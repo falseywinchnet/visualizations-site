@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="Two waves. One sum. Move their phase and watch reinforcement turn into cancellation.">
+<title>Meeting in the middle — wave interference</title>
+<style>
+:root{color-scheme:dark;--bg:#111610;--fg:#edf1e4;--muted:#a6b39a;--grid:#303e28;--a:#a9bcf2;--b:#d9ab80;--sum:#c5ed8d}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:17px/1.65 system-ui,sans-serif}main{max-width:1160px;margin:auto;padding:clamp(28px,6vw,80px) 24px}header{max-width:690px}.kicker{font:12px/1.5 monospace;letter-spacing:.16em;text-transform:uppercase;color:var(--sum)}h1{font-weight:450;font-size:clamp(42px,7vw,76px);letter-spacing:-.055em;line-height:1.08;margin:24px 0}header p{color:var(--muted);max-width:530px}.stage{margin:48px 0 28px;border-block:1px solid var(--grid);padding:24px 0}svg{display:block;width:100%;height:clamp(270px,40vw,420px);overflow:visible}.legend{display:flex;gap:24px;flex-wrap:wrap;font-size:13px;color:var(--muted)}.legend span::before{content:"";display:inline-block;width:18px;height:2px;background:var(--swatch);vertical-align:middle;margin-right:8px}.controls{display:grid;grid-template-columns:1fr 1fr auto;gap:32px;align-items:end}label{display:block;font-size:14px}label span{display:flex;justify-content:space-between;gap:12px}output{font-variant-numeric:tabular-nums;color:var(--sum)}input{width:100%;accent-color:var(--sum);margin:18px 0 0;cursor:pointer}button{font:inherit;font-size:14px;background:transparent;color:var(--fg);border:1px solid var(--grid);border-radius:5px;padding:10px 18px;cursor:pointer;min-width:95px}button:hover{border-color:var(--sum)}button:focus-visible,input:focus-visible{outline:2px solid var(--sum);outline-offset:6px}.note{margin-top:44px;max-width:680px;color:var(--muted);font-size:15px}.formula{font-family:monospace;font-size:13px;color:var(--fg)}footer{margin-top:44px;font-size:13px}a{color:var(--muted)}@media(max-width:640px){.controls{grid-template-columns:1fr;gap:24px}.controls button{justify-self:start}.stage{margin-top:32px}.legend{gap:15px}}
+@media(prefers-color-scheme:light){:root{color-scheme:light;--bg:#f4f3eb;--fg:#24301f;--muted:#5e6956;--grid:#d6ddce;--a:#5369a4;--b:#a0663a;--sum:#47701f}}
+</style>
+</head>
+<body><main>
+<header><span class="kicker">Study 001 · Superposition</span><h1>Meeting in<br>the middle.</h1><p>Waves add. Sometimes that makes them stronger. Sometimes they erase each other. Slide the phase to find the moment between.</p></header>
+<section class="stage" aria-label="Wave interference plot">
+<svg id="plot" viewBox="0 0 1000 360" preserveAspectRatio="none" role="img" aria-labelledby="plot-title plot-description"><title id="plot-title">Two sinusoidal waves and their sum</title><desc id="plot-description">The two component waves have the same wavelength and frequency. Changing their relative phase changes the amplitude of the sum.</desc><g id="grid" stroke="var(--grid)" stroke-width="1" vector-effect="non-scaling-stroke"></g><path id="wave-a" fill="none" stroke="var(--a)" stroke-width="1.5" vector-effect="non-scaling-stroke"/><path id="wave-b" fill="none" stroke="var(--b)" stroke-width="1.5" stroke-dasharray="6 5" vector-effect="non-scaling-stroke"/><path id="wave-sum" fill="none" stroke="var(--sum)" stroke-width="3" vector-effect="non-scaling-stroke"/></svg>
+<div class="legend"><span style="--swatch:var(--a)">Wave A</span><span style="--swatch:var(--b)">Wave B · dashed</span><span style="--swatch:var(--sum)">Their sum</span></div>
+</section>
+<div class="controls">
+<label for="phase"><span>Relative phase <output id="phase-value" for="phase">0°</output></span><input id="phase" type="range" min="0" max="360" step="1" value="0"></label>
+<label for="amplitude"><span>Wave B amplitude <output id="amplitude-value" for="amplitude">1.00</output></span><input id="amplitude" type="range" min="0" max="1" step="0.01" value="1"></label>
+<button id="motion" type="button" aria-pressed="true">Pause</button>
+</div>
+<p class="note">The sum has amplitude <output id="result" aria-live="polite">2.00</output> relative to wave A. Equal waves reinforce at 0° and cancel at 180°. Reduce one wave’s amplitude and cancellation becomes incomplete.<br><span class="formula">y = sin(θ) + b sin(θ + φ)</span></p>
+<footer><a href="../">All visualizations ↗</a></footer>
+</main>
+<script type="module">
+const phase = document.getElementById('phase');
+const amplitude = document.getElementById('amplitude');
+const phaseValue = document.getElementById('phase-value');
+const amplitudeValue = document.getElementById('amplitude-value');
+const result = document.getElementById('result');
+const paths = ['wave-a', 'wave-b', 'wave-sum'].map(id => document.getElementById(id));
+const motion = document.getElementById('motion');
+const grid = document.getElementById('grid');
+for (let y = 40; y <= 320; y += 70) {
+  const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  for (const [key, value] of Object.entries({x1:0,x2:1000,y1:y,y2:y})) line.setAttribute(key,value);
+  grid.append(line);
+}
+let running = !matchMedia('(prefers-reduced-motion: reduce)').matches;
+let clock = 0, previous = null, frame = null;
+function draw() {
+  const phi = Number(phase.value) * Math.PI / 180;
+  const b = Number(amplitude.value);
+  const data = ['', '', ''];
+  for (let x = 0; x <= 1000; x += 2) {
+    const theta = x / 1000 * Math.PI * 6 - clock;
+    const a = Math.sin(theta), other = b * Math.sin(theta + phi);
+    [a, other, a + other].forEach((value, index) => {
+      data[index] += `${x ? 'L' : 'M'}${x},${(180-value*70).toFixed(2)}`;
+    });
+  }
+  paths.forEach((path,index) => path.setAttribute('d',data[index]));
+}
+function update() {
+  phaseValue.value = `${phase.value}°`;
+  amplitudeValue.value = Number(amplitude.value).toFixed(2);
+  const b = Number(amplitude.value), phi = Number(phase.value)*Math.PI/180;
+  result.value = Math.sqrt(Math.max(0,1+b*b+2*b*Math.cos(phi))).toFixed(2);
+  draw();
+}
+function tick(now) {
+  frame = null;
+  if (!running || document.hidden) { previous = null; return; }
+  if (previous !== null) clock += Math.min((now-previous)/1000,0.1)*1.2;
+  previous = now;
+  draw();
+  frame = requestAnimationFrame(tick);
+}
+function syncMotion() {
+  motion.textContent = running ? 'Pause' : 'Play';
+  motion.setAttribute('aria-pressed',String(running));
+  previous = null;
+  if (frame !== null) cancelAnimationFrame(frame);
+  frame = running && !document.hidden ? requestAnimationFrame(tick) : null;
+}
+phase.addEventListener('input',update);
+amplitude.addEventListener('input',update);
+motion.addEventListener('click',() => { running = !running; syncMotion(); });
+document.addEventListener('visibilitychange',syncMotion);
+update(); syncMotion();
+</script>
+</body></html>
