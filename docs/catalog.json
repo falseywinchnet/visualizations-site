@@ -4,5 +4,11 @@
     "title": "Meeting in the middle \u2014 wave interference",
     "description": "Two waves. One sum. Move their phase and watch reinforcement turn into cancellation.",
     "path": "interference/"
+  },
+  {
+    "slug": "spider-drive",
+    "title": "Spider \u2014 drive the open country",
+    "description": "Drive the Spider, a raised six-wheeled scout carrier with hydropneumatic legs, across a generated watershed of rivers, gullies, cliffs, forests and cornfields. Free roam or fly wildfire, swiftwater rescue, forward pursuit and hostile crossing missions.",
+    "path": "spider-drive/"
   }
 ]

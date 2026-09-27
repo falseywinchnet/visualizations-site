@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="description" content="Drive the Spider, a raised six-wheeled scout carrier with hydropneumatic legs, across a generated watershed of rivers, gullies, cliffs, forests and cornfields. Free roam or fly wildfire, swiftwater rescue, forward pursuit and hostile crossing missions.">
+<title>Spider — drive the open country</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="drive.css">
+<script type="importmap">{"imports":{"three":"./vendor/three.module.js"}}</script>
+</head>
+<body data-state="loading">
+<main>
+<canvas id="world" tabindex="0" aria-label="Driving view of the Spider. Use W A S D or the arrow keys to drive; press H for the list of keys."></canvas>
+
+<section id="loading" aria-live="polite">
+ <div class="gen-wrap"><canvas id="gen" width="128" height="128" aria-label="The watershed forming"></canvas><div class="gen-glow"></div></div>
+ <h1 class="brand">Spider</h1>
+ <p id="gen-stage">Raising the country</p>
+ <div class="bar"><span id="gen-bar"></span></div>
+ <p class="small" id="gen-note">Country <span id="gen-seed">711</span> is being carved by rivers. This happens once; the result is kept in your browser.</p>
+</section>
+
+<section id="menu" hidden>
+ <div class="menu-inner">
+  <header class="menu-head"><h1 class="brand">Spider</h1><p class="tag">A raised six-wheeled scout. It goes over and around.</p></header>
+  <div class="missions" role="radiogroup" aria-label="Choose a scenario" id="missions"></div>
+  <div class="brief" id="brief"></div>
+  <details class="opts"><summary>Options</summary>
+   <div class="opt-grid">
+    <label>Country <input id="opt-seed" type="number" min="1" max="99999" value="711"></label>
+    <label>Time of day <input id="opt-time" type="range" min="4" max="21" step=".25" value="16.5"><output id="opt-time-out">16:30</output></label>
+    <label>Weather <select id="opt-weather"><option value="clear">Clear</option><option value="haze">Haze</option><option value="rain">Drizzle</option></select></label>
+    <label>Quality <select id="opt-quality"><option value="auto">Auto</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></label>
+    <label>Sound <input id="opt-volume" type="range" min="0" max="1" step=".05" value=".7"></label>
+    <label>Music <input id="opt-music" type="range" min="0" max="1" step=".05" value=".55"></label>
+   </div>
+  </details>
+  <button id="go" class="go">Board the Spider</button>
+  <p class="small honesty">A speculative vehicle concept. The dynamics are simulated from first principles, not validated against a built machine.</p>
+ </div>
+</section>
+
+<header id="hud-head">
+ <div><p class="brand-s">Spider</p><p id="place">Open country</p></div>
+ <nav aria-label="Spider pages"><a href="https://paymenottowork.com/exhibits/" target="_top">Exhibits</a><a href="https://paymenottowork.com/exhibits/spider-model/">Guided journey</a><a href="https://paymenottowork.com/ideas/spider/" target="_top">The idea</a><button id="pause-btn" aria-label="Pause (P)">❚❚</button></nav>
+</header>
+
+<aside id="objectives" class="none" aria-live="polite"><h2 id="obj-title"></h2><ol id="obj-list"></ol><p id="obj-meter"></p></aside>
+<div id="radio" aria-live="polite"><span class="who"></span><span class="line"></span></div>
+<div id="toast" aria-live="assertive"></div>
+
+<aside id="minimap"><canvas id="mini" width="200" height="200" aria-label="Minimap, north up"></canvas><p id="coords">0 E · 0 N</p><p id="bearing"></p></aside>
+
+<section id="panel" aria-label="Vehicle panel">
+ <canvas id="feet" width="176" height="200" aria-label="Six feet: load, stroke, tyre pressure and slip"></canvas>
+ <div class="attitude"><canvas id="horizon" width="96" height="96" aria-label="Attitude"></canvas><p id="att">Roll 0° · Pitch 0°</p></div>
+ <dl class="modes">
+  <div><dt>Ride</dt><dd id="m-ride">50%</dd></div>
+  <div><dt>Assist</dt><dd id="m-assist">On</dd></div>
+  <div><dt>Suspension</dt><dd id="m-susp">Auto</dd></div>
+  <div><dt>Tyres</dt><dd id="m-tyre">1.6 bar</dd></div>
+  <div><dt>Carriage</dt><dd id="m-carr">0.0 m</dd></div>
+  <div><dt>Balance</dt><dd id="m-bal">100%</dd></div>
+ </dl>
+ <div id="gauges"></div>
+</section>
+
+<section id="dash">
+ <canvas id="speedo" width="150" height="150" aria-label="Speed"></canvas>
+ <div class="dash-read"><p><b id="speed">0</b> km/h</p><p>limit <b id="limit">25</b></p><p id="rpm">750 rpm</p><p id="terrain-surf">Grass</p></div>
+ <p id="status" role="status"></p>
+ <div class="dash-btns">
+  <button data-act="view" title="C">View</button><button data-act="map" title="M">Map</button><button data-act="panel" class="narrow-only" title="Vehicle panel">Panel</button><button data-act="help" title="H">Keys</button>
+ </div>
+</section>
+
+<div id="touch" aria-label="Touch controls">
+ <div id="stick" aria-label="Drive stick"><span></span></div>
+ <div class="tb"><button data-act="raise">▲ Raise</button><button data-act="lower">▼ Lower</button><button data-act="brake" data-hold>Brake</button><button data-act="faster">+</button><button data-act="slower">−</button><button data-act="action" data-hold id="t-action">Action</button></div>
+</div>
+
+<section id="fullmap" hidden><canvas id="bigmap" aria-label="Full map"></canvas><button data-act="map" class="close">Close map (M)</button><p class="legend">Towns · rivers · roads · tracks · <span class="k-fire">fire</span> · <span class="k-obj">objectives</span></p></section>
+
+<section id="help" hidden>
+ <h2>Driving the Spider</h2>
+ <dl>
+  <div><dt>W / ↑, S / ↓</dt><dd>Drive forward / reverse (release to stop)</dd></div>
+  <div><dt>A / ←, D / →</dt><dd>Steer (front and middle plates turn)</dd></div>
+  <div><dt>+ / −</dt><dd>Speed limit</dd></div>
+  <div><dt>[ / ]</dt><dd>Raise / lower the cabin (leg retraction)</dd></div>
+  <div><dt>Space</dt><dd>Brake and hold</dd></div>
+  <div><dt>1 · 2 · 3</dt><dd>Lift the front, middle or rear pair</dd></div>
+  <div><dt>T</dt><dd>Tyre pressure: road · all-terrain · sand/mud</dd></div>
+  <div><dt>V</dt><dd>Suspension: auto · soft · firm</dd></div>
+  <div><dt>B</dt><dd>Stability assist on / off</dd></div>
+  <div><dt>K</dt><dd>Climb assist on / off</dd></div>
+  <div><dt>, / .</dt><dd>Slide the cabin carriage fore / aft (hold); / resets to auto</dd></div>
+  <div><dt>C</dt><dd>Camera: chase · driver's seat · orbit · cinematic · foot</dd></div>
+  <div><dt>M</dt><dd>Full map</dd></div>
+  <div><dt>L</dt><dd>Lights</dd></div>
+  <div><dt>N</dt><dd>Music on / off (it follows speed and danger)</dd></div>
+  <div><dt>F / R / E</dt><dd>Mission action: spray · draft water · load or unload</dd></div>
+  <div><dt>X</dt><dd>Recover (crane upright on clear ground)</dd></div>
+  <div><dt>P / Esc</dt><dd>Pause</dd></div>
+ </dl>
+ <p>In the driver's seat, drag to look around; double-click to look ahead. A gamepad works too: left stick steers and drives, triggers drive and brake, bumpers raise and lower, face buttons act, change view and open the map.</p>
+ <button data-act="help">Close</button>
+</section>
+
+<section id="pause" hidden>
+ <h2>Paused</h2>
+ <div class="pause-btns"><button data-act="resume">Resume</button><button data-act="recover">Recover (X)</button><button data-act="restart">Restart scenario</button><button data-act="menu">Choose another scenario</button><button data-act="help">Keys</button></div>
+ <label>Quality <select id="p-quality"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></label>
+ <label>Sound <input id="p-volume" type="range" min="0" max="1" step=".05" value=".7"></label>
+ <label>Music <input id="p-music" type="range" min="0" max="1" step=".05" value=".55"></label>
+</section>
+
+<section id="end" hidden><h2 id="end-title"></h2><p id="end-text"></p><dl id="end-stats"></dl><div class="pause-btns"><button data-act="restart">Run it again</button><button data-act="menu">Choose another scenario</button><button data-act="free">Keep driving</button></div></section>
+
+<p class="boundary">Speculative concept · simulated hydropneumatic dynamics, not a validated vehicle model · Country <span id="seed-label">711</span></p>
+<noscript><p class="noscript">This drive needs JavaScript and WebGL 2. <a href="https://paymenottowork.com/ideas/spider/">Read about the Spider.</a></p></noscript>
+</main>
+<script type="module" src="drive.mjs"></script>
+</body>
+</html>
