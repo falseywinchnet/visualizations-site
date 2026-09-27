@@ -4,7 +4,8 @@ import * as T from 'three';
 import {GEOM} from './physics.mjs';
 import {mergeNonIndexed} from './scenery.mjs';
 
-const LEG_X=3.65,AXLE=GEOM.halfTrack-LEG_X,PLATE=GEOM.plateY;
+const LEG_X=4.02,AXLE=GEOM.halfTrack-LEG_X,PLATE=GEOM.plateY,RIM_R=GEOM.R*.58;
+const mixN=(a,b,t)=>a+(b-a)*t;
 const LIVERY={scout:{paint:0x55604a,accent:0x2c3329},troop:{paint:0x4a5240,accent:0x2a2f27},rescue:{paint:0xd8d6cf,accent:0xc2412d},fire:{paint:0xa8321f,accent:0xe6d9b8}};
 const UNIFORM={scout:[0x5d6a4c,0x3b4436],troop:[0x55603f,0x2f3a2a],rescue:[0xd06a28,0xf2f2ee],fire:[0xb8872e,0xd8c56a]};
 
@@ -32,7 +33,10 @@ float n3(vec3 x){vec3 i=floor(x),f=fract(x);f=f*f*(3.0-2.0*f);return mix(mix(mix
    dark:new T.MeshStandardMaterial({color:0x1d2224,roughness:.6,metalness:.4}),
    chrome:new T.MeshStandardMaterial({color:0xdfe6e6,roughness:.12,metalness:1}),
    brass:new T.MeshStandardMaterial({color:0xb08d4f,roughness:.35,metalness:.9}),
-   rubber:dirty(new T.MeshStandardMaterial({color:0x1b1c1c,roughness:.93,metalness:0})),
+   rubber:dirty(new T.MeshStandardMaterial({color:0x2a2a27,roughness:.9,metalness:0})),
+   redPaint:new T.MeshStandardMaterial({color:0xa3261b,roughness:.45,metalness:.2}),
+   webbing:new T.MeshStandardMaterial({color:0x3c3f2e,roughness:.9}),
+   lamp:new T.MeshStandardMaterial({color:0xfff4dc,emissive:0xfff0d0,emissiveIntensity:.6,roughness:.4}),
    hose:new T.MeshStandardMaterial({color:0x151617,roughness:.7}),
    rim:dirty(new T.MeshStandardMaterial({color:0x6b7064,roughness:.45,metalness:.7})),
    glass:new T.MeshStandardMaterial({color:0x9cc6c8,roughness:.04,metalness:.15,transparent:true,opacity:.16,depthWrite:false,side:T.DoubleSide,envMapIntensity:1.6}),
@@ -108,6 +112,13 @@ float n3(vec3 x){vec3 i=floor(x),f=fract(x);f=f*f*(3.0-2.0*f);return mix(mix(mix
   // heavy hoop ribs and longerons (the concept's cage)
   for(const [z,s] of sections.slice(2,-2)){if(z>-4.3&&z<-3.2)continue;const ring=[];for(let j=0;j<=64;j++){const a=j/64*Math.PI*2;ring.push([RX*s*1.01*Math.cos(a),Y+RY*s*1.01*Math.sin(a),z]);}this.tube(ring,.04,M.frame,cab,true,64);}
   for(const a of [Math.PI*.5,Math.PI*.22,Math.PI*.78,-Math.PI*.12,Math.PI*1.12]){const line=sections.slice(1,-1).map(([z,s])=>[RX*s*1.015*Math.cos(a),Y+RY*s*1.015*Math.sin(a),z]);this.tube(line,.032,M.frame,cab,false,48);}
+  // carriage hangers: trolleys riding the two overhead slide rails, a crossbeam, and a saddle clamped over each main hoop
+  for(const z of [-3,0,3]){
+   for(const x of [-.72,.72]){this.box([.36,.3,.8],[x,5.95,z],M.frame,cab);for(const dz of [-.26,.26])this.mesh(new T.CylinderGeometry(.09,.09,.42,12),M.dark,[x,5.95,z+dz],cab,[0,0,Math.PI/2]);
+    this.rod([x,5.82,z],[x*1.25,Y+RY*.93,z],.07,M.paint,cab,8);}
+   this.box([1.9,.16,.22],[0,5.78,z],M.paint,cab);
+   const arc=[];for(let k=0;k<=16;k++){const a=.42+k/16*(Math.PI-.84);arc.push([RX*1.045*Math.cos(a),Y+RY*1.045*Math.sin(a),z]);}this.tube(arc,.075,M.paint,cab,false,32);
+   for(const x of [-1,1])this.mesh(new T.CylinderGeometry(.1,.1,.24,10),M.frame,[x*RX*1.045*Math.cos(.42),Y+RY*1.045*Math.sin(.42),z],cab,[Math.PI/2,0,0]);}
   // floor with glass panels down the centre (the downward view)
   const fy=2.75;this.box([2.1,.06,8],[-0,fy-.05,-.6],M.grate,cab).visible=false;
   for(const s of [-1,1])this.box([.78,.08,8.2],[s*.72,fy,-.6],M.grate,cab);
@@ -125,17 +136,58 @@ float n3(vec3 x){vec3 i=floor(x),f=fract(x);f=f*f*(3.0-2.0*f);return mix(mix(mix
   const con=this.box([.62,.1,.26],[-.62,fy+.62,-4.5],M.dark,cab);con.rotation.x=.55;this.rod([-.62,fy+.05,-4.4],[-.62,fy+.56,-4.46],.04,M.frame,cab,6);
   for(let i=0;i<2;i++){const s=this.box([.2,.12,.02],[-.74+i*.24,fy+.68,-4.6],M.screen,cab);s.rotation.x=.55;}
   for(const x of [-.62,.62]){this.rod([x+.28,fy+.62,-3.9],[x+.26,fy+.98,-3.94],.025,M.dark,cab,6);this.mesh(new T.SphereGeometry(.05,10,8),M.dark,[x+.26,fy+1.0,-3.94],cab);}
+  // ---- interior fit-out
+  {const I=new T.Group();I.name='Interior';cab.add(I);
+   // dash across the nose: angled panel, screen cluster, switch banks, driver yoke and pedals
+   // low binnacles either side of the floor glass so the view down past the nose stays clear
+   for(const x of [-.72,.72]){const d=this.box([.62,.22,.08],[x,fy+.5,-4.4],M.dark,I);d.rotation.x=-.9;
+    for(let k=0;k<2;k++){const sc=this.box([.22,.13,.02],[x-.13+k*.26,fy+.53,-4.37],M.screen,I);sc.rotation.x=-.9;}
+    for(let k=0;k<5;k++){const b=this.box([.04,.025,.04],[x-.2+k*.1,fy+.4,-4.3],k%2?M.chrome:M.screen,I);b.rotation.x=-.9;}
+    this.box([.62,.05,.26],[x,fy+.36,-4.28],M.frame,I);}
+   this.rod([-.62,fy+.38,-4.2],[-.62,fy+.62,-4.02],.03,M.frame,I,8);this.mesh(new T.TorusGeometry(.14,.022,8,24,Math.PI*1.3),M.dark,[-.62,fy+.66,-4.0],I,[.7,0,Math.PI*1.35]);// yoke
+   for(const x of [-.78,-.62,-.46])this.box([.08,.03,.16],[x,fy+.12,-4.2],M.chrome,I,[-.5,0,0]);// pedals
+   // overhead: grab rails with hanging straps, console with switches, lamp strips
+   for(const x of [-.95,.95]){this.rod([x,Y+1.18,-4.2],[x,Y+1.18,3.6],.022,M.chrome,I,6);for(let z=-3.6;z<3.6;z+=.9)this.box([.04,.22,.03],[x,Y+1.06,z],M.webbing,I);
+    this.box([.05,.03,7.2],[x*.55,Y+1.5,-.3],M.lamp,I);}
+   this.box([.5,.06,2.2],[0,Y+1.52,-3.3],M.dark,I);for(let k=0;k<10;k++)this.box([.04,.03,.04],[-.18+(k%5)*.09,Y+1.48,-3.9+Math.floor(k/5)*.25],M.screen,I);
+   // cable conduits along the upper hull
+   for(const x of [-1.22,1.22])this.rod([x,Y+.85,-4.3],[x,Y+.85,3.8],.03,M.hose,I,6);
+   // side equipment: extinguishers, first aid, radio rack, stowage nets, helmet hooks
+   for(const [x,z] of [[-1.25,-2.7],[1.25,2.9]]){this.mesh(new T.CylinderGeometry(.08,.08,.5,12),M.redPaint,[x,Y-.2,z],I);this.mesh(new T.CylinderGeometry(.03,.03,.08,8),M.dark,[x,Y+.09,z],I);this.box([.06,.05,.2],[x,Y-.35,z],M.frame,I);}
+   this.box([.1,.3,.42],[1.3,Y+.25,-2.7],M.lamp.clone(),I).material.color.set(0xf2f2ee);this.box([.11,.08,.08],[1.3,Y+.25,-2.7],M.redPaint,I);
+   const rack=new T.Group();rack.position.set(-1.1,Y-.1,3.25);I.add(rack);this.box([.3,1.1,.6],[0,0,0],M.frame,rack);for(let k=0;k<4;k++){this.box([.02,.18,.5],[.16,-.4+k*.26,0],M.dark,rack);this.box([.02,.05,.12],[.17,-.4+k*.26,-.15],M.screen,rack);}
+   for(const x of [-1.28,1.28])for(let z=-1.6;z<2.4;z+=1.75){for(let k=0;k<4;k++)this.rod([x,Y-.45+k*.2,z],[x,Y-.45+k*.2,z+1.1],.008,M.webbing,I,4);for(let k=0;k<5;k++)this.rod([x,Y-.45,z+k*.27],[x,Y+.15,z+k*.27],.008,M.webbing,I,4);}
+   for(let z=-3.2;z<2;z+=1.75)for(const x of [-1.2,1.2]){this.rod([x,Y+.55,z],[x*.93,Y+.6,z],.015,M.chrome,I,4);}
+   // rear bulkhead to the engine bay with a hatch door
+   this.box([2.6,2.4,.06],[0,Y+.05,3.9],M.frame,I);this.box([.8,1.5,.04],[0,Y-.2,3.86],M.accent,I);this.rod([.3,Y-.2,3.82],[.3,Y+.1,3.82],.02,M.chrome,I,6);
+   for(let k=0;k<3;k++)this.box([.8,.02,.05],[0,Y-.8+k*.6,3.84],M.dark,I);
+   // tread plate on the walkways, riveted
+   for(const sx of [-1,1])for(let z=-4.4;z<3.5;z+=.4)this.box([.7,.012,.03],[sx*.72,fy+.045,z],M.chrome,I);
+  }
   // upper nose shield support and the front hoop
   
   // V8 behind the passengers (visible through the rear glass band): block, heads, intake, headers
   const eng=new T.Group();eng.position.set(0,3.55,4.45);cab.add(eng);
   this.box([.7,.55,1.0],[0,0,0],M.engine,eng);for(const s of [-1,1]){const head=this.box([.34,.24,1.02],[s*.36,.36,0],M.engine,eng);head.rotation.z=s*.52;for(let k=0;k<4;k++){this.rod([s*.5,.3,-.36+k*.24],[s*.78,-.05,-.36+k*.24],.045,M.chrome,eng,6);}this.rod([s*.78,-.05,-.4],[s*.8,-.12,.7],.07,M.dark,eng,8);}
   this.box([.34,.2,.8],[0,.52,0],M.brass,eng);this.mesh(new T.CylinderGeometry(.18,.18,.12,14),M.dark,[0,.7,0],eng);
+  for(let k=0;k<4;k++)for(const s of [-1,1])this.rod([s*.08,.6,-.3+k*.2],[s*.22,.46,-.3+k*.2],.035,M.brass,eng,6);// intake runners
+  // front accessory drive: crank, water pump, alternator and hydraulic pump pulleys with a serpentine belt
+  const pul=[[0,-.1,.11],[0,.22,.09],[.3,.28,.08],[-.3,.3,.1]];for(const [x,y,r] of pul)this.mesh(new T.CylinderGeometry(r,r,.05,16),M.chrome,[x,y,-.56],eng,[Math.PI/2,0,0]);
+  this.tube([[0,-.21,-.6],[.38,.28,-.6],[0,.31,-.6],[-.4,.3,-.6],[0,-.21,-.6]],.012,M.hose,eng,true,40);
+  this.mesh(new T.CylinderGeometry(.13,.13,.26,14),M.frame,[.3,.28,-.42],eng,[Math.PI/2,0,0]);// alternator
+  const hp=this.mesh(new T.CylinderGeometry(.16,.16,.44,16),M.accent,[-.3,.3,-.36],eng,[Math.PI/2,0,0]);// main hydraulic pump
+  this.tube([[-.3,.46,-.3],[-.2,.8,-.1],[.1,.9,.3],[.4,.7,.6]],.035,M.hose,eng,false,20);this.tube([[-.42,.3,-.2],[-.6,.5,.2],[-.6,.8,.6]],.035,M.hose,eng,false,20);
+  // radiator and fan shroud behind, oil filter, dipstick
+  this.box([.72,.56,.08],[0,.12,.56],M.dark,eng);for(let k=0;k<9;k++)this.box([.68,.015,.03],[0,-.12+k*.06,.6],M.frame,eng);
+  this.mesh(new T.CylinderGeometry(.24,.24,.1,24,1,true),M.frame,[0,.12,.48],eng,[Math.PI/2,0,0]).material=M.frame;
+  this.mesh(new T.CylinderGeometry(.07,.07,.16,10),M.redPaint,[.4,-.2,.1],eng);this.rod([-.2,.1,-.4],[-.28,.55,-.45],.01,M.brass,eng,4);
   // underside hatch and the ladder
   this.hatch=this.mesh(new T.CylinderGeometry(.48,.48,.07,28),M.accent,[0,2.62,.8],cab);this.hatch.name='Underside hatch';
   this.ladder=new T.Group();this.ladder.position.set(0,2.6,.8);cab.add(this.ladder);
-  for(const x of [-.28,.28])this.rod([x,0,0],[x,-2.4,.3],.028,M.chrome,this.ladder,6);for(let y=-.25;y>-2.4;y-=.28)this.rod([-.28,y,-y*.125],[.28,y,-y*.125],.022,M.chrome,this.ladder,6);
-  this.ladder.scale.y=.01;this.ladder.visible=false;
+  // telescoping ladder: rails stretch to the ground, rungs every 0.3 m
+  this.ladRails=[-.3,.3].map(x=>{const r=this.mesh(new T.CylinderGeometry(.032,.032,1,8),M.chrome,[x,-.5,.06],this.ladder);return r;});
+  this.ladRungs=[];for(let k=0;k<22;k++){const r=this.mesh(new T.CylinderGeometry(.024,.024,.6,6),M.chrome,[0,0,0],this.ladder,[0,0,Math.PI/2]);this.ladRungs.push(r);}
+  this.ladder.visible=false;
   // headlights in the nose
   this.lights.head=[];for(const s of [-1,1]){const h=this.mesh(new T.CylinderGeometry(.14,.14,.1,16),M.headlamp,[s*.72,3.1,-5.12],cab,[Math.PI/2+.25,0,0]);this.lights.head.push(h);}
   this.lights.tail=[];for(const s of [-1,1]){const h=this.box([.18,.1,.05],[s*.9,3.6,5.2],M.red,cab);this.lights.tail.push(h);}
@@ -155,28 +207,42 @@ float n3(vec3 x){vec3 i=floor(x),f=fract(x);f=f*f*(3.0-2.0*f);return mix(mix(mix
    // short crossbar over the plate, arms out over the cabin, diagonal braces
    this.box([2.3,.26,.34],[0,.1,0],M.frame,g);
    for(const s of [-1,1]){
-    const arm=this.rod([s*1.05,.12,0],[s*(LEG_X+.05),-.2,0],.14,M.paint,g,12);
-    this.rod([s*1.05,-.12,.38],[s*(LEG_X-.1),-.25,.05],.06,M.frame,g,8);this.rod([s*1.05,-.12,-.38],[s*(LEG_X-.1),-.25,-.05],.06,M.frame,g,8);
-    this.rod([s*.9,.3,0],[s*(LEG_X),.05,0],.05,M.frame,g,8);
+    // arm: a braced box truss from the crossbar out to the knee
+    this.rod([s*1.05,.16,0],[s*(LEG_X+.02),.02,0],.17,M.paint,g,14);
+    for(const zz of [-1,1]){this.rod([s*1.1,-.14,zz*.4],[s*(LEG_X-.12),-.26,zz*.12],.075,M.frame,g,8);
+     for(let k=0;k<3;k++){const x0=1.35+k*.85,x1=x0+.85,t0=(x0-1.1)/(LEG_X-1.22),t1=(x1-1.1)/(LEG_X-1.22);this.rod([s*x0,.14-.13*t0*.9,0],[s*x1,-.14-.12*t1,zz*(.4-.28*t1)],.04,M.frame,g,6);}}
+    this.rod([s*.9,.34,0],[s*LEG_X,.12,0],.055,M.frame,g,8);
     // leg: knee knuckle, barrel with accumulator, chrome rod, hub motor, axle, wheel
     const leg=new T.Group();leg.position.set(s*LEG_X,0,0);g.add(leg);
-    this.mesh(new T.SphereGeometry(.24,16,12),M.frame,[0,-.22,0],leg);
-    const barrelTop=-.35,barrelBot=3.62-PLATE;// body y 3.62
-    this.rod([0,barrelTop,0],[0,barrelBot,0],.19,M.paint,leg,16);
-    this.mesh(new T.CylinderGeometry(.23,.23,.16,16),M.frame,[0,barrelBot+.05,0],leg);
-    this.mesh(new T.CylinderGeometry(.22,.22,.12,16),M.frame,[0,barrelTop-.05,0],leg);
-    // accumulator (the pneumatic spring) and its hoses
-    const acc=this.mesh(new T.SphereGeometry(.26,18,14),M.accent,[s*-.38,barrelTop-.55,.18],leg);
-    this.rod([s*-.2,barrelTop-.5,.1],[0,barrelTop-.4,.05],.05,M.frame,leg,6);
-    this.tube([[0,barrelBot+.3,-.2],[s*-.25,barrelTop-1.2,-.3],[s*-.4,barrelTop-.25,-.15],[s*-.6,.05,-.1]],.035,M.hose,leg,false,20);
-    this.tube([[0,barrelBot+.5,.2],[s*-.18,barrelTop-1.0,.32],[s*-.3,barrelTop-.2,.2],[s*-.5,.05,.12]],.03,M.hose,leg,false,20);
-    // emergency steps on the front-left leg
-    if(i===0&&s<0)for(let k=0;k<6;k++){const y=barrelTop-.3-k*.36;this.box([.24,.04,.1],[(k%2?-.24:.24),y,0],M.chrome,leg);}
-    const rod=this.mesh(new T.CylinderGeometry(.12,.12,1,14),M.chrome,[0,0,0],leg);rod.name='Chrome rod';
+    this.mesh(new T.SphereGeometry(.32,18,14),M.frame,[0,-.18,0],leg);
+    this.mesh(new T.CylinderGeometry(.22,.22,.78,16),M.frame,[0,-.18,0],leg,[Math.PI/2,0,0]);// knee pin boss
+    for(const zz of [-1,1])this.mesh(new T.CylinderGeometry(.1,.1,.06,12),M.chrome,[0,-.18,zz*.42],leg,[Math.PI/2,0,0]);
+    const barrelTop=-.42,barrelBot=2.4-PLATE;// body y 2.4
+    this.rod([0,barrelTop,0],[0,barrelBot,0],.26,M.paint,leg,18);
+    this.mesh(new T.CylinderGeometry(.31,.31,.2,18),M.frame,[0,barrelBot+.06,0],leg);// gland
+    this.mesh(new T.CylinderGeometry(.3,.3,.14,18),M.frame,[0,barrelTop-.05,0],leg);
+    for(let y=barrelTop-.7;y>barrelBot+.4;y-=.9)this.mesh(new T.CylinderGeometry(.285,.285,.06,18),M.frame,[0,y,0],leg);// barrel hoops
+    // knee braces: twin tubes from the arm down to a collar on the barrel, with a gusset plate between
+    const kx=-1.45,ky=-.02,by_=-1.65;
+    for(const zz of [-1,1]){this.rod([s*kx,ky,zz*.17],[s*-.3,by_,zz*.17],.1,M.paint,leg,10);
+     this.mesh(new T.CylinderGeometry(.13,.13,.1,12),M.frame,[s*kx,ky,zz*.17],leg,[Math.PI/2,0,0]);}
+    this.mesh(new T.CylinderGeometry(.3,.3,.34,18),M.frame,[0,by_,0],leg);// brace collar
+    this.mesh(new T.CylinderGeometry(.08,.08,.5,10),M.chrome,[s*-.3,by_,0],leg,[Math.PI/2,0,0]);// collar pin
+    // a strut web between the twin braces, tying them into one knee truss
+    for(const t of [.35,.7])this.rod([s*mixN(kx,-.3,t),mixN(ky,by_,t),-.17],[s*mixN(kx,-.3,t),mixN(ky,by_,t),.17],.05,M.frame,leg,6);
+    this.rod([s*mixN(kx,-.3,.35),mixN(ky,by_,.35),0],[s*-.05,mixN(ky,by_,.35),0],.06,M.frame,leg,8);
+    // accumulator (the pneumatic spring) and its hoses, forward of the braces
+    const acc=this.mesh(new T.SphereGeometry(.28,18,14),M.accent,[s*-.42,barrelTop-.7,.58],leg);
+    this.rod([s*-.25,barrelTop-.62,.4],[0,barrelTop-.5,.2],.055,M.frame,leg,6);
+    this.tube([[0,barrelBot+.35,.26],[s*-.12,barrelTop-1.6,.4],[s*-.3,barrelTop-.4,.5],[s*-.65,.12,.2]],.038,M.hose,leg,false,24);
+    this.tube([[0,barrelBot+.6,-.26],[s*-.14,barrelTop-1.3,-.38],[s*-.34,barrelTop-.3,-.34],[s*-.6,.1,-.16]],.034,M.hose,leg,false,24);
+    const rod=this.mesh(new T.CylinderGeometry(.16,.16,1,16),M.chrome,[0,0,0],leg);rod.name='Chrome rod';
     const hub=new T.Group();leg.add(hub);
-    this.mesh(new T.CylinderGeometry(.34,.34,.42,18),M.engine,[s*.08,0,0],hub,[0,0,Math.PI/2]);// hub motor
-    this.mesh(new T.CylinderGeometry(.1,.1,AXLE,10),M.chrome,[s*AXLE*.5,0,0],hub,[0,0,Math.PI/2]);
-    this.box([.2,.5,.32],[0,.35,0],M.frame,hub);// fork crown
+    this.mesh(new T.CylinderGeometry(.44,.44,.5,20),M.engine,[s*.14,0,0],hub,[0,0,Math.PI/2]);// hub motor
+    for(let k=0;k<10;k++){const a=k/10*Math.PI*2;this.box([.46,.05,.05],[s*.14,Math.cos(a)*.44,Math.sin(a)*.44],M.frame,hub,[a,0,0]);}// cooling fins
+    this.mesh(new T.CylinderGeometry(.13,.13,AXLE,12),M.chrome,[s*AXLE*.5,0,0],hub,[0,0,Math.PI/2]);
+    this.box([.34,.62,.46],[0,.42,0],M.frame,hub);// fork crown
+    this.box([.2,.2,.9],[0,.18,0],M.frame,hub);// torque arm
     const wheel=new T.Group();wheel.position.set(s*AXLE,0,0);hub.add(wheel);
     const spin=new T.Group();wheel.add(spin);
     const tireMat=M.rubber.clone();tireMat.onBeforeCompile=tireShader(M.rubber.onBeforeCompile);tireMat.customProgramCacheKey=()=>'tire';tireMat.userData.flat={value:0};tireMat.userData.down={value:new T.Vector3(0,-1,0)};
@@ -188,13 +254,22 @@ float n3(vec3 x){vec3 i=floor(x),f=fract(x);f=f*f*(3.0-2.0*f);return mix(mix(mix
   }
  }
  buildRim(parent,s){
-  const M=this.mats;
-  this.mesh(new T.CylinderGeometry(.78,.78,.42,32,1,true),M.rim,[0,0,0],parent,[0,0,Math.PI/2]).material.side=T.DoubleSide;
-  const disc=this.mesh(new T.CylinderGeometry(.76,.76,.05,32),M.rim,[s*.06,0,0],parent,[0,0,Math.PI/2]);
-  this.mesh(new T.TorusGeometry(.8,.045,8,40),M.frame,[s*.2,0,0],parent,[0,Math.PI/2,0]);// beadlock ring
-  for(let k=0;k<16;k++){const a=k/16*Math.PI*2;this.mesh(new T.CylinderGeometry(.025,.025,.05,6),M.chrome,[s*.23,Math.cos(a)*.8,Math.sin(a)*.8],parent,[0,0,Math.PI/2]);}
-  for(let k=0;k<8;k++){const a=k/8*Math.PI*2;this.box([.06,.12,.52],[s*.09,Math.cos(a)*.42,Math.sin(a)*.42],M.frame,parent,[a,0,0]);}
-  this.mesh(new T.CylinderGeometry(.24,.28,.2,16),M.engine,[s*.12,0,0],parent,[0,0,Math.PI/2]);
+  const M=this.mats,Rb=RIM_R,W=GEOM.tireWidth*.94;
+  const shell=this.mesh(new T.CylinderGeometry(Rb,Rb,W,40,1,true),M.rim,[0,0,0],parent,[0,0,Math.PI/2]);shell.material.side=T.DoubleSide;
+  for(const e of [-1,1])this.mesh(new T.TorusGeometry(Rb+.03,.04,8,48),M.rim,[e*W*.5,0,0],parent,[0,Math.PI/2,0]);// bead flanges
+  // centre disc set outboard with a drop centre, and pressed spokes back to the rim well
+  {const pr=[[0,.2],[.34,.2],[.4,.16],[.56,.13],[Rb*.8,.06],[Rb*.97,-.04],[Rb*.99,-.1]].map(([r,x])=>new T.Vector2(r,x*s));
+   const lg=new T.LatheGeometry(s>0?pr:pr.slice().reverse(),48);lg.rotateZ(-Math.PI/2);const d=this.mesh(lg,M.rim,[0,0,0],parent);d.material=M.rim;
+   // stiffening ribs and vent slots pressed into the dish
+   for(let k=0;k<10;k++){const a=(k+.5)/10*Math.PI*2,r=(.56+Rb*.8)/2;this.box([.05,.09,Rb*.8-.56],[s*.12,Math.cos(a)*r,Math.sin(a)*r],M.frame,parent,[a,0,0]);
+    const a2=k/10*Math.PI*2;this.mesh(new T.CylinderGeometry(.07,.07,.02,10),M.dark,[s*.105,Math.cos(a2)*r,Math.sin(a2)*r],parent,[0,0,Math.PI/2]);}}
+  // outer beadlock ring and its bolts
+  this.mesh(new T.TorusGeometry(Rb+.02,.05,8,48),M.frame,[s*W*.52,0,0],parent,[0,Math.PI/2,0]);
+  for(let k=0;k<20;k++){const a=k/20*Math.PI*2;this.mesh(new T.CylinderGeometry(.022,.022,.06,6),M.chrome,[s*(W*.52+.03),Math.cos(a)*(Rb+.02),Math.sin(a)*(Rb+.02)],parent,[0,0,Math.PI/2]);}
+  // hub cap, wheel studs, valve stem
+  this.mesh(new T.CylinderGeometry(.3,.36,.24,18),M.engine,[s*.2,0,0],parent,[0,0,Math.PI/2]);
+  for(let k=0;k<10;k++){const a=k/10*Math.PI*2;this.mesh(new T.CylinderGeometry(.03,.03,.1,6),M.chrome,[s*.2,Math.cos(a)*.44,Math.sin(a)*.44],parent,[0,0,Math.PI/2]);}
+  this.mesh(new T.CylinderGeometry(.018,.018,.14,6),M.chrome,[s*.14,Rb*.9,0],parent,[0,0,Math.PI/2]);
  }
  // ------------------------------------------------------------ variant equipment
  buildVariant(){
@@ -255,7 +330,10 @@ float n3(vec3 x){vec3 i=floor(x),f=fract(x);f=f*f*(3.0-2.0*f);return mix(mix(mix
   }
   // hatch and ladder
   const want=opts.ladder?1:0;this._lad=(this._lad??0)+(want-(this._lad??0))*Math.min(1,dt*1.2);
-  this.ladder.visible=this._lad>.02;this.ladder.scale.y=Math.max(.01,this._lad);this.hatch.position.x=this._lad*.9;
+  this.ladder.visible=this._lad>.02;this.hatch.position.x=this._lad*.9;
+  if(this.ladder.visible){let e=0;for(const w of sp.wheels)e+=w.e;const L=(2.6-(GEOM.hubTop-e/6-GEOM.R)+.1)*this._lad,tilt=.12;
+   for(const r of this.ladRails){r.scale.y=L;r.position.y=-L/2;r.position.z=L/2*tilt;r.rotation.x=-tilt;}
+   this.ladRungs.forEach((r,k)=>{const y=.3+k*.3;r.visible=y<L-.3;r.position.set(0,-y,y*tilt);});}
   // lights
   const t=performance.now()/1000;
   const night=opts.night||0;for(const h of this.lights.head)h.material.emissiveIntensity=opts.headlights?4:0;for(const h of this.lights.tail)h.material.emissiveIntensity=opts.headlights?2.5:(opts.braking?3:.2);
@@ -272,22 +350,23 @@ float n3(vec3 x){vec3 i=floor(x),f=fract(x);f=f*f*(3.0-2.0*f);return mix(mix(mix
 }
 // tyre: agricultural chevron tread on a rounded carcass; the flat spot is applied in the vertex shader
 function tireGeometry(){
- const R=GEOM.R,W=GEOM.tireWidth,seg=180,prof=[];
- const rows=16;for(let k=0;k<=rows;k++){const u=k/rows,a=(u-.5)*Math.PI;// cross-section from inner bead to outer bead
-  const x=Math.sin(a)*W*.5,r=R-.28+Math.cos(a)*.28;prof.push([x,r,u]);}
- const pos=[],idx=[],nLug=26;
- for(let i=0;i<=seg;i++){const th=i/seg*Math.PI*2;for(const [x,r,u] of prof){
-  const side=Math.abs(u-.5)*2;const tread=side<.92?1:0;
-  // chevron: lugs slanted from the centre line toward each shoulder
-  const ph=(th*nLug/(Math.PI*2)+Math.abs(x)*4.2);const lug=((ph%1)+1)%1<.36&&Math.abs(x)>.02?1:0;
-  const rr=r+tread*lug*.055*(1-side*.6);
+ const R=GEOM.R,W=GEOM.tireWidth,seg=200,prof=[],Rb=RIM_R+.02,rs=.2,hw=W*.5;
+ // cross-section from the inner bead, up the sidewall, over a rounded shoulder, across the tread, and back down
+ const side=(sgn,up)=>{const n=7;for(let k=0;k<=n;k++){const t=up?k/n:1-k/n;const r=Rb+(R-rs-Rb)*t;prof.push([sgn*(hw*(1+.07*Math.sin(Math.PI*t))),r,0]);}};
+ const shoulder=(sgn,out)=>{const n=5;for(let k=1;k<n;k++){const a=(out?k/n:1-k/n)*Math.PI/2;prof.push([sgn*(hw-rs+Math.cos(a)*rs),R-rs+Math.sin(a)*rs,1]);}};
+ side(-1,true);shoulder(-1,true);for(let k=0;k<=8;k++){const x=-(hw-rs)+k/8*2*(hw-rs);prof.push([x,R,1]);}shoulder(1,false);side(1,false);
+ const pos=[],idx=[],nLug=24;
+ for(let i=0;i<=seg;i++){const th=i/seg*Math.PI*2;for(const [x,r,tr] of prof){
+  // chevron lugs slanted from the centre line toward each shoulder
+  const ph=(th*nLug/(Math.PI*2)+Math.abs(x)*3.4);const lug=((ph%1)+1)%1<.34&&Math.abs(x)>.03?1:0;
+  const rr=r-tr*.08+tr*lug*.1;
   pos.push(x,Math.cos(th)*rr,Math.sin(th)*rr);}}
  const C=prof.length;for(let i=0;i<seg;i++)for(let k=0;k<C-1;k++){const a=i*C+k,b=a+C;idx.push(a,b,a+1,b,b+1,a+1);}
  const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(pos,3));g.setIndex(idx);g.computeVertexNormals();return g;
 }
 function tireShader(prev){return function(sh){prev&&prev.call(this,sh);sh.uniforms.uFlat=this.userData.flat;sh.uniforms.uDown=this.userData.down;
  sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nuniform float uFlat;uniform vec3 uDown;').replace('#include <begin_vertex>',`#include <begin_vertex>
-{float lim=${GEOM.R.toFixed(3)}-uFlat;float d=dot(transformed,uDown);if(d>lim){transformed-=uDown*(d-lim);transformed.x*=1.0+(d-lim)*.6;}}`);};}
+{float lim=${(GEOM.R+.02).toFixed(3)}-uFlat;float d=dot(transformed,uDown);if(d>lim){transformed-=uDown*(d-lim);transformed.x*=1.0+(d-lim)*.6;}}`);};}
 // a seated crew member, merged into one mesh with vertex colours
 function person(u1,u2,k,variant){
  const parts=[];const col=(c)=>new T.Color(c);const skin=[0xc89f7e,0x8d5f42,0xe0b894,0x6b4430,0xb88763][k%5];

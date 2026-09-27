@@ -90,3 +90,6 @@ body[data-cine=true] #panel,body[data-cine=true] #dash,body[data-cine=true] #min
 
 #obj-title{cursor:pointer;user-select:none}#obj-title::after{content:' ▾';font-size:12px;color:var(--mute)}#objectives.collapsed #obj-title::after{content:' ▸'}
 #objectives.collapsed ol{display:none}
+#cine-exit{display:none;position:fixed;left:50%;bottom:calc(7.5vh + 12px);transform:translateX(-50%);z-index:30;padding:8px 14px;border-radius:18px;border:1px solid #ffffff40;background:#0b1418aa;color:#e8efe9;font:13px system-ui,sans-serif;cursor:pointer;opacity:.75}
+#cine-exit:hover{opacity:1}
+body[data-cine=true] #cine-exit{display:block}

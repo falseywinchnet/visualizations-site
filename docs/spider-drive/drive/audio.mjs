@@ -12,15 +12,28 @@ export class Sound{
   const noiseBuf=(sec,kind='white')=>{const n=C.sampleRate*sec,b=C.createBuffer(1,n,C.sampleRate),d=b.getChannelData(0);let last=0;for(let i=0;i<n;i++){const w=Math.random()*2-1;if(kind==='brown'){last=(last+.02*w)/1.02;d[i]=last*3.5;}else d[i]=w;}return b;};
   this.white=noiseBuf(2);this.brown=noiseBuf(3,'brown');
   const loop=(buf,filterType,freq,q=1,dest=this.ext)=>{const s=C.createBufferSource();s.buffer=buf;s.loop=true;const f=C.createBiquadFilter();f.type=filterType;f.frequency.value=freq;f.Q.value=q;const g=C.createGain();g.gain.value=0;s.connect(f).connect(g).connect(dest);s.start();return {s,f,g};};
-  // V8: firing pulses through a shaper, cross-plane burble as amplitude modulation at half the firing order
-  const e=this.eng={};e.osc=C.createOscillator();e.osc.type='sawtooth';e.osc2=C.createOscillator();e.osc2.type='square';
-  e.sh=C.createWaveShaper();const curve=new Float32Array(1024);for(let i=0;i<1024;i++){const x=i/512-1;curve[i]=Math.tanh(x*3.5);}e.sh.curve=curve;
-  e.lp=C.createBiquadFilter();e.lp.type='lowpass';e.lp.frequency.value=600;e.lp.Q.value=2;e.g=C.createGain();e.g.gain.value=0;
-  e.am=C.createGain();e.am.gain.value=.6;e.lfo=C.createOscillator();e.lfo.type='sine';e.lfoG=C.createGain();e.lfoG.gain.value=.35;e.lfo.connect(e.lfoG).connect(e.am.gain);
-  const mixE=C.createGain();mixE.gain.value=.5;e.osc.connect(mixE);const g2=C.createGain();g2.gain.value=.35;e.osc2.connect(g2).connect(mixE);
-  mixE.connect(e.sh).connect(e.am).connect(e.lp).connect(e.g).connect(this.ext);
-  e.rumble=loop(this.brown,'lowpass',180,1);
-  e.osc.start();e.osc2.start();e.lfo.start();
+  // V8: one engine cycle (two crank turns) of exhaust pulses at the cross-plane firing order L R R L R L L R, with the
+  // banks at different strengths and a little per-cylinder variation, turned into a periodic wave played at rpm/120.
+  // The uneven bank pattern is what gives the low burble; a sub oscillator at firing frequency adds weight.
+  const e=this.eng={};
+  {const N=4096,wave=new Float32Array(N),banks=[1,0,0,1,0,1,1,0],amp=[1.0,.93,1.06,.97,1.02,.9,1.08,.95];
+   for(let c=0;c<8;c++){const t0=c/8,A=amp[c]*(banks[c]?1:.72);for(let k=0;k<N;k++){let t=k/N-t0;if(t<0)t+=1;const x=t*8;// in firing periods
+     if(x<1.6)wave[k]+=A*(Math.exp(-x*5.5)*Math.sin(Math.PI*2*x*1.6)-.25*Math.exp(-x*2.2)*Math.sin(Math.PI*x*.8));}}
+   const H=160,re=new Float32Array(H+1),im=new Float32Array(H+1);
+   for(let h=1;h<=H;h++){let a=0,b=0;for(let k=0;k<N;k+=2){const ph=2*Math.PI*h*k/N;a+=wave[k]*Math.cos(ph);b+=wave[k]*Math.sin(ph);}re[h]=a/N*2;im[h]=b/N*2;}
+   e.wave=C.createPeriodicWave(re,im,{disableNormalization:false});}
+  e.osc=C.createOscillator();e.osc.setPeriodicWave(e.wave);
+  e.sub=C.createOscillator();e.sub.type='sine';e.subG=C.createGain();e.subG.gain.value=.35;
+  e.drive=C.createGain();e.drive.gain.value=1.2;
+  e.sh=C.createWaveShaper();const curve=new Float32Array(1024);for(let i=0;i<1024;i++){const x=i/512-1;curve[i]=Math.tanh(x*1.6)/Math.tanh(1.6);}e.sh.curve=curve;
+  e.body=C.createBiquadFilter();e.body.type='peaking';e.body.frequency.value=95;e.body.Q.value=.9;e.body.gain.value=9;
+  e.lp=C.createBiquadFilter();e.lp.type='lowpass';e.lp.frequency.value=420;e.lp.Q.value=.9;
+  e.lp2=C.createBiquadFilter();e.lp2.type='lowpass';e.lp2.frequency.value=900;e.lp2.Q.value=.5;
+  e.g=C.createGain();e.g.gain.value=0;
+  e.osc.connect(e.drive).connect(e.sh).connect(e.body).connect(e.lp).connect(e.lp2).connect(e.g).connect(this.ext);
+  e.sub.connect(e.subG).connect(e.lp);
+  e.rumble=loop(this.brown,'lowpass',140,1);
+  e.osc.start();e.sub.start();
   // hydraulic pump whine
   this.pump={o:C.createOscillator(),g:C.createGain()};this.pump.o.type='triangle';this.pump.g.gain.value=0;this.pump.o.connect(this.pump.g).connect(this.ext);this.pump.o.start();
   this.pump.o2=C.createOscillator();this.pump.o2.type='sine';this.pump.o2.connect(this.pump.g);this.pump.o2.start();
@@ -48,8 +61,9 @@ export class Sound{
  update(dt,sp,G,cam){
   if(!this.ctx||this.paused)return;this.t+=dt;const C=this.ctx,e=this.eng;
   const rpm=sp.engine.rpm,load=sp.engine.load,fire=rpm/60*4;
-  e.osc.frequency.setTargetAtTime(Math.max(8,fire*.5),C.currentTime,.03);e.osc2.frequency.setTargetAtTime(Math.max(8,fire*.25),C.currentTime,.03);e.lfo.frequency.setTargetAtTime(Math.max(1,rpm/60/2),C.currentTime,.03);
-  e.lp.frequency.setTargetAtTime(300+load*1600+rpm*.25,C.currentTime,.05);this.set(e.g,rpm<50?0:.1+load*.22);this.set(e.rumble.g,rpm<50?0:.2+load*.3);
+  const now=C.currentTime,cyc=Math.max(1,rpm/120);e.osc.frequency.setTargetAtTime(cyc,now,.03);e.sub.frequency.setTargetAtTime(Math.max(20,fire),now,.03);
+  e.drive.gain.setTargetAtTime(1+load*2.2,now,.05);e.lp.frequency.setTargetAtTime(260+load*520+rpm*.09,now,.05);e.lp2.frequency.setTargetAtTime(700+load*1400,now,.08);
+  this.set(e.g,rpm<50?0:.24+load*.18);this.set(e.subG,rpm<50?0:.3+load*.25);this.set(e.rumble.g,rpm<50?0:.22+load*.3);
   const flow=sp.engine.pumpFlow||0;this.pump.o.frequency.setTargetAtTime(220+rpm*.14,C.currentTime,.05);this.pump.o2.frequency.setTargetAtTime(440+rpm*.28,C.currentTime,.05);this.set(this.pump.g,clamp(flow/.006,0,1)*.07);
   // valve clicks on leg reversals, accumulator thumps on hard compressions
   sp.wheels.forEach((w,i)=>{if(w.valve&&w.valve!==this.prevValve[i]&&Math.random()<.5)this.burst(.03,3200,4,.08);this.prevValve[i]=w.valve||0;if(w.ev<-.9&&this.prevEv[i]>=-.9)this.tone(70,40,.25,.35);this.prevEv[i]=w.ev;});
