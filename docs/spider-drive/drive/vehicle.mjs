@@ -211,16 +211,16 @@ float n3(vec3 x){vec3 i=floor(x),f=fract(x);f=f*f*(3.0-2.0*f);return mix(mix(mix
   const M=this.mats;
   for(let i=0;i<3;i++){
    const z=GEOM.stations[i],g=new T.Group();g.position.set(0,PLATE,z);this.root.add(g);g.name=['Front slide plate pair','Middle slide plate pair','Rear fixed pair'][i];
-   // short crossbar over the plate, arms out over the cabin, diagonal braces
-   this.box([2.3,.26,.34],[0,.1,0],M.frame,g);
+   // crossbar housing the two telescoping arm beams (side by side, so both can run in past the centre)
+   this.box([2.5,.5,.9],[0,.08,0],M.frame,g);for(const e of [-1,1])this.box([.12,.56,.96],[e*1.25,.08,0],M.dark,g);
    for(const s of [-1,1]){
-    // arm: a braced box truss from the crossbar out to the knee
-    this.rod([s*1.05,.16,0],[s*(LEG_X+.02),.02,0],.17,M.paint,g,14);
-    for(const zz of [-1,1]){this.rod([s*1.1,-.14,zz*.4],[s*(LEG_X-.12),-.26,zz*.12],.075,M.frame,g,8);
-     for(let k=0;k<3;k++){const x0=1.35+k*.85,x1=x0+.85,t0=(x0-1.1)/(LEG_X-1.22),t1=(x1-1.1)/(LEG_X-1.22);this.rod([s*x0,.14-.13*t0*.9,0],[s*x1,-.14-.12*t1,zz*(.4-.28*t1)],.04,M.frame,g,6);}}
-    this.rod([s*.9,.34,0],[s*LEG_X,.12,0],.055,M.frame,g,8);
+    // fixed outer sleeve of the arm, then the sliding beam that carries the leg
+    this.box([.95,.42,.4],[s*1.65,.1,s*.21],M.paint,g);this.box([.08,.48,.46],[s*2.1,.1,s*.21],M.frame,g);
     // leg: knee knuckle, barrel with accumulator, chrome rod, hub motor, axle, wheel
     const leg=new T.Group();leg.position.set(s*LEG_X,0,0);g.add(leg);
+    this.box([2.5,.32,.3],[s*-1.25,.1,s*.21],M.chrome,leg);// sliding arm beam (runs into the sleeve)
+    this.box([.5,.36,.34],[s*-.2,.1,s*.21],M.paint,leg);// arm head
+    for(let k=0;k<5;k++)this.mesh(new T.CylinderGeometry(.03,.03,.34,6),M.dark,[s*(-.5-k*.45),.27,s*.21],leg);// rack teeth for the slide motor
     this.mesh(new T.SphereGeometry(.32,18,14),M.frame,[0,-.18,0],leg);
     this.mesh(new T.CylinderGeometry(.22,.22,.78,16),M.frame,[0,-.18,0],leg,[Math.PI/2,0,0]);// knee pin boss
     for(const zz of [-1,1])this.mesh(new T.CylinderGeometry(.1,.1,.06,12),M.chrome,[0,-.18,zz*.42],leg,[Math.PI/2,0,0]);
@@ -230,7 +230,7 @@ float n3(vec3 x){vec3 i=floor(x),f=fract(x);f=f*f*(3.0-2.0*f);return mix(mix(mix
     this.mesh(new T.CylinderGeometry(.3,.3,.14,18),M.frame,[0,barrelTop-.05,0],leg);
     for(let y=barrelTop-.7;y>barrelBot+.4;y-=.9)this.mesh(new T.CylinderGeometry(.285,.285,.06,18),M.frame,[0,y,0],leg);// barrel hoops
     // knee braces: twin tubes from the arm down to a collar on the barrel, with a gusset plate between
-    const kx=-1.45,ky=-.02,by_=-1.65;
+    const kx=-.85,ky=-.02,by_=-1.1;// short enough to clear the cabin at road track
     for(const zz of [-1,1]){this.rod([s*kx,ky,zz*.17],[s*-.3,by_,zz*.17],.1,M.paint,leg,10);
      this.mesh(new T.CylinderGeometry(.13,.13,.1,12),M.frame,[s*kx,ky,zz*.17],leg,[Math.PI/2,0,0]);}
     this.mesh(new T.CylinderGeometry(.3,.3,.34,18),M.frame,[0,by_,0],leg);// brace collar
@@ -258,9 +258,9 @@ float n3(vec3 x){vec3 i=floor(x),f=fract(x);f=f*f*(3.0-2.0*f);return mix(mix(mix
     const tire=this.mesh(tireGeometry(),tireMat,[0,0,0],spin);tire.name='Tyre';
     this.buildRim(spin,s);
     // front pair: a driving-lamp pod on each knee that turns with the steering
-    if(i===0){const pod=new T.Group();pod.position.set(s*LEG_X,-.05,-.52);g.add(pod);this.box([.12,.12,.3],[0,0,.18],M.frame,pod);
+    if(i===0){const pod=new T.Group();pod.position.set(0,-.05,-.52);leg.add(pod);this.box([.12,.12,.3],[0,0,.18],M.frame,pod);
      this.mesh(new T.CylinderGeometry(.19,.16,.26,18),M.dark,[0,0,-.02],pod,[Math.PI/2,0,0]);const f=this.mesh(new T.CylinderGeometry(.16,.16,.02,18),M.headlamp,[0,0,-.16],pod,[Math.PI/2,0,0]);this.lights.head.push(f);
-     this.lampMounts.push({parent:g,pos:[s*LEG_X,-.05,-.7],aim:[s*(LEG_X+1.5),-8,-30],angle:.42,power:1,steer:true});}
+     this.lampMounts.push({parent:leg,pos:[0,-.05,-.7],aim:[s*1.5,-8,-30],angle:.42,power:1,steer:true});}
     this.legs.push({pair:i,side:s,leg,rod,stage,hub,barrelBot,acc});this.wheels.push({spin,tire,tireMat,side:s,wheel});
    }
    this.pairs.push(g);
@@ -334,6 +334,7 @@ float n3(vec3 x){vec3 i=floor(x),f=fract(x);f=f*f*(3.0-2.0*f);return mix(mix(mix
   this.root.updateMatrixWorld();
   for(let i=0;i<6;i++){
    const w=sp.wheels[i],L=this.legs[i],W=this.wheels[i];
+   L.leg.position.x=L.side*(sp.ht()-AXLE);// telescoping arms: road track to full width
    const hubY=GEOM.hubTop-w.e-PLATE;// relative to the plate group
    L.hub.position.y=hubY;
    const rodTop=L.barrelBot+.1,len=Math.max(.05,rodTop-hubY-.2);L.rod.scale.y=len;L.rod.position.y=hubY+.2+len/2;const sl=Math.max(.05,len*.5);L.stage.scale.y=sl;L.stage.position.y=rodTop-sl/2;

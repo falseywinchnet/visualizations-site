@@ -12,7 +12,7 @@ export const SURFACES={
  mud:{name:'Mud',mu:.4,slide:.3,roll:.11,soft:1,dust:0,color:[.3,.24,.17]},
  sand:{name:'Sand',mu:.56,slide:.46,roll:.1,soft:.8,dust:1.2,color:[.76,.66,.48]},
  rock:{name:'Rock',mu:.82,slide:.66,roll:.018,soft:0,dust:.2,color:[.5,.48,.45]},
- snow:{name:'Snow',mu:.36,slide:.26,roll:.06,soft:.6,dust:0,color:[.9,.92,.95]},
+ snow:{name:'Snow',mu:.42,slide:.3,roll:.06,soft:.6,dust:0,color:[.9,.92,.95]},
  riverbed:{name:'Riverbed',mu:.5,slide:.4,roll:.07,soft:.55,dust:0,color:[.4,.37,.3]},
  ash:{name:'Ash',mu:.55,slide:.44,roll:.045,soft:.35,dust:1.4,color:[.16,.15,.14]},
 };

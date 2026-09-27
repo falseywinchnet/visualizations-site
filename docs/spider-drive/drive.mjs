@@ -151,6 +151,7 @@ addEventListener('keydown',e=>{
   case 'Digit1':case 'Digit2':case 'Digit3':{const p=+e.code.slice(-1)-1;c.lift[p]=!c.lift[p];break;}
   case 'KeyT':{const o=['road','terrain','soft'];c.tire=o[(o.indexOf(c.tire)+1)%3];sound.hiss(1);spider.say(`Tyres to ${PRESSURES[c.tire]} bar (${{road:'road',terrain:'all-terrain',soft:'sand and mud'}[c.tire]})`,2.5);break;}
   case 'KeyV':{const o=['auto','soft','firm'];c.suspension=o[(o.indexOf(c.suspension)+1)%3];spider.say(`Suspension ${c.suspension}`,1.5);break;}
+  case 'KeyG':c.track=c.track>=.5?0:1;spider.say(c.track?'Track out to full width: more lock, more stability':'Track in for the road: 6 m wide, gentler turns, less side stability',3);break;
   case 'KeyB':c.assist=!c.assist;spider.say(`Stability assist ${c.assist?'on':'off'}`,2);break;
   case 'KeyK':c.climb=!c.climb;spider.say(`Climb assist ${c.climb?'on':'off'}`,2);break;
   case 'Slash':c.carriageManual=null;spider.say('Carriage on automatic load trim',2);break;
@@ -264,7 +265,7 @@ function drawHud(){
  $('#status').textContent=G.paused?'Paused':(sp.message||(sp.climbState?`Climbing: ${['front','middle','rear'][sp.climbState.pair]} pair ${sp.climbState.phase}`:sp.hold?'Holding':''));
  $('#coords').textContent=`${Math.round(sp.pos[0])} E · ${Math.round(-sp.pos[2])} N · ${Math.round(terrain.height(sp.pos[0],sp.pos[2]))} m`;
  $('#att').textContent=`Roll ${sp.roll?.toFixed(1)}° · Pitch ${sp.pitch?.toFixed(1)}°`;
- $('#m-ride').textContent=`${Math.round(sp.ctl.retraction*100)}% retr`;$('#m-assist').textContent=(sp.ctl.assist?'On':'Off')+(sp.ctl.climb?' +climb':'');$('#m-susp').textContent=`${sp.ctl.suspension}${sp.ctl.suspension==='auto'?' ('+sp.suspMode+')':''}`;
+ $('#m-ride').textContent=`${Math.round(sp.ctl.retraction*100)}% retr`;$('#m-assist').textContent=(sp.ctl.assist?'On':'Off')+(sp.ctl.climb?' +climb':'');$('#m-track').textContent=spider.trackFrac>.99?'Wide':spider.trackFrac<.01?'Road':`${spider.ctl.track?'Widening':'Narrowing'} ${Math.round(spider.trackFrac*100)}%`;$('#m-susp').textContent=`${sp.ctl.suspension}${sp.ctl.suspension==='auto'?' ('+sp.suspMode+')':''}`;
  $('#m-tyre').textContent=`${sp.wheels[0].pressure.toFixed(1)} bar`;$('#m-carr').textContent=`${sp.carriage>=0?'aft ':'fwd '}${Math.abs(sp.carriage).toFixed(1)} m`;
  const L=sp.wheels.map(w=>w.load),m=L.reduce((a,b)=>a+b,0)/6||1,dev=Math.max(...L.map(l=>Math.abs(l-m)))/m;$('#m-bal').textContent=`${Math.round(clamp(1-dev*.5,0,1)*100)}%`;
  const bearing=G.mission?.bearing?.();$('#bearing').textContent=bearing||'';
@@ -295,7 +296,7 @@ function drawSpeedo(kmh){const c=spdCtx,S=150;c.clearRect(0,0,S,S);const a0=Math
  const safe=spider.safeSpeed*3.6;c.strokeStyle='#ff6a4f55';c.beginPath();c.arc(S/2,S/2,S/2-10,v2a(Math.min(110,safe)),a1);c.stroke();
  c.strokeStyle='#6fe0c8';c.beginPath();c.arc(S/2,S/2,S/2-10,a0,v2a(kmh));c.stroke();
  const la=v2a(spider.ctl.limit*3.6);c.strokeStyle='#f0b95a';c.lineWidth=3;c.beginPath();c.moveTo(S/2+Math.cos(la)*(S/2-18),S/2+Math.sin(la)*(S/2-18));c.lineTo(S/2+Math.cos(la)*(S/2-2),S/2+Math.sin(la)*(S/2-2));c.stroke();
- const rp=clamp(spider.engine.rpm/2200,0,1);c.lineWidth=4;c.strokeStyle='#f0b95a88';c.beginPath();c.arc(S/2,S/2,S/2-24,a0,a0+(a1-a0)*rp);c.stroke();
+ const rp=clamp(spider.engine.rpm/2000,0,1);c.lineWidth=4;c.strokeStyle='#f0b95a88';c.beginPath();c.arc(S/2,S/2,S/2-24,a0,a0+(a1-a0)*rp);c.stroke();
  c.fillStyle='#eef3ee';c.font='600 30px system-ui';c.textAlign='center';c.fillText(kmh.toFixed(0),S/2,S/2+10);c.font='11px system-ui';c.fillStyle='#b9c6c2';c.fillText('km/h',S/2,S/2+26);}
 // ------------------------------------------------------------------ frame
 function syncModel(dt){

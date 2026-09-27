@@ -127,7 +127,7 @@ class Wildfire extends Mission{
     let ok=0;for(let q=1;q<=10;q++){const cc=f0.idx(x+(this.hikers[0]-x)*q/10,z+(this.hikers[1]-z)*q/10);if(cc>=0&&f0.fuel[cc]>.25)ok++;}if(ok>=7){cand=[x,z];break;}}
    if(!cand)cand=[this.hikers[0]-this.windDir[0]*900,this.hikers[1]-this.windDir[1]*900];
    for(const k in snapshot)f0[k].set(snapshot[k]);f0.active=[];f0.burnedArea=0;
-   f0.ignite(cand[0],cand[1],28);for(let k=0;k<340;k++)f0.step(.5);
+   f0.ignite(cand[0],cand[1],28);for(let k=0;k<340;k++){f0.step(.5);if(k>30&&f0.active.length>60)break;}/* only until it has taken hold */
    if(f0.active.length>40){ig=cand;break;}
   }
   if(!ig){// last resort: light a line across the wind 700 m upwind
@@ -139,6 +139,13 @@ class Wildfire extends Mission{
   for(const r of W.roads)for(let q=0;q<r.n;q+=4){const x=r.xz[q*2],z=r.xz[q*2+1];const dx=x-ig[0],dz=z-ig[1],along=dx*this.windDir[0]+dz*this.windDir[1],side=Math.abs(dx*lat[0]+dz*lat[1]);if(along<100||along>900||side<350||side>1100)continue;const sc=Math.abs(side-600)-t.height(x,z)*.8;if(sc<best){best=sc;anc=[x,z];}}
   if(!anc)anc=[ig[0]+lat[0]*650+this.windDir[0]*400,ig[1]+lat[1]*650+this.windDir[1]*400];
   this.anchor=anc;this.station=[st.x,st.z];
+  // pacing: measure how fast this fire actually runs at the hikers, then set its clock so the front arrives in
+  // about 1.5x the time a good run needs (the route at ~29 km/h plus two minutes for the crew drop)
+  {const snap={state:f0.state.slice(),prog:f0.prog.slice(),burnT:f0.burnT.slice(),I:f0.I.slice(),char:f0.char.slice(),wet:f0.wet.slice(),moist:f0.moist.slice()},act=f0.active.slice(),ba=f0.burnedArea;
+   const d0=f0.eta(this.hikers[0],this.hikers[1]).dist;for(let k=0;k<240;k++)f0.step(.5);const d1=f0.eta(this.hikers[0],this.hikers[1]).dist;
+   for(const k in snap)f0[k].set(snap[k]);f0.active=act;f0.burnedArea=ba;f0.upload();
+   this.vf=Math.max(.4,(d0-d1)/120);const route=Math.hypot(anc[0]-st.x,anc[1]-st.z)+Math.hypot(this.hikers[0]-anc[0],this.hikers[1]-anc[1]);
+   const allow=(route/8+120)*1.5;this.pace=clamp((d0-30)/(this.vf*allow),.15,1);}
   // props
   this.hikerMeshes=[0,1,2].map(k=>this.add(this.place(person(0xe0b030,k===0?'wave':'stand'),this.hikers[0]+k*1.3,this.hikers[1]+(k%2)*1.2)));
   this.bA=this.beacon(anc[0],anc[1],0xffb040);this.bH=this.beacon(this.hikers[0],this.hikers[1],0x6fe0c8);this.bS=this.beacon(st.x,st.z,0x9fe07a);this.bH.on=false;this.bS.on=false;
@@ -151,10 +158,10 @@ class Wildfire extends Mission{
  get beaconsOn(){return false;}
  tick(dt){
   const sp=this.sp,f=this.fire;
-  this.acc=(this.acc||0)+dt;while(this.acc>=.25){f.step(.25);this.acc-=.25;}
+  this.acc=(this.acc||0)+dt;while(this.acc>=.25){f.step(.25*(this.stage<2?this.pace:1));this.acc-=.25;}
   // heat on the vehicle
   const hn=f.burningNear(sp.pos[0],sp.pos[2],28);this.G.fireNear=clamp(1-hn.nearest/120,0,1);
-  if(hn.heat>.6){sp.hull=Math.max(0,sp.hull-hn.heat*dt*.9);if(this.time-(this._heat||0)>4){this._heat=this.time;sp.say('Radiant heat! Get into the black or back off',2.5);}}
+  if(hn.heat>.6){sp.hurtHull(hn.heat*dt*.9);if(this.time-(this._heat||0)>4){this._heat=this.time;sp.say('Radiant heat! Get into the black or back off',2.5);}}
   this.G.hurt=clamp(hn.heat*.4,0,.8);
   // monitor and drafting
   const inp=this.G.input||{};
@@ -162,7 +169,7 @@ class Wildfire extends Mission{
    const dir=this.aimDir();this.knocked+=f.douse(sp.pos[0],sp.pos[2],dir[0],dir[1]);}else this.spraying=false;
   if(inp.draft){const w=this.t.water(sp.pos[0],sp.pos[2],{});if(w.kind&&w.depth>.8&&this.retracted(.85)&&this.still()){const add=Math.min(3500-sp.water,70*dt);sp.water+=add;this.drafted+=add;this.drafting=true;sp.recomputeMass();if(sp.water>=3499&&this.time-(this._full||0)>5){this._full=this.time;sp.say('Tank full',2);}}else{this.drafting=false;if(this.time-(this._dm||0)>3){this._dm=this.time;sp.say(w.kind?'Retract fully and stop to lower the intake':'Drafting needs a lake or river at least a metre deep',2.5);}}}else this.drafting=false;
   // hikers' ETA
-  const eta=f.eta(this.hikers[0],this.hikers[1]);this.hikerEta=eta;
+  const eta=f.eta(this.hikers[0],this.hikers[1]);eta.eta=Math.max(0,eta.dist-30)/(this.vf*this.pace);this.hikerEta=eta;
   if(this.stage<2&&eta.dist<30&&!this.hikersSafe){this.objs[1].state='fail';this.end(false,'The front reached the trailhead','The hikers were caught by the fire before the Spider reached them.');}
   // stages
   if(this.stage===0&&this.hold('hA',this.anchor,16,4,{label:'Crew dismount'})){this.stage=1;this.objs[0].state='done';this.objs[1].state='active';this.bA.on=false;this.bH.on=true;sp.crewCount=2;sp.recomputeMass();this.G.model.setCrew(2,'fire');this.G.ladder=false;this.hA=0;this.radio('Crew boss','Crew is on the ground at the anchor. Go get those hikers.',0);this.radio('Dispatch',`Front is ${fmtD(eta.dist)} from the trailhead.`,6);}
@@ -366,7 +373,7 @@ class Crossing extends Mission{
  impact(x,z){const t=this.t,y=t.height(x,z),sp=this.sp;this.G.fx.blast(x,y,z);const d=Math.hypot(x-sp.pos[0],z-sp.pos[2]);this.G.sound.boom(d);this.G.shake=Math.min(1.5,(this.G.shake||0)+clamp(1-d/300,0,1)*1.2);this.rounds++;
   // crater decal
   const cr=new T.Mesh(new T.CircleGeometry(3.5+Math.random()*2,20),new T.MeshStandardMaterial({color:0x1d1a16,roughness:1,transparent:true,opacity:.85,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-4}));cr.rotation.x=-Math.PI/2;cr.position.set(x,y+.08,z);this.add(cr);
-  if(d<28){const k=1-d/28;sp.hull=Math.max(0,sp.hull-k*30);const dir=[(sp.pos[0]-x)/(d||1),(sp.pos[2]-z)/(d||1)];sp.vel[0]+=dir[0]*k*2.5;sp.vel[2]+=dir[1]*k*2.5;sp.vel[1]+=k*1.5;
+  if(d<28){const k=1-d/28;sp.hurtHull(k*30);const dir=[(sp.pos[0]-x)/(d||1),(sp.pos[2]-z)/(d||1)];sp.vel[0]+=dir[0]*k*2.5;sp.vel[2]+=dir[1]*k*2.5;sp.vel[1]+=k*1.5;
    if(d<16&&this.r()<.5){const legs=sp.wheels.map((w,i)=>({i,d:Math.hypot(w.hub[0]-x,w.hub[2]-z)})).filter(l=>!sp.wheels[l.i].disabled).sort((a,b)=>a.d-b.d);if(legs[0])sp.disableLeg(legs[0].i);}}}
  dismount(){const sp=this.sp;for(let k=0;k<8;k++){const m=this.add(person(0x55603f,'stand'));const a=k/8*6.28;const ax=sp.pos[0]+Math.cos(a)*2,az=sp.pos[2]+Math.sin(a)*2;m.position.set(ax,this.t.height(ax,az),az);this.troops.push({m,t:0,a:[ax,az],b:[ax+Math.cos(a)*30,az+Math.sin(a)*30]});}}
  extraStats(){return {'Detections':this.detections,'Rounds fired at you':this.rounds,'Legs lost':this.sp.wheels.filter(w=>w.disabled).length};}
