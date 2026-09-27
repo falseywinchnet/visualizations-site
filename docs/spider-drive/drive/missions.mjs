@@ -356,16 +356,18 @@ class Crossing extends Mission{
   let rate=0;
   this.losT=(this.losT||0)+dt;if(this.losT>.5){this.losT=0;this.exp=this.ops.map(o=>this.exposure([o.x,o.h+5,o.z]));if(this.patrol){const p=this.patrol.m.position;const d=Math.hypot(p.x-sp.pos[0],p.z-sp.pos[2]);this.pexp=d<700?this.exposure([p.x,p.y+2.5,p.z])*2.4:0;}}
   (this.exp||[]).forEach((e,i)=>{rate+=e*.08;});rate+=(this.pexp||0)*.08;
-  this.threat=clamp(this.threat+rate*dt-(rate<.002?.012*dt:0),0,1);
-  if(this.threat>=1&&!this.barrages.length){this.detections++;const lead=8+this.r()*6;this.barrages.push({t:this.time+lead,pos:[sp.pos[0]+sp.vel[0]*lead*.8,sp.pos[2]+sp.vel[2]*lead*.8],n:4+Math.floor(this.r()*5),fired:0});this.threat=.45;this.radio('Intercept','They have you. Fire mission called on your position. Move!',0);this.G.sound.squelch();}
-  for(const b of this.barrages){if(this.time<b.t)continue;if(b.fired<b.n&&this.time>=b.t+b.fired*1.4){if(b.fired===0)this.G.sound.whistle();const a=this.r()*6.28,d=15+this.r()*45,x=b.pos[0]+Math.cos(a)*d,z=b.pos[1]+Math.sin(a)*d;this.impact(x,z);b.fired++;}}
+  // threat builds while seen and drains quickly once you break line of sight; a fire mission needs 30 s to relay
+  this.threat=clamp(this.threat+rate*.75*dt-(rate<.004?.06*dt:0),0,1);
+  if(this.wasFixed&&this.threat<.2&&!this.barrages.length){this.wasFixed=false;this.radio('Intercept','Their net has gone quiet. They have lost you.',0);}
+  if(this.threat>=1&&!this.barrages.length&&this.time>(this.relayUntil||0)){this.detections++;this.wasFixed=true;this.relayUntil=this.time+30;const lead=10+this.r()*4;this.barrages.push({t:this.time+lead,pos:[sp.pos[0]+sp.vel[0]*lead*.5,sp.pos[2]+sp.vel[2]*lead*.5],n:3+Math.floor(this.r()*4),fired:0});this.threat=.3;this.radio('Intercept','They have you. Fire mission called on your position. Move!',0);this.G.sound.squelch();}
+  for(const b of this.barrages){if(this.time<b.t)continue;if(b.fired<b.n&&this.time>=b.t+b.fired*1.7){if(b.fired===0)this.G.sound.whistle();const a=this.r()*6.28,d=20+this.r()*45,x=b.pos[0]+Math.cos(a)*d,z=b.pos[1]+Math.sin(a)*d;this.impact(x,z);b.fired++;}}
   this.barrages=this.barrages.filter(b=>b.fired<b.n);
   // stages
   if(this.stage===0&&this.dist(this.lz)<45){this.stage=1;this.objs[0].state='done';this.objs[1].state='active';this.radio('Troop lead','LZ. Get her down and hold.',0);}
   if(this.stage===1&&this.hold('hd',this.lz,48,5,{label:'Dismount'})){this.stage=2;this.objs[1].state='done';this.objs[2].state='active';sp.crewCount=2;sp.recomputeMass();this.G.model.setCrew(2,'troop');this.G.ladder=false;this.dismount();this.bLZ.on=false;this.bHome.on=true;this.radio('Troop lead','Team is off. Go.',0);}
   if(this.stage===2&&this.dist(this.home)<60){this.objs[2].state='done';this.end(true,'Crossing complete',`Eight troops delivered and the Spider is home. ${this.detections?`Fixed ${this.detections} time${this.detections>1?'s':''} by the posts.`:'Never fixed by the posts.'}`);}
   for(const tr of this.troops){tr.t+=dt;const k=Math.min(1,tr.t/6);tr.m.position.x=mix(tr.a[0],tr.b[0],k);tr.m.position.z=mix(tr.a[1],tr.b[1],k);tr.m.position.y=t.height(tr.m.position.x,tr.m.position.z);if(tr.t>14)tr.m.visible=false;}
-  this.meter=`Threat ${Math.round(this.threat*100)}%${this.barrages.length?' · INCOMING':''} · ${this.ops.filter(o=>o.known).length}/${this.ops.length} posts spotted`;
+  this.meter=`Threat ${Math.round(this.threat*100)}%${this.barrages.length?(this.barrages[0].t>this.time?` · INCOMING ${Math.ceil(this.barrages[0].t-this.time)} s: leave the circle`:' · IMPACTS'):''} · ${this.ops.filter(o=>o.known).length}/${this.ops.length} posts spotted`;
   this.ops.forEach((o,i)=>{if(!o.known&&this.dist([o.x,o.z])<900&&los(t,[sp.pos[0],sp.pos[1]+4.5,sp.pos[2]],[o.x,o.h+2,o.z])>.4){o.known=true;this.radio('Sensor','Observation post spotted on the ridge.',0);}});
   this.G.hud.gauges([{label:'Threat',text:`${Math.round(this.threat*100)}%`,value:this.threat,color:this.threat>.7?'#ff6a4f':'#f0b95a'},{label:'Silhouette',text:`${Math.round((1-sp.ctl.retraction)*100)}%`,value:1-sp.ctl.retraction*.7,color:'#b9c6c2'},{label:'Hull',text:`${Math.round(sp.hull)}%`,value:sp.hull/100,color:sp.hull<40?'#ff6a4f':'#9fe07a'}]);
   this.markers=[{x:this.lz[0],z:this.lz[1],label:'LZ',hidden:this.stage>=2},{x:this.home[0],z:this.home[1],label:'Staging',color:'#9fe07a'},...this.ops.filter(o=>o.known).map(o=>({x:o.x,z:o.z,label:'Post',color:'#ff5a3a'})),...this.barrages.map(b=>({x:b.pos[0],z:b.pos[1],circle:60,color:'#ff3a2a'}))];

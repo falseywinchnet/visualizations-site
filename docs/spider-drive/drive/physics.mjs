@@ -117,29 +117,38 @@ export class Spider{
    const vM=this.pointVel(M),vH=sub(vM,scl(up,wh.ev));
    const fb=[-Math.sin(d),0,-Math.cos(d)],fw=mv(R,fb);
    let fh=[fw[0],0,fw[2]];const fl=Math.hypot(fh[0],fh[2])||1;fh=[fh[0]/fl,0,fh[2]/fl];
-   // ---- contact: circle vs height profile along the wheel's line
-   let pen=-1,gp=null,ax=0,ay=0,az=0;const sink=wh.sink;
+   // ---- contact: circle vs height profile along the wheel's line, split into a ground patch and an edge patch
+   // (a tyre pressed against a step face climbs it by the friction at the edge, which points up the face)
+   const pg={pen:-1,p:null,ax:0,ay:0,az:0},pe={pen:-1,p:null,ax:0,ay:0,az:0};const sink=wh.sink;let gSup=-1e9;
    for(let k=-6;k<=6;k++){const s=k/6*Rw*.98,gx=hub[0]+fh[0]*s,gz=hub[2]+fh[2]*s,gy=env.ground(gx,gz,hub[1])-sink;
+    gSup=Math.max(gSup,gy+Math.sqrt(Math.max(0,Rw*Rw-s*s))-Rw);// where a rigid tyre of this radius rests on the profile
     let p,nx,ny,nz,py;
     if(gy>hub[1]){// solid column reaches above the hub: nearest point is level with the hub
      if(Math.abs(s)<.12){p=Rw+(gy-hub[1]);nx=0;ny=1;nz=0;py=gy;}else{p=Rw-Math.abs(s);nx=-fh[0]*Math.sign(s);ny=0;nz=-fh[2]*Math.sign(s);py=hub[1];}}
     else{const dx=hub[0]-gx,dy=hub[1]-gy,dz=hub[2]-gz,dd=Math.hypot(dx,dy,dz)||1e-6;p=Rw-dd;nx=dx/dd;ny=dy/dd;nz=dz/dd;py=gy;}
-    if(p>pen){pen=p;gp=[gx,py,gz,nx,ny,nz];}
-    if(p>0){ax+=nx*p;ay+=ny*p;az+=nz*p;}}
-   // penetration-weighted normal: smooth in V-shaped ditches and over edges
-   if(pen>0&&gp){const l=Math.hypot(ax,ay,az);if(l>1e-6){gp[3]=ax/l;gp[4]=ay/l;gp[5]=az/l;}}
+    const P=(ny<.35&&Math.abs(s)>.3)?pe:pg;// only a genuinely steep face counts as an edge patch
+    if(p>P.pen){P.pen=p;P.p=[gx,py,gz];}
+    if(p>0){P.ax+=nx*p;P.ay+=ny*p;P.az+=nz*p;}}
+   wh.gSup=gSup;
+   // two patches only when they are distinct contacts; otherwise one blended contact as before
+   if(pg.pen>0&&pe.pen>0&&Math.hypot(pg.p[0]-pe.p[0],pg.p[1]-pe.p[1],pg.p[2]-pe.p[2])<.6){if(pe.pen>pg.pen){pg.pen=pe.pen;pg.p=pe.p;}pg.ax+=pe.ax;pg.ay+=pe.ay;pg.az+=pe.az;pe.pen=-1;}
+   const patches=[];for(const P of [pg,pe])if(P.pen>0){const l=Math.hypot(P.ax,P.ay,P.az)||1;patches.push({pen:P.pen,n:[P.ax/l,P.ay/l,P.az/l],pt:P.p});}
+   const pen=patches.length?Math.max(...patches.map(q=>q.pen)):-1;
    let Fn=0,cn=[0,1,0],cpt=hub;
    wh.contact=pen>0;
    let tf=[0,0,0];// tyre force on wheel
    if(pen>0){
-    cn=[gp[3],gp[4],gp[5]];
-    const nt=env.normal(gp[0],gp[2]);const lh=[-fh[2],0,fh[0]];const lat=dot(nt,lh);cn=norm(add(cn,scl(lh,lat)));
-    cpt=[gp[0],gp[1],gp[2]];
+    const nt=env.normal(patches[0].pt[0],patches[0].pt[2]);const lh=[-fh[2],0,fh[0]];const lat=dot(nt,lh);
     const kt=mix(260e3,620e3,(wh.pressure-.8)/1.7),ct=9000;/* the big carcass damps wheel hop */
-    const pdot=-dot(vH,cn);
-    Fn=kt*pen+ct*pdot+(pen>.3?(pen-.3)*2.5e6:0);if(Fn<0)Fn=0;if(Fn>4.5e5)Fn=4.5e5;wh.deflection=pen;
-    // ---- friction
-    let t=sub(fw,scl(cn,dot(fw,cn)));t=norm(t);const l=cross(cn,t);// l points to the wheel's left? cross(up, fwd) = left
+    for(const q of patches){q.n=norm(add(q.n,scl(lh,lat*(q===patches[0]?1:0))));const pdot=-dot(vH,q.n);
+     q.Fn=kt*q.pen+ct*pdot+(q.pen>.3?(q.pen-.3)*2.5e6:0);if(q.Fn<0)q.Fn=0;if(q.Fn>4.5e5)q.Fn=4.5e5;
+     q.t=norm(sub(fw,scl(q.n,dot(fw,q.n))));q.l=cross(q.n,q.t);Fn+=q.Fn;}
+    if(Fn>4.5e5){const k=4.5e5/Fn;for(const q of patches)q.Fn*=k;Fn=4.5e5;}
+    // resultant normal and contact point (load weighted) stand for the tyre in the strut and HUD
+    {let nn=[0,0,0],pp=[0,0,0];const w0=Fn||1;for(const q of patches){nn=add(nn,scl(q.n,q.Fn||1e-6));pp=add(pp,scl(q.pt,(q.Fn||1e-6)/w0));}cn=norm(nn);cpt=Fn>0?pp:patches[0].pt;}
+    wh.deflection=pen;
+    // ---- friction (slip measured along the load-weighted tangent)
+    let t=[0,0,0],l=[0,0,0];for(const q of patches){const wq=(q.Fn||1e-6)/(Fn||1e-6);t=add(t,scl(q.t,wq));l=add(l,scl(q.l,wq));}t=norm(t);l=norm(l);
     const vx=dot(vH,t),vy=dot(vH,l);
     const surf=wh.surface||{mu:.65,slide:.5,roll:.04,soft:.3};
     const pfac=(2.5-wh.pressure)/1.7;
@@ -178,7 +187,8 @@ export class Spider{
      wh.slip=kap2;wh.slipAngle=Math.atan2(vy,den);
     }
     wh.spin+=wh.omega*DT;
-    tf=add(add(scl(cn,Fn),scl(t,Fx)),scl(l,Fy));
+    // each patch carries its share of the tyre force along its own surface
+    for(const q of patches){const sh=Fn>0?q.Fn/Fn:1/patches.length;tf=add(tf,add(add(scl(q.n,q.Fn),scl(q.t,Fx*sh)),scl(q.l,Fy*sh)));}
     wh.fx=Fx;wh.fy=Fy;
    }else{wh.deflection=0;wh.anchor=null;const I=300;const wT=wh.targetOmega||0;wh.omega+=clamp((wT-wh.omega)*8,-20,20)*DT;wh.spin+=wh.omega*DT;wh.fx=wh.fy=0;}
    wh.load=Fn;wh.cp=cpt;wh.cn=cn;
@@ -363,9 +373,11 @@ export class Spider{
   let vt=c.throttle*c.limit;if(c.brake)vt=0;const gov=this.gov={};const tag=(n,v0)=>{if(Math.abs(vt)<Math.abs(v0)-.05)gov[n]=+(vt*3.6).toFixed(0);};
   if(this.climbState&&this.climbState.cap!==undefined)vt=clamp(vt,-this.climbState.cap,this.climbState.cap);
   // terrain preview: cap speed so the vertical acceleration over the ground ahead stays tolerable
-  if(c.assist&&Math.abs(vt)>2.5){const dir=vt>0?1:-1;let kmax=0,hazard=1e9;const hx0=[-hf[2],0,hf[0]];
+  if(c.assist&&Math.abs(vt)>2.5){const dir=vt>0?1:-1;let kmax=0,hazard=1e9,ledgeCap=1e9;const hx0=[-hf[2],0,hf[0]];
    for(const lat of [-this.ht(),0,this.ht()]){let prevG=null,prevH=null,g0=null;const dMax=Math.max(24,Math.abs(vfwd)*3.2);for(let d=4;d<=dMax;d+=6){const x=this.pos[0]+hf[0]*d*dir+hx0[0]*lat,z=this.pos[2]+hf[2]*d*dir+hx0[2]*lat,h=env.ground(x,z,1e9);if(prevH!==null){const g=(h-prevH)/6;if(prevG!==null)kmax=Math.max(kmax,Math.abs(g-prevG)/6);prevG=g;if(g0===null)g0=g;if(Math.abs(h-prevH)>1.9&&Math.abs(g)>.7&&Math.abs(g-g0)>.45&&d-6<hazard)hazard=d-6;}prevH=h;}
-    let hp=null,gp0=null;for(let d=2;d<=dMax;d+=3){const x=this.pos[0]+hf[0]*d*dir+hx0[0]*lat,z=this.pos[2]+hf[2]*d*dir+hx0[2]*lat,h=env.ground(x,z,1e9);if(hp!==null){const g=(h-hp)/3;if(gp0===null)gp0=g;if(Math.abs(h-hp)>1.9&&Math.abs(g)>.9&&Math.abs(g-gp0)>.45&&d-3<hazard)hazard=d-3;}hp=h;}}
+    let hp=null,gp0=null;for(let d=2;d<=dMax;d+=3){const x=this.pos[0]+hf[0]*d*dir+hx0[0]*lat,z=this.pos[2]+hf[2]*d*dir+hx0[2]*lat,h=env.ground(x,z,1e9);if(hp!==null){const g=(h-hp)/3;if(gp0===null)gp0=g;if(Math.abs(h-hp)>1.9&&Math.abs(g)>.9&&Math.abs(g-gp0)>.45&&d-3<hazard)hazard=d-3;const dh=Math.abs((h-hp)-gp0*3);/* a riser is a break from the local slope, not the slope itself */if(dh>.6){const vs=Math.max(2.4,7-3.3*(dh-.6)),va=Math.sqrt(vs*vs+2*3*Math.max(0,d-8));if(va<ledgeCap)ledgeCap=va;}}hp=h;}}
+   /* ledges: meet each riser at a speed the tyres and struts can take, sized to its height */
+   if(ledgeCap<Math.abs(vt)){const v0=vt;vt=Math.sign(vt)*ledgeCap;tag('ledge',v0);}
    /* a cliff or wall ahead (a sharp break in grade, more than ~1.9 m within 6 m): arrive slowly enough to stop or to start a climb */
    if(hazard<1e9){const vh=Math.max(1.2,Math.sqrt(2*3.5*Math.max(0,hazard-7)));if(Math.abs(vt)>vh){const v0=vt;vt=Math.sign(vt)*vh;tag('hazard',v0);}this.hazardAhead=hazard;}else this.hazardAhead=null;
    const vcap=Math.max(4,Math.sqrt(8/Math.max(kmax,1e-3)));/* 2.4 m of travel soaks most of it */this.previewCap=vcap;if(Math.abs(vt)>vcap){const v0=vt;vt=Math.sign(vt)*vcap;tag('rough',v0);if(this.t-(this._pmsg||0)>6&&vcap<c.limit*.6){this._pmsg=this.t;this.say('Rough ground ahead: assist is easing off',2);}}}else this.previewCap=null;
@@ -392,7 +404,7 @@ export class Spider{
   // ---- active suspension: ground under each tyre, terrain plane, levelling
   const wheels=this.wheels,active=wheels.map(w=>!w.lifted&&!w.disabled);
   const gH=[],hx=[],hz=[];
-  for(const wh of wheels){const hb=this.hubBody(wh),rel=mv(R,[hb[0],0,hb[2]]);hx.push(dot(rel,hr));hz.push(dot(rel,hf));gH.push(env.ground(wh.hub[0],wh.hub[2],wh.hub[1])-wh.sink);}
+  for(const wh of wheels){const hb=this.hubBody(wh),rel=mv(R,[hb[0],0,hb[2]]);hx.push(dot(rel,hr));hz.push(dot(rel,hf));gH.push(wh.gSup??(env.ground(wh.hub[0],wh.hub[2],wh.hub[1])-wh.sink));/* the tyre rests on edges, not on the point below the hub */}
   // least squares plane g = a*x + b*z + c over supported wheels
   const fit=(vals,mask)=>{let n=0,sx=0,sz=0,sg=0,sxx=0,szz=0,sxz=0,sxg=0,szg=0;for(let i=0;i<6;i++){if(!mask[i])continue;n++;sx+=hx[i];sz+=hz[i];sg+=vals[i];sxx+=hx[i]*hx[i];szz+=hz[i]*hz[i];sxz+=hx[i]*hz[i];sxg+=hx[i]*vals[i];szg+=hz[i]*vals[i];}
    const M=[sxx,sxz,sx,sxz,szz,sz,sx,sz,n];const iM=inv3(M);const r=mv(iM,[sxg,szg,sg]);return {a:r[0],b:r[1],c:r[2]};};
@@ -546,7 +558,9 @@ export class Spider{
   const reach=GEOM.stroke-.8;/* the lift needs leg in hand on the other pairs: 1.6 m steps */
   if(!this.climbState){
    if(drop>reach+.15&&steep>1&&c.throttle!==0){this.dropWarn=true;if(this.t-(this._dropMsg||0)>3){this._dropMsg=this.t;this.say(`Drop of ${drop.toFixed(1)} m ahead exceeds leg reach`,2.5);}}
-   if(rise>.72*kR&&steep>1.1&&Math.abs(this.roll||0)<12&&c.throttle!==0&&Math.abs(vfwd)<2.5&&wheels.filter(w=>w.contact).length>=5){
+   // only when driving over it has actually stalled: the tyres climb most ledges on their own
+   this.stallT=(c.throttle!==0&&Math.abs(vfwd)<.3&&Math.abs(this.vcmd)>.8)?(this.stallT||0)+dt:0;
+   if(rise>.72*kR&&steep>1.1&&Math.abs(this.roll||0)<12&&c.throttle!==0&&this.stallT>2.5&&wheels.filter(w=>w.contact).length>=4){
     if(rise>reach+.05){c.throttle!==0&&this.t-(this._riseMsg||0)>3&&(this._riseMsg=this.t,this.say(`Rise of ${rise.toFixed(1)} m is beyond reach: find another route`,3));return;}
     if(c.climb&&c.assist){this.climbState={pair:dir>0?0:2,dir,phase:'approach',top,cap:.8,t:0};this.say(`Climbing a ${rise.toFixed(1)} m step`,2.5);}
    }
