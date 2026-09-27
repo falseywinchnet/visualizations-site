@@ -5,7 +5,7 @@
 // controller does levelling, load allocation, skyhook damping and step climbing.
 // This is a speculative concept model: plausible physics, not a validated vehicle.
 
-export const GEOM=Object.freeze({R:1.7,tireWidth:.62,halfTrack:4.8,stations:[-4.7,0,4.7],stroke:2.4,hubTop:1.35,plateY:6.11,topPlate:6.4,belly:2.6,cabinY:4.2,cabinR:1.6,cabinHalf:5.4,wheelbase:9.4,maxLock:35*Math.PI/180,carriageMax:1.2});
+export const GEOM=Object.freeze({R:1.7,tireWidth:.62,halfTrack:4.8,stations:[-4.7,0,4.7],stroke:2.4,hubTop:2.64,plateY:6.11,topPlate:6.4,belly:2.6,cabinY:4.2,cabinR:1.6,cabinHalf:5.4,wheelbase:9.4,maxLock:35*Math.PI/180,carriageMax:2.0});
 export const DT=1/240;
 const G=9.81,RHO=1000,PISTON=.0095,PN=1.55e6,GAMMA=1.3;
 const clamp=(v,a,b)=>v<a?a:v>b?b:v,mix=(a,b,t)=>a+(b-a)*t;
@@ -43,7 +43,7 @@ export class Spider{
   for(let i=0;i<6;i++)this.wheels.push({pair:i>>1,side:(i&1)?1:-1,e:1.2,ev:0,eset:1.35,spin:0,omega:0,load:0,contact:false,pressure:1.6,sink:0,slip:0,slipAngle:0,surface:null,anchor:null,disabled:false,lifted:false,gas:PN,deflection:0,cp:[0,0,0],cn:[0,1,0],hub:[0,0,0],mount:[0,0,0],water:0,torque:0,depthUnder:0});
   this.steer=[0,0,0];// plate angles (front, middle, rear=0)
   this.pos=[0,0,0];this.vel=[0,0,0];this.q=[0,0,0,1];this.w=[0,0,0];this.acc=[0,0,0];
-  this.engine={rpm:750,load:0,stalled:false,stallTimer:0,pump:0};this.vcmd=0;this.hold=true;
+  this.engine={rpm:600,load:0,stalled:false,stallTimer:0,pump:0};this.vcmd=0;this.hold=true;
   this.hull=100;this.damage=[];this.events=[];this.cabinAcc=[0,0,0];this.jerk=0;this.comfort=1;
   this.climbState=null;this.message='Ready';this.messageT=0;this.overturned=false;this.flooded=0;this.brush=0;this.breaks=0;
   this.distance=0;this.maxTilt=0;this.impacts=0;this.integ=[0,0,0];
@@ -56,7 +56,7 @@ export class Spider{
   const items=[
    {m:5000,pos:[0,4.2,0],size:[3.0,3.2,10.8],moves:true},// cabin shell, seats, glazing
    {m:2500,pos:[0,6.2,0],size:[2.6,.5,10.4],moves:false},// overhead plates, crossbars, top cover
-   {m:1250,pos:[0,3.8,4.4],size:[1.2,.9,1.1],moves:true},// V8, pump, reservoir
+   {m:1700,pos:[0,3.8,4.4],size:[1.2,.9,1.1],moves:true},// turbo diesel V8, pumps, reservoir, cooling
    {m:2100,pos:[0,4.6,0],size:[9.2,2.6,9.4],moves:false},// leg barrels, knee braces, hub motors
    {m:this.crewCount*110,pos:[0,3.7,-.8],size:[1.4,1,7],moves:true},
    ...VARIANTS[this.variant].payload];
@@ -133,7 +133,7 @@ export class Spider{
     cn=[gp[3],gp[4],gp[5]];
     const nt=env.normal(gp[0],gp[2]);const lh=[-fh[2],0,fh[0]];const lat=dot(nt,lh);cn=norm(add(cn,scl(lh,lat)));
     cpt=[gp[0],gp[1],gp[2]];
-    const kt=mix(260e3,620e3,(wh.pressure-.8)/1.7),ct=5200;
+    const kt=mix(260e3,620e3,(wh.pressure-.8)/1.7),ct=9000;/* the big carcass damps wheel hop */
     const pdot=-dot(vH,cn);
     Fn=kt*pen+ct*pdot+(pen>.3?(pen-.3)*2.5e6:0);if(Fn<0)Fn=0;if(Fn>4.5e5)Fn=4.5e5;wh.deflection=pen;
     // ---- friction
@@ -142,7 +142,8 @@ export class Spider{
     const surf=wh.surface||{mu:.65,slide:.5,roll:.04,soft:.3};
     const pfac=(2.5-wh.pressure)/1.7;
     const Fnom=this.totalMass*G/6;
-    let mu=surf.mu*(1+.22*pfac*surf.soft)*(1-.07*(Fn/Fnom-1));const muS=surf.slide*(1+.22*pfac*surf.soft);
+    // 3.4 m lugged agricultural tyres bite harder than the surface's reference tyre, more so aired down on soft ground
+    const lug=1.2+.12*pfac*surf.soft;let mu=surf.mu*lug*(1+.22*pfac*surf.soft)*(1-.07*(Fn/Fnom-1));const muS=surf.slide*lug*(1+.22*pfac*surf.soft);
     if(wh.water>.3)mu*=.9;
     const Ck=9,Ca=7;const den=Math.max(Math.abs(vx),1.5);
     let Fx,Fy;
@@ -158,9 +159,9 @@ export class Spider{
      // spin DOF, implicit against the linearised longitudinal force
      const I=300;const kap=(wh.omega*Rw-vx)/den;const F0=Ck*Fn*kap;const D=Ck*Fn*Rw/den;// dFx/domega
      const roll=(surf.roll*(1+.6*pfac*(1-surf.soft))+wh.sink*.35)*Fn*Rw*Math.tanh(wh.omega*3);
-     let Tm=0,Tmax=wh.disabled||this.engine.stalled?0:Math.min(20000,1.25*mu*Fn*Rw+2500);
+     let Tm=0,Tmax=wh.disabled||this.engine.stalled?0:Math.min(38000,1.25*mu*Fn*Rw+2500);
      // engine power shared by the six hub motors caps motoring torque (braking is hydrostatic and free)
-     const Tpow=(this.engine.Pavail??4e5)/6/Math.max(Math.abs(wh.omega),1.5);
+     const Tpow=(this.engine.Pavail??8e5)/6/Math.max(Math.abs(wh.omega),1.5);
      const wT=wh.targetOmega||0;const Kp=14000;
      // unsaturated implicit solution with P control
      let om=(I*wh.omega+DT*(Kp*wT-Rw*(F0-D*wh.omega)-roll))/(I+DT*(Rw*D+Kp));Tm=Kp*(wT-om);
@@ -186,7 +187,7 @@ export class Spider{
    const tu=dot(tf,up);
    const f0=mU*aMu-tu+mU*G*up[1]+Fs;
    const Ks=this.gasStiffness(wh,wh.e)+(wh.e<0||wh.e>GEOM.stroke?9e5:0),Kt=pen>0?mix(260e3,620e3,(wh.pressure-.8)/1.7)*cnU*cnU:0;
-   const Cs=this.strutDamping(wh.ev),Ct=pen>0?5200*cnU*cnU:0;
+   const Cs=this.strutDamping(wh.ev),Ct=pen>0?9000*cnU*cnU:0;
    const Kk=Ks+Kt,Cc=Cs+Ct;
    const evn=(mU*wh.ev+DT*(f0+Cc*wh.ev))/(mU+DT*Cc+DT*DT*Kk);
    wh.ev=evn;wh.e+=DT*evn;if(wh.e<-.08){wh.e=-.08;wh.ev=Math.max(0,wh.ev);}if(wh.e>GEOM.stroke+.08){wh.e=GEOM.stroke+.08;wh.ev=Math.min(0,wh.ev);}
@@ -272,7 +273,8 @@ export class Spider{
      const dx=s.p[0]-ob.x,dz=s.p[2]-ob.z,d=Math.hypot(dx,dz),rr=s.r+ob.r;
      if(d<rr&&d>1e-4){const nx=dx/d,nz=dz/d,pen=rr-d,v=this.pointVel(s.p),vn=v[0]*nx+v[2]*nz;
       let Fn=2.4e6*pen-6e4*vn;if(Fn<0)continue;Fn=Math.min(Fn,this.mass*(Math.max(0,-vn)+Math.min(pen,.3)*3)/DT/6);
-      if(ob.breakable){const imp=Fn*DT;ob._imp=(ob._imp||0)*.9+imp;if(ob._imp>ob.strength){ob.broken=true;this.breaks++;this.events.push({type:'break',ob,dir:[-nx,-nz],speed:Math.hypot(this.vel[0],this.vel[2])});if(this.env.onBreak)this.env.onBreak(ob,-nx,-nz);continue;}}
+      if(ob.breakable){const imp=Fn*DT;ob._imp=(ob._imp||0)*.9+imp;ob._F=(ob._F||0)+(Fn-(ob._F||0))*DT/.12;/* rammed (impulse) or shoved over (sustained push) */
+       if(ob._imp>ob.strength||ob._F>(ob.fbreak||1e9)){ob.broken=true;this.breaks++;this.events.push({type:'break',ob,dir:[-nx,-nz],speed:Math.hypot(this.vel[0],this.vel[2])});if(this.env.onBreak)this.env.onBreak(ob,-nx,-nz);continue;}}
       const tx=-nz,tz=nx,vtt=v[0]*tx+v[2]*tz;const fr=clamp(-vtt*4e4,-.4*Fn,.4*Fn);
       applyAt([nx*Fn+tx*fr,0,nz*Fn+tz*fr],s.p);if(vn<-2.2&&this.t-(this._lastHit||0)>1){this._lastHit=this.t;this.hull=Math.max(0,this.hull-Math.min(12,(-vn-2.2)*3));this.impacts++;this.events.push({type:'impact',strength:-vn,ob});}}
     }else if(ob.type==='box'){
@@ -306,7 +308,7 @@ export class Spider{
    const buoy=RHO*G*vol*.28;applyAt([0,buoy,0],wh.hub);
    // drag relative to current: side area of the tyre, frontal area of the leg
    const v=this.pointVel(wh.hub),rel=[v[0]-w.fx,0,v[2]-w.fz],rs=Math.hypot(rel[0],rel[2]);
-   if(rs>.01){const R_=this.R,right=[R_[0],R_[3],R_[6]],side=Math.abs((rel[0]*right[0]+rel[2]*right[2])/rs);const A=mix(GEOM.tireWidth*2*GEOM.R+.3,Math.PI*GEOM.R*GEOM.R*.9,side)*areaFrac;const f=.5*RHO*.75*A*rs;applyAt([-rel[0]*f,0,-rel[2]*f],wh.hub);}
+   if(rs>.01){const R_=this.R,right=[R_[0],R_[3],R_[6]],side=Math.abs((rel[0]*right[0]+rel[2]*right[2])/rs);const A=mix(GEOM.tireWidth*2*GEOM.R+.3,Math.PI*GEOM.R*GEOM.R*.9,side)*areaFrac;const f=.5*RHO*.32*A*rs;applyAt([-rel[0]*f,0,-rel[2]*f],wh.hub);}/* edge-on tyre and slender leg: low drag head-on */
   }
   // cabin: buoyancy of the sealed lower hull and drag
   const cabinPts=[-4,-2,0,2,4];let wet=0;
@@ -357,12 +359,20 @@ export class Spider{
   let vt=c.throttle*c.limit;if(c.brake)vt=0;
   if(this.climbState&&this.climbState.cap!==undefined)vt=clamp(vt,-this.climbState.cap,this.climbState.cap);
   // terrain preview: cap speed so the vertical acceleration over the ground ahead stays tolerable
-  if(c.assist&&Math.abs(vt)>2.5){const dir=vt>0?1:-1;let kmax=0;const hx0=[-hf[2],0,hf[0]];
-   for(const lat of [-GEOM.halfTrack,0,GEOM.halfTrack]){let prevG=null,prevH=null;const dMax=Math.max(22,Math.abs(vfwd)*3.2);for(let d=4;d<=dMax;d+=3){const x=this.pos[0]+hf[0]*d*dir+hx0[0]*lat,z=this.pos[2]+hf[2]*d*dir+hx0[2]*lat,h=env.ground(x,z,1e9);if(prevH!==null){const g=(h-prevH)/3;if(prevG!==null)kmax=Math.max(kmax,Math.abs(g-prevG)/3);prevG=g;}prevH=h;}}
-   const vcap=Math.max(2.8,Math.sqrt(4.5/Math.max(kmax,1e-3)));this.previewCap=vcap;if(Math.abs(vt)>vcap){vt=Math.sign(vt)*vcap;if(this.t-(this._pmsg||0)>6&&vcap<c.limit*.6){this._pmsg=this.t;this.say('Rough ground ahead: assist is easing off',2);}}}else this.previewCap=null;
+  if(c.assist&&Math.abs(vt)>2.5){const dir=vt>0?1:-1;let kmax=0,hazard=1e9;const hx0=[-hf[2],0,hf[0]];
+   for(const lat of [-GEOM.halfTrack,0,GEOM.halfTrack]){let prevG=null,prevH=null,g0=null;const dMax=Math.max(24,Math.abs(vfwd)*3.2);for(let d=4;d<=dMax;d+=6){const x=this.pos[0]+hf[0]*d*dir+hx0[0]*lat,z=this.pos[2]+hf[2]*d*dir+hx0[2]*lat,h=env.ground(x,z,1e9);if(prevH!==null){const g=(h-prevH)/6;if(prevG!==null)kmax=Math.max(kmax,Math.abs(g-prevG)/6);prevG=g;if(g0===null)g0=g;if(Math.abs(h-prevH)>1.9&&Math.abs(g)>.7&&Math.abs(g-g0)>.45&&d-6<hazard)hazard=d-6;}prevH=h;}
+    let hp=null,gp0=null;for(let d=2;d<=dMax;d+=3){const x=this.pos[0]+hf[0]*d*dir+hx0[0]*lat,z=this.pos[2]+hf[2]*d*dir+hx0[2]*lat,h=env.ground(x,z,1e9);if(hp!==null){const g=(h-hp)/3;if(gp0===null)gp0=g;if(Math.abs(h-hp)>1.9&&Math.abs(g)>.9&&Math.abs(g-gp0)>.45&&d-3<hazard)hazard=d-3;}hp=h;}}
+   /* a cliff or wall ahead (a sharp break in grade, more than ~1.9 m within 6 m): arrive slowly enough to stop or to start a climb */
+   if(hazard<1e9){const vh=Math.max(1.2,Math.sqrt(2*3.5*Math.max(0,hazard-7)));if(Math.abs(vt)>vh)vt=Math.sign(vt)*vh;this.hazardAhead=hazard;}else this.hazardAhead=null;
+   const vcap=Math.max(4,Math.sqrt(8/Math.max(kmax,1e-3)));/* 2.4 m of travel soaks most of it */this.previewCap=vcap;if(Math.abs(vt)>vcap){vt=Math.sign(vt)*vcap;if(this.t-(this._pmsg||0)>6&&vcap<c.limit*.6){this._pmsg=this.t;this.say('Rough ground ahead: assist is easing off',2);}}}else this.previewCap=null;
   if(this.dropWarn&&vt>0)vt=Math.min(vt,.9);
+  // side-slope governor: slow down as the roll the levelling cannot remove and the tip margin say the slope is getting serious
+  if(c.assist){const r=Math.abs(this.roll||0),tm=this.tipMargin??9;let cap=1e9;if(r>8)cap=Math.min(cap,Math.max(2.5,16-(r-8)*1.3));if(tm<3.2)cap=Math.min(cap,Math.max(2,(tm-1.1)*7));if(Math.abs(vt)>cap){vt=Math.sign(vt)*cap;if(cap<6&&this.t-(this._sideMsg||0)>6){this._sideMsg=this.t;this.say('Side slope: holding speed down',2);}}}
+  // anti-flip: the drive is strong enough to walk up a wall; ease off as the nose climbs and the tip margin shrinks
+  if(c.assist&&!this.climbState&&(this.probeRise||0)>GEOM.stroke-.23&&(this.probeSteep||0)>1.1&&vt>0){vt=Math.min(vt,.4);}/* a wall beyond reach: do not power into it */
+  if(c.assist&&!this.climbState){const p=(this.pitch||0)*Math.sign(vt||0);if(p>16&&(this.tipMargin??9)<3.2){const k=clamp(((this.tipMargin??9)-1.2)/2,0,1)*clamp((30-p)/14,0,1);vt*=k;if(Math.abs(this.vcmd)>Math.abs(vt))this.vcmd=vt;if(k<.6&&this.t-(this._flipMsg||0)>5){this._flipMsg=this.t;this.say('Too steep: easing off before she goes over backwards',2.5);}}}
   if(E.stalled)vt=0;
-  const accel=c.brake?4.5:(Math.abs(vt)>Math.abs(this.vcmd)&&Math.sign(vt||1)===Math.sign(this.vcmd||vt||1)?1.9:2.8);
+  const accel=c.brake||(this.hazardAhead!=null&&Math.abs(vt)<Math.abs(this.vcmd))?5.5:(Math.abs(vt)>Math.abs(this.vcmd)&&Math.sign(vt||1)===Math.sign(this.vcmd||vt||1)?3.6:3.2);
   this.vcmd+=clamp(vt-this.vcmd,-accel*dt,accel*dt);
   this.hold=Math.abs(this.vcmd)<.03&&Math.abs(vt)<.01&&speed<.6;
   // speed loop integral (hydrostatic drive tracks the commanded ground speed)
@@ -373,7 +383,7 @@ export class Spider{
   const zr=GEOM.stations[2],dRef=Math.hypot(Rc,zr);
   for(const wh of this.wheels){const hb=this.hubBody(wh);const di=Math.hypot(hb[0]+Rc,hb[2]-zr);wh.targetOmega=wh.lifted||wh.disabled?0:vEff*(Math.abs(Rc)>1e8?1:di/dRef)/GEOM.R;}
   // power limit: scale targets if the demanded power exceeds the engine
-  const Pmax=480e3*clamp(E.rpm/2600,.25,1)-(E.pump||0);
+  const Pmax=950e3*clamp(E.rpm/1800,.3,1)-(E.pump||0);
   E.Pavail=Math.max(6e4,Pmax);
   // ---- active suspension: ground under each tyre, terrain plane, levelling
   const wheels=this.wheels,active=wheels.map(w=>!w.lifted&&!w.disabled);
@@ -385,12 +395,14 @@ export class Spider{
   const all=[1,1,1,1,1,1];const tp=fit(gH,all);
   // requested ride height
   let sReq=c.retraction;if(this.climbState)sReq=0;
+  // wade assist: look ahead for water and raise the cabin so the belly clears it (clearance 1.7 m lowered, 3.8 m raised)
+  if(c.assist){let dW=0;const wt2=this._wt2||(this._wt2={}),dir=vfwd>=0?1:-1;for(const d of [0,6,12,18,26]){const x=this.pos[0]+hf[0]*d*dir,z=this.pos[2]+hf[2]*d*dir,w=env.water?env.water(x,z,wt2):null;if(w&&w.kind){const g=env.ground(x,z,1e9);dW=Math.max(dW,w.level-g);}}
+   this.wadeAhead=dW;if(dW>.4){const need=dW+.45,sMax=clamp(1-(need-1.7)/2.1,0,1);if(sReq>sMax){sReq=sMax;if(this.t-(this._wadeMsg||0)>8){this._wadeMsg=this.t;this.say(`Water ${dW.toFixed(1)} m deep ahead: raising the cabin`,2.5);}}}}
   // kinematic lateral acceleration (speed x yaw rate): no feedback from body sway
   const latK=clamp(vfwd*this.w[1]/G,-.5,.5);this.latG=latK;
-  if(c.assist)sReq=clamp(sReq+Math.abs(latK)*.35,0,1);
   // rollover guard: static margin from the CoM to the edge of the full six-tyre support polygon
   {const rxA=[],rzA=[],all6=[];for(let i=0;i<6;i++){const q=wheels[i].contact?wheels[i].cp:sub(wheels[i].hub,[0,GEOM.R,0]),rr=sub(q,this.pos);rxA.push(dot(rr,hr));rzA.push(dot(rr,hf));if(active[i])all6.push(i);}this.tipMargin=supportMargin(rxA,rzA,all6);}
-  if(c.assist&&this.tipMargin<1.4&&!this.climbState){sReq=clamp(sReq+(1.4-this.tipMargin)*.9,0,1);if(this.tipMargin<.9&&this.t-(this._tipMsg||0)>4){this._tipMsg=this.t;this.say('Rollover risk: lowering the cabin',2.5);}}
+  if(c.assist&&this.tipMargin<2.6&&!this.climbState){sReq=clamp(sReq+(2.6-this.tipMargin)*.6,0,1);if(this.tipMargin<.9&&this.t-(this._tipMsg||0)>4){this._tipMsg=this.t;this.say('Rollover risk: lowering the cabin',2.5);}}
   const eNom=GEOM.stroke*(1-sReq);
   // body attitude target: level fraction f by bisection so every leg stays within stroke
   const margin=this.climbState||sReq<.04?.06:.16,lo=margin,hi=GEOM.stroke-margin;
@@ -416,7 +428,7 @@ export class Spider{
   // coordinated slew: every leg covers the same fraction of its move per step, bounded by the
   // slew rate and by the pump flow the extending legs would need
   if(!this.eTs)this.eTs=wheels.map(w=>w.e);
-  const Qmax0=.015*clamp(E.rpm/2800,.35,1);
+  const Qmax0=.015*clamp(E.rpm/1500,.6,1);
   let maxD=0,extSum=0;for(let i=0;i<6;i++){if(!active[i])continue;const d=eGoal[i]-this.eTs[i];maxD=Math.max(maxD,Math.abs(d));if(d>0)extSum+=d;}
   let alpha=1;const slew=speed>2?.9:.35;if(maxD>slew*dt)alpha=slew*dt/maxD;if(extSum*alpha*PISTON>Qmax0*dt*.9)alpha=Math.min(alpha,Qmax0*dt*.9/(extSum*PISTON));
   const Fnom6=this.totalMass*G/6;
@@ -431,7 +443,7 @@ export class Spider{
   const comH=[0,0];// CoM horizontal is at 0 in hr/hf coords relative to pos
   const rx=[],rz=[];for(let i=0;i<6;i++){const p=wheels[i].contact?wheels[i].cp:wheels[i].hub;const rr=sub(p,this.pos);// project along gravity
    rx.push(dot(rr,hr));rz.push(dot(rr,hf));}
-  const idx=[];for(let i=0;i<6;i++)if(active[i]&&wheels[i].contact)idx.push(i);
+  const idx=[];for(let i=0;i<6;i++)if(active[i]&&wheels[i].contact)idx.push(i);const anyLift=wheels.some(w=>w.lifted);// lifted legs are already out of the allocation (not active)
   const Ft=new Array(6).fill(0);
   if(idx.length>=3){const n=idx.length,Fb=W/n;// A = [1;rx;rz], b=[W,0,0]
    let S=[0,0,0,0,0,0,0,0,0],r0=[0,0,0];
@@ -457,28 +469,33 @@ export class Spider{
     // the minimum-variance allocation so no tyre carries the vehicle on a crest or hangs in a hollow
     if(!this.Fsm)this.Fsm=wheels.map(()=>Fnom6);
     this.Fsm[i]+=(wh.load-this.Fsm[i])*(1-Math.exp(-dt/.9));
-    const Fuse=clamp(this.Fsm[i]*.65+(Ft[i]||Fnom6)*.35,.5*Fnom6,3.2*Fnom6);
+    const Fuse=clamp(anyLift?this.Fsm[i]*.2+(Ft[i]||Fnom6)*.8:this.Fsm[i]*.65+(Ft[i]||Fnom6)*.35,.5*Fnom6,3.4*Fnom6);// with a pair lifting, pre-load the others to their new share
     const ff=this.esetFor(Fuse-620*G,eT[i]);
     const modal=this.integ[0];
     const loadTrim=0;
-    const vUp=this.pointVel(wh.mount)[1];const sky=c.assist?clamp(-vUp*.45,-.35,.35):0;
+    const vUp=this.pointVel(wh.mount)[1],vDb=Math.sign(vUp)*Math.max(0,Math.abs(vUp)-.04);const sky=c.assist?clamp(-vDb*.45,-.35,.35):0;
     target=ff+modal+loadTrim+sky;
     // keep each strut's loaded equilibrium off its end stops
     const Fl=Math.max(wh.load-620*G,.6*Fnom6);target=clamp(target,this.esetFor(Fl,.08),this.esetFor(Fl,GEOM.stroke-.08));
     if(!c.assist)target=this.esetFor(W/6-620*G,eNom)+this.integ[0]*.5;
    }
-   newSet.push(clamp(target,-.3,2.4));
+   newSet.push(clamp(target,-.3,GEOM.stroke+.5));// accumulator setpoint headroom above the stroke for loaded legs
   }
   // pump budget: extension under load costs flow; retraction is fast
-  const Qmax=.015*clamp(E.rpm/2800,.35,1);
+  const Qmax=.015*clamp(E.rpm/1500,.6,1);
   let ext=0;for(let i=0;i<6;i++){const d=newSet[i]-wheels[i].eset;if(d>0)ext+=d;}
   const cap=Qmax*dt/PISTON;const s=ext>cap?cap/ext:1;
-  for(let i=0;i<6;i++){const wh=wheels[i],d=newSet[i]-wh.eset;const dd=d>0?Math.min(d*s,1.0*dt):Math.max(d,-1.2*dt);wh.eset+=dd;if(d>0)pumpDemand+=dd*PISTON/dt;wh.valve=Math.sign(dd);}
-  E.pumpFlow=pumpDemand;E.pump=pumpDemand*9e6;
-  // engine rpm: idle, driven by drive power, pump flow and speed
-  const drive=clamp((E.drivePower||0)/480e3,0,1),pumpF=clamp(pumpDemand/Qmax,0,1);
-  const rpmT=E.stalled?0:750+2350*Math.max(drive*1.1,pumpF*.75,Math.abs(this.vcmd)/28*.7);
-  E.rpm=mix(E.rpm,rpmT,1-Math.exp(-dt*(rpmT>E.rpm?3.5:2)));E.load=Math.max(drive,pumpF);
+  for(let i=0;i<6;i++){const wh=wheels[i],d=newSet[i]-wh.eset;wh.liftT=wh.lifted?(wh.liftT||0)+dt:0;const unload=wh.liftT>0&&wh.liftT<3&&wh.load>.12*this.totalMass*G/6;// hand the load over gently, then snatch the tyre up
+   const dd=d>0?Math.min(d*s,1.0*dt):Math.max(d,-(unload?.22:1.2)*dt);wh.eset+=dd;if(d>0)pumpDemand+=dd*PISTON/dt;wh.valve=Math.sign(dd);}
+  // levelling corrections chatter up and down; the accumulators absorb that, so the pump (and the engine)
+  // only see the smoothed flow, and small trims are carried by the accumulators alone
+  E.pumpSm=(E.pumpSm||0)+(pumpDemand-(E.pumpSm||0))*(1-Math.exp(-dt/.8));
+  E.pumpFlow=E.pumpSm;E.pump=E.pumpSm*9e6;
+  // engine rpm (a big turbo diesel: 600 idle, 2100 governed): set by the drive demand; hydraulics add a little
+  const drive=clamp((E.drivePower||0)/950e3,0,1),pumpF=clamp((E.pumpSm-.2*Qmax)/(.8*Qmax),0,1);
+  // a climb puts the engine in work mode (high idle) so the pump has full flow for the load transfers
+  const rpmT=E.stalled?0:Math.max(this.climbState?1400:0,600+1500*Math.max(drive*1.1,pumpF*.3,Math.abs(this.vcmd)/28*.7));
+  E.rpm=mix(E.rpm,rpmT,1-Math.exp(-dt*(rpmT>E.rpm?2.2:1.6)));E.load=Math.max(drive,pumpF*.5);
   // ---- carriage
   this.updateCarriage(dt);
   // ---- step climbing
@@ -525,7 +542,7 @@ export class Spider{
   const reach=GEOM.stroke-.28;
   if(!this.climbState){
    if(drop>reach+.15&&steep>1&&c.throttle!==0){this.dropWarn=true;if(this.t-(this._dropMsg||0)>3){this._dropMsg=this.t;this.say(`Drop of ${drop.toFixed(1)} m ahead exceeds leg reach`,2.5);}}
-   if(rise>.72*kR&&steep>1.1&&Math.abs(this.roll||0)<12&&c.throttle!==0&&Math.abs(vfwd)<6){
+   if(rise>.72*kR&&steep>1.1&&Math.abs(this.roll||0)<12&&c.throttle!==0&&Math.abs(vfwd)<2.5&&wheels.filter(w=>w.contact).length>=5){
     if(rise>reach+.05){c.throttle!==0&&this.t-(this._riseMsg||0)>3&&(this._riseMsg=this.t,this.say(`Rise of ${rise.toFixed(1)} m is beyond reach: find another route`,3));return;}
     if(c.climb&&c.assist){this.climbState={pair:dir>0?0:2,dir,phase:'approach',top,cap:.8,t:0};this.say(`Climbing a ${rise.toFixed(1)} m step`,2.5);}
    }
@@ -548,15 +565,16 @@ export class Spider{
     if(front){S.phase='shift';S.carriage=needCarriage;S.cap=0;S.t=0;}
     break;}
    case 'shift':S.cap=0;if(Math.abs(this.carriage-S.carriage)<.05||S.t>6){const idx=[];for(let i=0;i<6;i++)if((i>>1)!==p&&!wheels[i].disabled)idx.push(i);const m=supportMargin(rx,rz,idx);
-     if(m<.25){this.say('Cannot lift: centre of mass outside the remaining support',3);this.endClimb();break;}
+     if(m<.4){this.say('Cannot lift: centre of mass outside the remaining support',3);this.endClimb();break;}
      S.phase='lift';S.t=0;for(const w of W){w.lifted=true;}}
     break;
-   case 'lift':{S.cap=0;// retract until the tyre bottom clears the top + 0.25
+   case 'lift':{S.cap=0;if(Math.abs(this.pitch||0)>10||Math.abs(this.roll||0)>10){for(const w of W)w.lifted=false;S.phase='settle';S.t=0;S.retries=(S.retries||0)+1;break;}// retract until the tyre bottom clears the top + 0.25
     // safety: if the remaining support loses a tyre, put the pair back down and let it settle
-    {let sup=0;for(let i=0;i<6;i++)if((i>>1)!==p&&wheels[i].contact&&wheels[i].load>1500)sup++;if(sup<4&&S.t>.6){for(const w of W)w.lifted=false;S.phase='settle';S.t=0;S.retries=(S.retries||0)+1;if(S.retries>3){this.say('Cannot hold the lift: support is unstable',3);this.endClimb();}break;}}
-    let done=true;for(const w of W){const needHub=S.top+GEOM.R+.16;const dy=needHub-w.hub[1];w.liftE=clamp(w.e-dy,-.25,GEOM.stroke);if(dy>.1)done=false;}
-    if(done||S.t>5){if(!done&&W.some(w=>w.e<.02)){this.say('Step is beyond reach',3);this.endClimb();break;}S.phase='advance';S.t=0;}break;}
-   case 'advance':{S.cap=.55;for(const w of W){const needHub=S.top+GEOM.R+.18;w.liftE=clamp(w.e-(needHub-w.hub[1]),-.25,GEOM.stroke);}
+    {let sup=0;for(let i=0;i<6;i++)if((i>>1)!==p&&wheels[i].contact&&wheels[i].load>1500)sup++;S.lost=sup<4?(S.lost||0)+dt:0;if(S.lost>.5&&S.t>.6){for(const w of W)w.lifted=false;S.phase='settle';S.t=0;S.retries=(S.retries||0)+1;if(S.retries>3){this.say('Cannot hold the lift: support is unstable',3);this.endClimb();}break;}}
+    let done=true;for(const w of W){const needHub=S.top+GEOM.R+.16;const dy=needHub-w.hub[1];w.liftE=clamp(w.eset-dy,-.3,GEOM.stroke);/* move the setpoint: a hanging strut sits below it */if(dy>.1)done=false;}
+    if(done){S.phase='advance';S.t=0;}else if(S.t>8||W.some(w=>w.e<.02&&w.hub[1]<S.top+GEOM.R)){this.say('Step is beyond reach',3);for(const w of W)w.lifted=false;this.endClimb();}break;}
+   case 'advance':{if(Math.abs(this.pitch||0)>10||Math.abs(this.roll||0)>10){for(const w of W)w.lifted=false;S.phase='settle';S.t=0;S.retries=(S.retries||0)+1;break;}let clear=true;for(const w of W){const needHub=S.top+GEOM.R+.18;w.liftE=clamp(w.eset-(needHub-w.hub[1]),-.3,GEOM.stroke);if(w.hub[1]<needHub-.12)clear=false;}
+    S.cap=clear?.55:0;// never drive the lifted tyres into the edge
     // lifted wheels over the top?
     const over=W.every(w=>this.env.ground(w.hub[0],w.hub[2],1e9)>S.top-.35&&this.env.ground(w.hub[0]-hf[0]*.9*S.dir,w.hub[2]-hf[2]*.9*S.dir,1e9)>S.top-.5);
     if(over||S.t>12){S.phase='place';S.t=0;for(const w of W)w.lifted=false;}break;}

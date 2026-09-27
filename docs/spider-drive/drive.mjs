@@ -93,7 +93,10 @@ function setupVehicle(variant){
 let heads=[];
 let beams=[];
 function headlights(){for(const h of heads)h.parent?.remove(h);heads=[];for(const b of beams)b.parent?.remove(b);beams=[];
- for(const s of [-1,1]){const g=new T.ConeGeometry(4.5,38,20,1,true);g.translate(0,-19,0);g.rotateX(-Math.PI/2+.06);const m=new T.Mesh(g,new T.MeshBasicMaterial({color:0xfff0d0,transparent:true,opacity:.05,blending:T.AdditiveBlending,depthWrite:false,side:T.DoubleSide,fog:true}));m.position.set(s*.72,3.1,-5.2);m.visible=false;model.cabin.add(m);beams.push(m);}for(const s of [-1,1]){const l=new T.SpotLight(0xfff0d6,0,120,.42,.5,1.2);l.position.set(s*.72,3.1,-5.2);const tgt=new T.Object3D();tgt.position.set(s*1.5,.5,-40);model.cabin.add(l,tgt);l.target=tgt;heads.push(l);}}
+ // spotlights from the model's lamp mounts: the roof floodlight bank and the steering knee pods
+ for(const m of model.lampMounts){const l=new T.SpotLight(0xfff0d6,0,140,m.angle,.55,1.1);l.position.set(...m.pos);const tgt=new T.Object3D();tgt.position.set(...m.aim);m.parent.add(l,tgt);l.target=tgt;l.userData.power=m.power;heads.push(l);
+  if(!m.steer){const len=30,g=new T.ConeGeometry(len*Math.tan(m.angle)*.8,len,20,1,true);g.translate(0,-len/2,0);const d=new T.Vector3(...m.aim).sub(new T.Vector3(...m.pos)).normalize();g.applyQuaternion(new T.Quaternion().setFromUnitVectors(new T.Vector3(0,-1,0),d));
+   const b=new T.Mesh(g,new T.MeshBasicMaterial({color:0xfff0d0,transparent:true,opacity:.04,blending:T.AdditiveBlending,depthWrite:false,side:T.DoubleSide,fog:true}));b.position.set(...m.pos);b.visible=false;m.parent.add(b);beams.push(b);}}}
 // ------------------------------------------------------------------ menu
 function buildMenu(){
  const box=$('#missions');box.innerHTML='';
@@ -292,7 +295,7 @@ function drawSpeedo(kmh){const c=spdCtx,S=150;c.clearRect(0,0,S,S);const a0=Math
  const safe=spider.safeSpeed*3.6;c.strokeStyle='#ff6a4f55';c.beginPath();c.arc(S/2,S/2,S/2-10,v2a(Math.min(110,safe)),a1);c.stroke();
  c.strokeStyle='#6fe0c8';c.beginPath();c.arc(S/2,S/2,S/2-10,a0,v2a(kmh));c.stroke();
  const la=v2a(spider.ctl.limit*3.6);c.strokeStyle='#f0b95a';c.lineWidth=3;c.beginPath();c.moveTo(S/2+Math.cos(la)*(S/2-18),S/2+Math.sin(la)*(S/2-18));c.lineTo(S/2+Math.cos(la)*(S/2-2),S/2+Math.sin(la)*(S/2-2));c.stroke();
- const rp=clamp(spider.engine.rpm/3200,0,1);c.lineWidth=4;c.strokeStyle='#f0b95a88';c.beginPath();c.arc(S/2,S/2,S/2-24,a0,a0+(a1-a0)*rp);c.stroke();
+ const rp=clamp(spider.engine.rpm/2200,0,1);c.lineWidth=4;c.strokeStyle='#f0b95a88';c.beginPath();c.arc(S/2,S/2,S/2-24,a0,a0+(a1-a0)*rp);c.stroke();
  c.fillStyle='#eef3ee';c.font='600 30px system-ui';c.textAlign='center';c.fillText(kmh.toFixed(0),S/2,S/2+10);c.font='11px system-ui';c.fillStyle='#b9c6c2';c.fillText('km/h',S/2,S/2+26);}
 // ------------------------------------------------------------------ frame
 function syncModel(dt){
@@ -301,7 +304,7 @@ function syncModel(dt){
  // mud and dust build up on soft ground; fording washes it off
  {const surf=spider.wheels[2].surface||{};const soil=(surf.soft||0)*(surf.name==='Mud'?3:1)+(surf.dust||0)*.3;model.dirt.value=clamp(model.dirt.value+dt*(soil*speed*.0025)-dt*(spider.wading||0)*.06-dt*(atmo?.weather==='rain'?.004:0),.05,1);}
  model.update(spider,dt,{headlights:G.lights,worklights:G.lights,beacons:G.mission?.beacons??false,braking:spider.ctl.brake,night:atmo?.night||0,ladder:!!G.ladder,groundY:gy,dirt:model.dirt.value,wet:spider.wading>.1?1:0,monitorAim:G.mission?.monitorAim});
- for(const h of heads)h.intensity=G.lights?260:0;for(const b of beams)b.visible=G.lights&&(atmo?.night||0)>.3;
+ for(const h of heads)h.intensity=G.lights?420*h.userData.power:0;for(const b of beams)b.visible=G.lights&&(atmo?.night||0)>.3&&G.view!=='seat';
 }
 let last=performance.now(),acc=0,hudT=0,missionT=0,fpsT=0,frames=0,fps=60,lowFps=0;
 function step(dt){

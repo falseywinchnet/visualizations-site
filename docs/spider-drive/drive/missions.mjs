@@ -9,7 +9,7 @@ import {GEOM} from './physics.mjs';
 export const MISSIONS=[
  {id:'free',name:'Open Country',tag:'Free roam over the whole watershed',variant:'scout',time:null,weather:null,
   brief:'Six kilometres of generated country: a trunk river crossing from the high range to the basin, creeks and dry gullies, mesas with cliff bands, forests, cornfields and towns joined by graded roads. Nothing to accomplish except the ones the land offers.',
-  kit:'Scout variant · crew of six · sensor mast · discoveries tracked on the panel'},
+  kit:'Scout variant · crew of six · sensor turret and floodlight bank · discoveries tracked on the panel'},
  {id:'fire',name:'Wildfire',tag:'Crew to the anchor, hikers out, back to the black',variant:'fire',time:15.4,weather:'smoke',
   brief:'A wind-driven fire is running through the scrub toward a trailhead. Put the hand crew on the anchor point, reach the hikers before the front does, and bring everyone back to a safety zone. The roof tank carries 3.5 tonnes: it raises the centre of mass. Knock fire down with the monitor (hold F); refill by lowering the intake into a lake or river (retract fully, hold R).',
   kit:'Fire support variant · 3,500 L roof tank · monitor · crew of six'},
@@ -66,7 +66,7 @@ class Mission{
  update(dt){
   this.time+=dt;for(const m of this.q.filter(m=>m.t<=this.time)){this.G.hud.radio(m.who,m.line,Math.max(4,m.line.length/14));}this.q=this.q.filter(m=>m.t>this.time);
   const c=this.sp.comfort;if(this.patients){this.comfortSum+=c*dt;this.comfortN+=dt;}
-  if(!this.finished){this.tick(dt);if(this.sp.hull<=0)this.end(false,'The Spider is disabled','Hull integrity reached zero.');}
+  if(!this.finished){this.tick(dt);if(this.lethal&&this.sp.hull<=0)this.end(false,'The Spider is disabled','Hull integrity reached zero.');/* only combat can disable it */}
   this.hud();
  }
  frame(dt){for(const b of this.bList)b.frame(this.time,b.on!==false);}
@@ -312,6 +312,7 @@ class Pursuit extends Mission{
 }
 // ------------------------------------------------------------------ hostile crossing
 class Crossing extends Mission{
+ lethal=true;
  intensity(){return .08+.55*(this.threat||0)+(this.barrages?.length?.45:0);}
  start(){
   const W=this.w,t=this.t;const st=W.sites.find(s=>s.type==='staging')||W.towns[0];this.home=[st.x,st.z];

@@ -55,7 +55,7 @@ float n3(vec3 x){vec3 i=floor(x),f=fract(x);f=f*f*(3.0-2.0*f);return mix(mix(mix
   this.pairs=[];this.legs=[];this.wheels=[];this.lights={};
   this.buildTop();this.buildCabin();this.buildPairs();this.buildVariant();
   // merge static parts per material to keep draw calls low
-  const keep=new Set([this.hatch,this.gauge,this.searchlight,...this.legs.map(l=>l.rod),...this.wheels.map(w=>w.tire),...this.lights.head,...this.lights.tail,...this.lights.beacons,...(this.lights.bar||[])]);
+  const keep=new Set([this.hatch,this.gauge,this.searchlight,...this.legs.map(l=>l.rod),...this.legs.map(l=>l.stage),...this.wheels.map(w=>w.tire),...this.lights.head,...this.lights.nose,...this.lights.tail,...this.lights.beacons,...(this.lights.bar||[])]);
   const groups=[this.top,this.cabin,...this.seats,...this.pairs,...this.legs.map(l=>l.leg),...this.legs.map(l=>l.hub),...this.wheels.map(w=>w.spin)];
   this.cabin.children.filter(c=>c.isGroup&&c!==this.ladder&&!this.seats.includes(c)).forEach(g=>groups.push(g));
   for(const g of groups)mergeByMaterial(g,keep);
@@ -87,6 +87,13 @@ float n3(vec3 x){vec3 i=floor(x),f=fract(x);f=f*f*(3.0-2.0*f);return mix(mix(mix
   // work lights and beacons along the plate
   this.lights.work=[];for(const z of [-5.2,5.2])for(const s of [-1,1]){const l=this.box([.28,.16,.12],[s*1.0,GEOM.topPlate+.18,z],M.headlamp,top);this.lights.work.push(l);}
   this.lights.beacons=[];for(const z of [-4.8,4.8]){const b=this.mesh(new T.CylinderGeometry(.11,.13,.18,12),M.amber,[0,GEOM.topPlate+.32,z],top);this.lights.beacons.push(b);}
+  // front crossmember with a bank of forward floodlights angled at the ground ahead
+  this.box([2.9,.22,.24],[0,GEOM.topPlate-.08,-5.3],M.frame,top);for(const s of [-1,1])this.rod([s*1.35,GEOM.topPlate-.1,-5.3],[s*1.25,GEOM.topPlate-.1,-4.4],.06,M.frame,top,8);
+  this.lights.head=this.lights.head||[];this.lampMounts=[];
+  for(const x of [-1.2,-.78,.78,1.2]){const g=new T.Group();g.position.set(x,GEOM.topPlate+.12,-5.36);g.rotation.x=-.22;top.add(g);
+   this.box([.34,.26,.2],[0,0,0],M.dark,g);this.box([.36,.03,.24],[0,.14,-.02],M.frame,g);for(let k=-1;k<=1;k++)this.box([.02,.22,.03],[k*.1,0,-.11],M.frame,g);
+   const face=this.box([.3,.2,.02],[0,0,-.105],M.headlamp,g);this.lights.head.push(face);}
+  this.lampMounts.push({parent:top,pos:[-.95,GEOM.topPlate+.1,-5.5],aim:[-3,0,-24],angle:.62,power:1.2},{parent:top,pos:[.95,GEOM.topPlate+.1,-5.5],aim:[3,0,-24],angle:.62,power:1.2});
   // antenna whips
   for(const s of [-1,1])this.rod([s*1.2,GEOM.topPlate+.1,3],[s*1.35,GEOM.topPlate+2.4,3.4],.012,M.dark,top,4);
  }
@@ -189,7 +196,7 @@ float n3(vec3 x){vec3 i=floor(x),f=fract(x);f=f*f*(3.0-2.0*f);return mix(mix(mix
   this.ladRungs=[];for(let k=0;k<22;k++){const r=this.mesh(new T.CylinderGeometry(.024,.024,.6,6),M.chrome,[0,0,0],this.ladder,[0,0,Math.PI/2]);this.ladRungs.push(r);}
   this.ladder.visible=false;
   // headlights in the nose
-  this.lights.head=[];for(const s of [-1,1]){const h=this.mesh(new T.CylinderGeometry(.14,.14,.1,16),M.headlamp,[s*.72,3.1,-5.12],cab,[Math.PI/2+.25,0,0]);this.lights.head.push(h);}
+  this.lights.head=this.lights.head||[];this.lights.nose=[];const noseM=M.headlamp.clone();for(const s of [-1,1]){const h=this.mesh(new T.CylinderGeometry(.14,.14,.1,16),noseM,[s*.72,3.1,-5.12],cab,[Math.PI/2+.25,0,0]);this.lights.nose.push(h);}
   this.lights.tail=[];for(const s of [-1,1]){const h=this.box([.18,.1,.05],[s*.9,3.6,5.2],M.red,cab);this.lights.tail.push(h);}
   // crew
   this.crew=[];
@@ -217,7 +224,7 @@ float n3(vec3 x){vec3 i=floor(x),f=fract(x);f=f*f*(3.0-2.0*f);return mix(mix(mix
     this.mesh(new T.SphereGeometry(.32,18,14),M.frame,[0,-.18,0],leg);
     this.mesh(new T.CylinderGeometry(.22,.22,.78,16),M.frame,[0,-.18,0],leg,[Math.PI/2,0,0]);// knee pin boss
     for(const zz of [-1,1])this.mesh(new T.CylinderGeometry(.1,.1,.06,12),M.chrome,[0,-.18,zz*.42],leg,[Math.PI/2,0,0]);
-    const barrelTop=-.42,barrelBot=2.4-PLATE;// body y 2.4
+    const barrelTop=-.42,barrelBot=3.5-PLATE;// body y 3.5
     this.rod([0,barrelTop,0],[0,barrelBot,0],.26,M.paint,leg,18);
     this.mesh(new T.CylinderGeometry(.31,.31,.2,18),M.frame,[0,barrelBot+.06,0],leg);// gland
     this.mesh(new T.CylinderGeometry(.3,.3,.14,18),M.frame,[0,barrelTop-.05,0],leg);
@@ -236,6 +243,8 @@ float n3(vec3 x){vec3 i=floor(x),f=fract(x);f=f*f*(3.0-2.0*f);return mix(mix(mix
     this.rod([s*-.25,barrelTop-.62,.4],[0,barrelTop-.5,.2],.055,M.frame,leg,6);
     this.tube([[0,barrelBot+.35,.26],[s*-.12,barrelTop-1.6,.4],[s*-.3,barrelTop-.4,.5],[s*-.65,.12,.2]],.038,M.hose,leg,false,24);
     this.tube([[0,barrelBot+.6,-.26],[s*-.14,barrelTop-1.3,-.38],[s*-.34,barrelTop-.3,-.34],[s*-.6,.1,-.16]],.034,M.hose,leg,false,24);
+    // two-stage telescopic leg: an intermediate sleeve runs out of the barrel, the chrome rod out of the sleeve
+    const stage=this.mesh(new T.CylinderGeometry(.21,.21,1,16),M.chrome,[0,0,0],leg);stage.name='Leg sleeve';
     const rod=this.mesh(new T.CylinderGeometry(.16,.16,1,16),M.chrome,[0,0,0],leg);rod.name='Chrome rod';
     const hub=new T.Group();leg.add(hub);
     this.mesh(new T.CylinderGeometry(.44,.44,.5,20),M.engine,[s*.14,0,0],hub,[0,0,Math.PI/2]);// hub motor
@@ -248,7 +257,11 @@ float n3(vec3 x){vec3 i=floor(x),f=fract(x);f=f*f*(3.0-2.0*f);return mix(mix(mix
     const tireMat=M.rubber.clone();tireMat.onBeforeCompile=tireShader(M.rubber.onBeforeCompile);tireMat.customProgramCacheKey=()=>'tire';tireMat.userData.flat={value:0};tireMat.userData.down={value:new T.Vector3(0,-1,0)};
     const tire=this.mesh(tireGeometry(),tireMat,[0,0,0],spin);tire.name='Tyre';
     this.buildRim(spin,s);
-    this.legs.push({pair:i,side:s,leg,rod,hub,barrelBot,acc});this.wheels.push({spin,tire,tireMat,side:s,wheel});
+    // front pair: a driving-lamp pod on each knee that turns with the steering
+    if(i===0){const pod=new T.Group();pod.position.set(s*LEG_X,-.05,-.52);g.add(pod);this.box([.12,.12,.3],[0,0,.18],M.frame,pod);
+     this.mesh(new T.CylinderGeometry(.19,.16,.26,18),M.dark,[0,0,-.02],pod,[Math.PI/2,0,0]);const f=this.mesh(new T.CylinderGeometry(.16,.16,.02,18),M.headlamp,[0,0,-.16],pod,[Math.PI/2,0,0]);this.lights.head.push(f);
+     this.lampMounts.push({parent:g,pos:[s*LEG_X,-.05,-.7],aim:[s*(LEG_X+1.5),-8,-30],angle:.42,power:1,steer:true});}
+    this.legs.push({pair:i,side:s,leg,rod,stage,hub,barrelBot,acc});this.wheels.push({spin,tire,tireMat,side:s,wheel});
    }
    this.pairs.push(g);
   }
@@ -306,8 +319,9 @@ float n3(vec3 x){vec3 i=floor(x),f=fract(x);f=f*f*(3.0-2.0*f);return mix(mix(mix
   }
   if(v==='scout'||v==='troop'){
    // sensor mast with an electro-optical ball
-   const mast=new T.Group();mast.position.set(0,Y+.1,-1.2);top.add(mast);this.rod([0,0,0],[0,1.6,0],.07,M.frame,mast,8);
-   const ball=this.mesh(new T.SphereGeometry(.24,20,14),M.dark,[0,1.8,0],mast);this.mesh(new T.CylinderGeometry(.09,.09,.05,14),M.screen,[0,1.8,-.23],mast,[Math.PI/2,0,0]);this.sensor=ball;this.sensorMast=mast;
+   // compact electro-optical turret on the front crossmember, between the lamp banks
+   const mast=new T.Group();mast.position.set(0,Y+.02,-5.3);top.add(mast);this.mesh(new T.CylinderGeometry(.16,.2,.16,14),M.frame,[0,.08,0],mast);
+   const ball=this.mesh(new T.SphereGeometry(.22,20,14),M.dark,[0,.34,0],mast);this.mesh(new T.CylinderGeometry(.08,.08,.05,14),M.screen,[0,.34,-.21],mast,[Math.PI/2,0,0]);this.sensor=ball;this.sensorMast=mast;
   }
  }
  // ------------------------------------------------------------ per-frame update from physics
@@ -322,7 +336,7 @@ float n3(vec3 x){vec3 i=floor(x),f=fract(x);f=f*f*(3.0-2.0*f);return mix(mix(mix
    const w=sp.wheels[i],L=this.legs[i],W=this.wheels[i];
    const hubY=GEOM.hubTop-w.e-PLATE;// relative to the plate group
    L.hub.position.y=hubY;
-   const rodTop=L.barrelBot+.1,len=Math.max(.05,rodTop-hubY-.2);L.rod.scale.y=len;L.rod.position.y=hubY+.2+len/2;
+   const rodTop=L.barrelBot+.1,len=Math.max(.05,rodTop-hubY-.2);L.rod.scale.y=len;L.rod.position.y=hubY+.2+len/2;const sl=Math.max(.05,len*.5);L.stage.scale.y=sl;L.stage.position.y=rodTop-sl/2;
    W.spin.rotation.x=-w.spin;
    // tyre flat spot: deflection toward the contact normal (in the spinning tyre's local frame)
    W.tireMat.userData.flat.value=w.contact?Math.min(.3,w.deflection||0):0;
@@ -336,7 +350,7 @@ float n3(vec3 x){vec3 i=floor(x),f=fract(x);f=f*f*(3.0-2.0*f);return mix(mix(mix
    this.ladRungs.forEach((r,k)=>{const y=.3+k*.3;r.visible=y<L-.3;r.position.set(0,-y,y*tilt);});}
   // lights
   const t=performance.now()/1000;
-  const night=opts.night||0;for(const h of this.lights.head)h.material.emissiveIntensity=opts.headlights?4:0;for(const h of this.lights.tail)h.material.emissiveIntensity=opts.headlights?2.5:(opts.braking?3:.2);
+  const night=opts.night||0;for(const h of this.lights.head)h.material.emissiveIntensity=opts.headlights?4:0;for(const h of this.lights.nose)h.material.emissiveIntensity=opts.headlights?.8:0;for(const h of this.lights.tail)h.material.emissiveIntensity=opts.headlights?2.5:(opts.braking?3:.2);
   for(const w of this.lights.work)w.material.emissiveIntensity=opts.worklights?3:0;
   this.lights.beacons.forEach((b,k)=>{b.material.emissiveIntensity=opts.beacons?(Math.sin(t*7+k*Math.PI)>.3?5:.2):0;});
   if(this.lights.bar)this.lights.bar.forEach((b,k)=>{b.material.emissiveIntensity=opts.beacons?((Math.floor(t*6)+k)%3===0?6:.3):0;});

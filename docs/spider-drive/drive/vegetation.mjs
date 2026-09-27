@@ -136,7 +136,7 @@ function pack(out){return out.map(a=>a.length?Float32Array.from(a):null);}
 export function collidersFrom(lists,key){
  const trunks=[],caps=[],canopies=[];
  const tree=(sp,L)=>{if(!L)return;const def=SPECIES[sp];for(let k=0;k<L.length;k+=STRIDE){const x=L[k],y=L[k+1],z=L[k+2],h=L[k+4],r=mix(def.trunk[0],def.trunk[1],L[k+5])*(h/def.h[1]);
-  trunks.push({type:'trunk',x,y,z,r:Math.max(.05,r),h:h*.7,breakable:sp===SP.sapling||r<.15,strength:3.5e4*Math.pow(Math.max(.05,r)/.1,3),sp,key,idx:k/STRIDE});
+  trunks.push({type:'trunk',x,y,z,r:Math.max(.05,r),h:h*.7,breakable:sp===SP.sapling||r<.45,strength:3.5e4*Math.pow(Math.max(.05,r)/.1,3),fbreak:15e3*Math.pow(Math.max(.05,r)/.1,2.5),sp,key,idx:k/STRIDE});
   if(sp!==SP.snag){const cr=sp===SP.conifer?h*.2:h*.3;canopies.push({type:'canopy',x,z,cy:y+h*(sp===SP.conifer?.55:.66),r:cr,sp,key,idx:k/STRIDE});}}};
  for(const sp of [SP.conifer,SP.broadleaf,SP.birch,SP.snag,SP.sapling])tree(sp,lists[sp]);
  const B=lists[SP.boulder];if(B)for(let k=0;k<B.length;k+=STRIDE){const s=B[k+4];caps.push({kind:'boulder',x:B[k],y:B[k+1],z:B[k+2],rx:s*.9,rz:s*.75,h:s*.85,rot:B[k+3]});}

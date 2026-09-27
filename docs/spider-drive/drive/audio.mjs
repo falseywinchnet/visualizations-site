@@ -12,28 +12,39 @@ export class Sound{
   const noiseBuf=(sec,kind='white')=>{const n=C.sampleRate*sec,b=C.createBuffer(1,n,C.sampleRate),d=b.getChannelData(0);let last=0;for(let i=0;i<n;i++){const w=Math.random()*2-1;if(kind==='brown'){last=(last+.02*w)/1.02;d[i]=last*3.5;}else d[i]=w;}return b;};
   this.white=noiseBuf(2);this.brown=noiseBuf(3,'brown');
   const loop=(buf,filterType,freq,q=1,dest=this.ext)=>{const s=C.createBufferSource();s.buffer=buf;s.loop=true;const f=C.createBiquadFilter();f.type=filterType;f.frequency.value=freq;f.Q.value=q;const g=C.createGain();g.gain.value=0;s.connect(f).connect(g).connect(dest);s.start();return {s,f,g};};
-  // V8: one engine cycle (two crank turns) of exhaust pulses at the cross-plane firing order L R R L R L L R, with the
-  // banks at different strengths and a little per-cylinder variation, turned into a periodic wave played at rpm/120.
-  // The uneven bank pattern is what gives the low burble; a sub oscillator at firing frequency adds weight.
+  // Turbo diesel V8: a heavy, smooth firing thump (one engine cycle of rounded pulses at the cross-plane bank
+  // pattern, played at rpm/120 and kept under a low cutoff), a firing-rate sub, injector knock (band-passed noise
+  // gated by an impulse train at the firing rate), exhaust roar under load, and a turbo whine that spools with boost.
   const e=this.eng={};
-  {const N=4096,wave=new Float32Array(N),banks=[1,0,0,1,0,1,1,0],amp=[1.0,.93,1.06,.97,1.02,.9,1.08,.95];
-   for(let c=0;c<8;c++){const t0=c/8,A=amp[c]*(banks[c]?1:.72);for(let k=0;k<N;k++){let t=k/N-t0;if(t<0)t+=1;const x=t*8;// in firing periods
-     if(x<1.6)wave[k]+=A*(Math.exp(-x*5.5)*Math.sin(Math.PI*2*x*1.6)-.25*Math.exp(-x*2.2)*Math.sin(Math.PI*x*.8));}}
-   const H=160,re=new Float32Array(H+1),im=new Float32Array(H+1);
-   for(let h=1;h<=H;h++){let a=0,b=0;for(let k=0;k<N;k+=2){const ph=2*Math.PI*h*k/N;a+=wave[k]*Math.cos(ph);b+=wave[k]*Math.sin(ph);}re[h]=a/N*2;im[h]=b/N*2;}
-   e.wave=C.createPeriodicWave(re,im,{disableNormalization:false});}
+  {const N=4096,wave=new Float32Array(N),banks=[1,0,0,1,0,1,1,0],amp=[1,.95,1.04,.98,1.02,.94,1.05,.97];
+   for(let c=0;c<8;c++){const t0=c/8,A=amp[c]*(banks[c]?1:.84);for(let k=0;k<N;k++){let t=k/N-t0;if(t<0)t+=1;const x=t*8;
+     if(x<.5){const u=x/.5;wave[k]+=A*(Math.pow(Math.sin(Math.PI*Math.pow(u,.6)),3)-.18);}else wave[k]-=A*.18;}}
+   const dft=(w,H)=>{const re=new Float32Array(H+1),im=new Float32Array(H+1);for(let h=1;h<=H;h++){let a=0,b=0;for(let k=0;k<N;k+=2){const ph=2*Math.PI*h*k/N;a+=w[k]*Math.cos(ph);b+=w[k]*Math.sin(ph);}re[h]=a/N*2;im[h]=b/N*2;}return [re,im];};
+   const [re,im]=dft(wave,96);e.wave=C.createPeriodicWave(re,im);
+   // impulse train (one sharp spike per firing) used to gate the knock noise
+   const kre=new Float32Array(25),kim=new Float32Array(25);for(let h=1;h<=24;h++)kre[h]=1-h/26;e.pulse=C.createPeriodicWave(kre,kim);}
   e.osc=C.createOscillator();e.osc.setPeriodicWave(e.wave);
-  e.sub=C.createOscillator();e.sub.type='sine';e.subG=C.createGain();e.subG.gain.value=.35;
-  e.drive=C.createGain();e.drive.gain.value=1.2;
-  e.sh=C.createWaveShaper();const curve=new Float32Array(1024);for(let i=0;i<1024;i++){const x=i/512-1;curve[i]=Math.tanh(x*1.6)/Math.tanh(1.6);}e.sh.curve=curve;
-  e.body=C.createBiquadFilter();e.body.type='peaking';e.body.frequency.value=95;e.body.Q.value=.9;e.body.gain.value=9;
-  e.lp=C.createBiquadFilter();e.lp.type='lowpass';e.lp.frequency.value=420;e.lp.Q.value=.9;
-  e.lp2=C.createBiquadFilter();e.lp2.type='lowpass';e.lp2.frequency.value=900;e.lp2.Q.value=.5;
+  e.sub=C.createOscillator();e.sub.type='sine';e.subG=C.createGain();e.subG.gain.value=.15;
+  e.drive=C.createGain();e.drive.gain.value=1;
+  e.sh=C.createWaveShaper();const curve=new Float32Array(1024);for(let i=0;i<1024;i++){const x=i/512-1;curve[i]=Math.tanh(x*1.3)/Math.tanh(1.3);}e.sh.curve=curve;
+  e.shelf=C.createBiquadFilter();e.shelf.type='peaking';e.shelf.frequency.value=125;e.shelf.Q.value=.8;e.shelf.gain.value=7;
+  e.lp=C.createBiquadFilter();e.lp.type='lowpass';e.lp.frequency.value=220;e.lp.Q.value=.7;
+  e.lp2=C.createBiquadFilter();e.lp2.type='lowpass';e.lp2.frequency.value=420;e.lp2.Q.value=.5;
   e.g=C.createGain();e.g.gain.value=0;
-  e.osc.connect(e.drive).connect(e.sh).connect(e.body).connect(e.lp).connect(e.lp2).connect(e.g).connect(this.ext);
-  e.sub.connect(e.subG).connect(e.lp);
-  e.rumble=loop(this.brown,'lowpass',140,1);
-  e.osc.start();e.sub.start();
+  e.osc.connect(e.drive).connect(e.sh).connect(e.shelf).connect(e.lp).connect(e.lp2).connect(e.g).connect(this.ext);
+  e.sub.connect(e.subG).connect(e.shelf);
+  // injector knock: noise x impulse train
+  e.knockSrc=C.createBufferSource();e.knockSrc.buffer=this.white;e.knockSrc.loop=true;e.knockBP=C.createBiquadFilter();e.knockBP.type='bandpass';e.knockBP.frequency.value=1500;e.knockBP.Q.value=1.1;
+  e.knockVCA=C.createGain();e.knockVCA.gain.value=0;e.knockOsc=C.createOscillator();e.knockOsc.setPeriodicWave(e.pulse);e.knockDepth=C.createGain();e.knockDepth.gain.value=.6;e.knockOsc.connect(e.knockDepth).connect(e.knockVCA.gain);
+  e.knockLP=C.createBiquadFilter();e.knockLP.type='lowpass';e.knockLP.frequency.value=2600;e.knockG=C.createGain();e.knockG.gain.value=0;
+  e.knockSrc.connect(e.knockBP).connect(e.knockVCA).connect(e.knockLP).connect(e.knockG).connect(this.ext);
+  // turbo: whine plus a breathy intake hiss that both follow boost
+  e.turbo=C.createOscillator();e.turbo.type='sine';e.turboG=C.createGain();e.turboG.gain.value=0;e.turbo.connect(e.turboG).connect(this.ext);
+  e.intake=loop(this.white,'bandpass',2200,2.5);
+  e.rumble=loop(this.brown,'lowpass',110,1);e.roar=loop(this.brown,'lowpass',260,.8);
+  // combustion is never perfectly even: a slow random wobble on the firing pitch
+  e.wob=C.createBufferSource();e.wob.buffer=this.brown;e.wob.loop=true;const wl=C.createBiquadFilter();wl.type='lowpass';wl.frequency.value=5;const wg=C.createGain();wg.gain.value=260;e.wob.connect(wl).connect(wg);wg.connect(e.osc.detune);wg.connect(e.sub.detune);wg.connect(e.knockOsc.detune);e.wob.start();
+  e.osc.start();e.sub.start();e.knockSrc.start();e.knockOsc.start();e.turbo.start();e.boost=0;
   // hydraulic pump whine
   this.pump={o:C.createOscillator(),g:C.createGain()};this.pump.o.type='triangle';this.pump.g.gain.value=0;this.pump.o.connect(this.pump.g).connect(this.ext);this.pump.o.start();
   this.pump.o2=C.createOscillator();this.pump.o2.type='sine';this.pump.o2.connect(this.pump.g);this.pump.o2.start();
@@ -60,11 +71,15 @@ export class Sound{
  chirp(){const f=2500+Math.random()*2500;this.tone(f,f*1.4,.08,.05,'sine');setTimeout(()=>this.tone(f*1.2,f*.9,.1,.04,'sine'),110);}
  update(dt,sp,G,cam){
   if(!this.ctx||this.paused)return;this.t+=dt;const C=this.ctx,e=this.eng;
-  const rpm=sp.engine.rpm,load=sp.engine.load,fire=rpm/60*4;
-  const now=C.currentTime,cyc=Math.max(1,rpm/120);e.osc.frequency.setTargetAtTime(cyc,now,.03);e.sub.frequency.setTargetAtTime(Math.max(20,fire),now,.03);
-  e.drive.gain.setTargetAtTime(1+load*2.2,now,.05);e.lp.frequency.setTargetAtTime(260+load*520+rpm*.09,now,.05);e.lp2.frequency.setTargetAtTime(700+load*1400,now,.08);
-  this.set(e.g,rpm<50?0:.24+load*.18);this.set(e.subG,rpm<50?0:.3+load*.25);this.set(e.rumble.g,rpm<50?0:.22+load*.3);
-  const flow=sp.engine.pumpFlow||0;this.pump.o.frequency.setTargetAtTime(220+rpm*.14,C.currentTime,.05);this.pump.o2.frequency.setTargetAtTime(440+rpm*.28,C.currentTime,.05);this.set(this.pump.g,clamp(flow/.006,0,1)*.07);
+  const rpm=sp.engine.rpm,load=sp.engine.load,fire=rpm/60*4,on=rpm>50;
+  const now=C.currentTime;e.osc.frequency.setTargetAtTime(Math.max(1,rpm/120),now,.04);e.sub.frequency.setTargetAtTime(Math.max(20,fire),now,.04);e.knockOsc.frequency.setTargetAtTime(Math.max(5,fire),now,.04);
+  e.boost+=(load*clamp((rpm-900)/900,0,1)-e.boost)*Math.min(1,dt*1.5);// turbo spools behind the throttle
+  e.drive.gain.setTargetAtTime(1+load*1.4,now,.08);e.lp.frequency.setTargetAtTime(240+load*260+rpm*.08,now,.08);e.lp2.frequency.setTargetAtTime(520+load*600,now,.1);
+  this.set(e.g,on?.28+load*.08:0);this.set(e.subG,on?.14+load*.08:0);
+  this.set(e.knockG,on?.55*(1-load*.45)*(1.1-rpm/2600):0);
+  e.turbo.frequency.setTargetAtTime(1400+e.boost*3600,now,.15);this.set(e.turboG,on?e.boost*.012:0,.2);e.intake.f.frequency.setTargetAtTime(1600+e.boost*2600,now,.2);this.set(e.intake.g,on?e.boost*.05:0,.2);
+  this.set(e.rumble.g,on?.28+load*.2:0);this.set(e.roar.g,on?load*.35:0,.15);
+  const flow=sp.engine.pumpFlow||0;this.pump.o.frequency.setTargetAtTime(220+rpm*.2,C.currentTime,.05);this.pump.o2.frequency.setTargetAtTime(440+rpm*.4,C.currentTime,.05);this.set(this.pump.g,clamp(flow/.006,0,1)*.07);
   // valve clicks on leg reversals, accumulator thumps on hard compressions
   sp.wheels.forEach((w,i)=>{if(w.valve&&w.valve!==this.prevValve[i]&&Math.random()<.5)this.burst(.03,3200,4,.08);this.prevValve[i]=w.valve||0;if(w.ev<-.9&&this.prevEv[i]>=-.9)this.tone(70,40,.25,.35);this.prevEv[i]=w.ev;});
   this.set(this.hissL.g,sp.hiss?.05:0,.2);
