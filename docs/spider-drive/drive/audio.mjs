@@ -53,7 +53,7 @@ export class Sound{
   this.skid=loop(this.white,'bandpass',1400,3);this.rustle=loop(this.white,'bandpass',4800,.8);this.waterL=loop(this.brown,'lowpass',900,.7);this.splashL=loop(this.white,'bandpass',1800,.6);
   this.rain=loop(this.white,'highpass',5000,.5,master);this.wind=loop(this.brown,'lowpass',500,.5,master);this.fireL=loop(this.brown,'lowpass',260,.6,this.ext);this.river=loop(this.brown,'bandpass',600,.5,this.ext);
   this.crickets={o:C.createOscillator(),am:C.createGain(),g:C.createGain(),lfo:C.createOscillator()};const cr=this.crickets;cr.o.frequency.value=4600;cr.lfo.frequency.value=28;const lg=C.createGain();lg.gain.value=.5;cr.lfo.connect(lg).connect(cr.am.gain);cr.am.gain.value=.5;cr.g.gain.value=0;cr.o.connect(cr.am).connect(cr.g).connect(this.ext);cr.o.start();cr.lfo.start();
-  this.t=0;this.nextBird=2;this.prevValve=[0,0,0,0,0,0];this.prevEv=[0,0,0,0,0,0];
+  this.t=0;this.nextBird=2;this.prevValve=[false,false,false,false,false,false];this.prevEv=[0,0,0,0,0,0];
   this.music.init();
  }
  setVolume(v){this.vol=v;if(this.master)this.master.gain.setTargetAtTime(this.paused?0:v,this.ctx.currentTime,.05);}
@@ -61,6 +61,9 @@ export class Sound{
  set(g,v,tc=.08){g.gain.setTargetAtTime(v,this.ctx.currentTime,tc);}
  burst(dur,freq,q,gain,type='bandpass',dest=this.ext,buf=this.white){if(!this.ctx)return;const C=this.ctx,s=C.createBufferSource();s.buffer=buf;const f=C.createBiquadFilter();f.type=type;f.frequency.value=freq;f.Q.value=q;const g=C.createGain();const t=C.currentTime;g.gain.setValueAtTime(gain,t);g.gain.exponentialRampToValueAtTime(.001,t+dur);s.connect(f).connect(g).connect(dest);s.start(t,Math.random());s.stop(t+dur+.05);}
  tone(f0,f1,dur,gain,type='sine',dest=this.ext){if(!this.ctx)return;const C=this.ctx,o=C.createOscillator();o.type=type;const g=C.createGain();const t=C.currentTime;o.frequency.setValueAtTime(f0,t);o.frequency.exponentialRampToValueAtTime(Math.max(1,f1),t+dur);g.gain.setValueAtTime(gain,t);g.gain.exponentialRampToValueAtTime(.001,t+dur);o.connect(g).connect(dest);o.start(t);o.stop(t+dur+.05);}
+ starter(){if(!this.ctx)return;this.tone(95,150,1.1,.14,'sawtooth');this.tone(190,300,1.1,.05,'square');this.burst(1.1,700,1.5,.08,'bandpass');}
+ catchUp(){this.thump(.7);this.burst(.5,220,.7,.5,'lowpass',this.ext,this.brown);}
+ engineStop(){this.burst(.8,160,.7,.35,'lowpass',this.ext,this.brown);this.hiss(.5);}
  crack(k=1){this.burst(.12,2200,.7,.9*k,'bandpass');this.burst(.5,500,.8,.5*k,'lowpass',this.ext,this.brown);}
  thump(k=1){this.tone(90,40,.35,.9*k);this.burst(.25,300,.7,.5*k,'lowpass',this.ext,this.brown);}
  hiss(k=1){this.burst(1.6,4200,.5,.25*k,'highpass');}
@@ -71,21 +74,22 @@ export class Sound{
  chirp(){const f=2500+Math.random()*2500;this.tone(f,f*1.4,.08,.05,'sine');setTimeout(()=>this.tone(f*1.2,f*.9,.1,.04,'sine'),110);}
  update(dt,sp,G,cam){
   if(!this.ctx||this.paused)return;this.t+=dt;const C=this.ctx,e=this.eng;
-  const rpm=sp.engine.rpm,load=sp.engine.load,fire=rpm/60*4,on=rpm>50;
+  const rpm=sp.engine.rpm,load=sp.engine.load,fire=rpm/60*4,on=rpm>50,run=clamp(rpm/450,0,1);/* fades out as the engine runs down */
   const now=C.currentTime;e.osc.frequency.setTargetAtTime(Math.max(1,rpm/120),now,.04);e.sub.frequency.setTargetAtTime(Math.max(20,fire),now,.04);e.knockOsc.frequency.setTargetAtTime(Math.max(5,fire),now,.04);
   e.boost+=(load*clamp((rpm-800)/800,0,1)-e.boost)*Math.min(1,dt*1.5);// turbo spools behind the throttle
   e.drive.gain.setTargetAtTime(1+load*1.4,now,.08);e.lp.frequency.setTargetAtTime(150+load*110+rpm*.05,now,.08);e.lp2.frequency.setTargetAtTime(340+load*220,now,.1);
-  this.set(e.g,on?.26+load*.04:0);this.set(e.subG,on?.14+load*.08:0);
-  this.set(e.knockG,on?.45*(1-load*.45)*(1.1-rpm/2400):0);
+  this.set(e.g,on?(.26+load*.04)*run:0);this.set(e.subG,on?(.14+load*.08)*run:0);
+  this.set(e.knockG,on?.45*(1-load*.45)*(1.1-rpm/2400)*run:0);
   e.turbo.frequency.setTargetAtTime(700+e.boost*1300,now,.15);this.set(e.turboG,on?e.boost*.004:0,.2);e.intake.f.frequency.setTargetAtTime(600+e.boost*700,now,.2);this.set(e.intake.g,on?e.boost*.04:0,.2);
-  this.set(e.rumble.g,on?.28+load*.2:0);this.set(e.roar.g,on?load*.35:0,.15);
+  this.set(e.rumble.g,on?(.28+load*.2)*run:0);this.set(e.roar.g,on?load*.35:0,.15);
   const flow=sp.engine.pumpFlow||0;this.pump.o.frequency.setTargetAtTime(70+rpm*.05,C.currentTime,.05);this.pump.o2.frequency.setTargetAtTime(140+rpm*.1,C.currentTime,.05);this.set(this.pump.g,clamp(flow/.006,0,1)*.07);
   // valve clicks on leg reversals, accumulator thumps on hard compressions
-  sp.wheels.forEach((w,i)=>{if(w.valve&&w.valve!==this.prevValve[i]&&Math.random()<.5)this.burst(.03,3200,4,.08);this.prevValve[i]=w.valve||0;if(w.ev<-.9&&this.prevEv[i]>=-.9)this.tone(70,40,.25,.35);this.prevEv[i]=w.ev;});
+  // (the levelling servo reverses its valves every few milliseconds; clicking on those read as a Geiger counter)
+  sp.wheels.forEach((w,i)=>{const lf=!!w.lifted;if(lf!==this.prevValve[i])this.burst(.05,900,2,.06,'bandpass',this.ext,this.brown);this.prevValve[i]=lf;if(w.ev<-.9&&this.prevEv[i]>=-.9)this.tone(70,40,.25,.35);this.prevEv[i]=w.ev;});
   this.set(this.hissL.g,sp.hiss?.05:0,.2);
   const speed=sp.speed(),s=sp.wheels[2].surface||{};const contact=sp.wheels.some(w=>w.contact);
   this.set(this.tyre.g,contact?clamp(speed/12,0,1)*.35:0);this.tyre.f.frequency.setTargetAtTime(120+speed*18,C.currentTime,.1);
-  this.set(this.gravel.g,contact&&(s.name==='Gravel'||s.name==='Rock'||s.name==='Riverbed')?clamp(speed/10,0,1)*(.1+.1*Math.random()):0,.03);
+  this.set(this.gravel.g,contact&&(s.name==='Gravel'||s.name==='Rock'||s.name==='Riverbed')?clamp(speed/10,0,1)*(.12+.05*Math.sin(this.t*7.3)*Math.sin(this.t*2.9)):0,.15);
   this.set(this.hum.g,contact&&s.name==='Asphalt'?clamp(speed/15,0,1)*.08:0);this.hum.f.frequency.setTargetAtTime(200+speed*25,C.currentTime,.1);
   const slip=Math.max(...sp.wheels.map(w=>w.contact?Math.abs(w.slip)+Math.abs(w.slipAngle)*.5:0));this.set(this.skid.g,slip>.2&&speed>1?clamp((slip-.2)*.6,0,.25):0);
   this.set(this.rustle.g,clamp(sp.brush*.25,0,.35)+(G.brushCrop||0)*.05,.05);

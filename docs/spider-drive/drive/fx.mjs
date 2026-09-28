@@ -100,7 +100,7 @@ export class FX{
    // brushing through canopies sheds leaves over the cabin
    if(sp.brush>.12&&speed>.8&&Math.random()<Math.min(1,sp.brush)){const R=G.model.cabin;const p=R.localToWorld(new T.Vector3((Math.random()-.5)*3,5.4,(Math.random()-.5)*9));this.leaves(p.x,p.y,p.z,3);}
    // exhaust
-   if(G.model&&!sp.engine.stalled){const R=G.model.root;for(const e of G.model.exhausts){const p=R.localToWorld(e.clone());this.exhaust(p.x,p.y,p.z,sp.engine.load);}}
+   if(G.model&&!sp.engine.stalled&&sp.engine.rpm>250){const R=G.model.root;for(const e of G.model.exhausts){const p=R.localToWorld(e.clone());this.exhaust(p.x,p.y,p.z,sp.engine.load);}}
   }
   this.soft.update(dt,w);this.add.update(dt,w);
   const fog=G.scene?.fog;for(const p of [this.soft,this.add]){p.mesh.material.uniforms.uFogColor.value.copy(fog?fog.color:new T.Color());p.mesh.material.uniforms.uFogDensity.value=fog?fog.density:0;}
