@@ -35,6 +35,7 @@ float n3(vec3 x){vec3 i=floor(x),f=fract(x);f=f*f*(3.0-2.0*f);return mix(mix(mix
    brass:new T.MeshStandardMaterial({color:0xb08d4f,roughness:.35,metalness:.9}),
    rubber:dirty(new T.MeshStandardMaterial({color:0x2a2a27,roughness:.9,metalness:0})),
    redPaint:new T.MeshStandardMaterial({color:0xa3261b,roughness:.45,metalness:.2}),
+   aramid:dirty(new T.MeshStandardMaterial({color:0xc9a227,roughness:.55,metalness:.1})),
    webbing:new T.MeshStandardMaterial({color:0x3c3f2e,roughness:.9}),
    lamp:new T.MeshStandardMaterial({color:0xfff4dc,emissive:0xfff0d0,emissiveIntensity:.6,roughness:.4}),
    hose:new T.MeshStandardMaterial({color:0x151617,roughness:.7}),
@@ -258,6 +259,8 @@ float n3(vec3 x){vec3 i=floor(x),f=fract(x);f=f*f*(3.0-2.0*f);return mix(mix(mix
     const tireMat=M.rubber.clone();tireMat.onBeforeCompile=tireShader(M.rubber.onBeforeCompile);tireMat.customProgramCacheKey=()=>'tire';tireMat.userData.flat={value:0};tireMat.userData.down={value:new T.Vector3(0,-1,0)};
     const tire=this.mesh(tireGeometry(),tireMat,[0,0,0],spin);tire.name='Tyre';
     this.buildRim(spin,s);
+    // Kevlar-belted tyre: a woven aramid band on both sidewalls
+    for(const e of [-1,1]){const bandR=(RIM_R+GEOM.R)/2+.05;this.mesh(new T.TorusGeometry(bandR,.035,6,72),M.aramid,[e*GEOM.tireWidth*.53,0,0],spin,[0,Math.PI/2,0]);}
     // front pair: a driving-lamp pod on each knee that turns with the steering
     if(i===0){const pod=new T.Group();pod.position.set(0,-.05,-.52);leg.add(pod);this.box([.12,.12,.3],[0,0,.18],M.frame,pod);
      this.mesh(new T.CylinderGeometry(.19,.16,.26,18),M.dark,[0,0,-.02],pod,[Math.PI/2,0,0]);const f=this.mesh(new T.CylinderGeometry(.16,.16,.02,18),M.headlamp,[0,0,-.16],pod,[Math.PI/2,0,0]);this.lights.head.push(f);

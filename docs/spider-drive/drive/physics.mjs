@@ -5,7 +5,7 @@
 // controller does levelling, load allocation, skyhook damping and step climbing.
 // This is a speculative concept model: plausible physics, not a validated vehicle.
 
-export const GEOM=Object.freeze({R:1.7,tireWidth:.62,halfTrack:4.8,roadHalfTrack:2.75,stations:[-4.7,0,4.7],stroke:3.6,hubTop:3.24,plateY:6.11,topPlate:6.4,belly:2.6,cabinY:4.2,cabinR:1.6,cabinHalf:5.4,wheelbase:9.4,maxLock:35*Math.PI/180,carriageMax:2.0});
+export const GEOM=Object.freeze({R:1.7,tireWidth:.62,halfTrack:4.8,roadHalfTrack:2.75,stations:[-4.7,0,4.7],stroke:3.6,hubTop:3.24,plateY:6.11,topPlate:6.4,belly:2.6,cabinY:4.2,cabinR:1.6,cabinHalf:5.4,wheelbase:9.4,maxLock:40*Math.PI/180,carriageMax:2.0});
 export const DT=1/240;
 const G=9.81,RHO=1000,PISTON=.0095,PN=1.55e6,GAMMA=1.3;
 const clamp=(v,a,b)=>v<a?a:v>b?b:v,mix=(a,b,t)=>a+(b-a)*t;
@@ -119,7 +119,7 @@ export class Spider{
    let fh=[fw[0],0,fw[2]];const fl=Math.hypot(fh[0],fh[2])||1;fh=[fh[0]/fl,0,fh[2]/fl];
    // ---- contact: circle vs height profile along the wheel's line, split into a ground patch and an edge patch
    // (a tyre pressed against a step face climbs it by the friction at the edge, which points up the face)
-   const pg={pen:-1,p:null,ax:0,ay:0,az:0},pe={pen:-1,p:null,ax:0,ay:0,az:0};const sink=wh.sink;let gSup=-1e9;
+   const pg={pen:-1,p:null,ax:0,ay:0,az:0},pe={pen:-1,p:null,ax:0,ay:0,az:0,above:0};const sink=wh.sink;let gSup=-1e9;
    for(let k=-6;k<=6;k++){const s=k/6*Rw*.98,gx=hub[0]+fh[0]*s,gz=hub[2]+fh[2]*s,gy=env.ground(gx,gz,hub[1])-sink;
     gSup=Math.max(gSup,gy+Math.sqrt(Math.max(0,Rw*Rw-s*s))-Rw);// where a rigid tyre of this radius rests on the profile
     let p,nx,ny,nz,py;
@@ -127,12 +127,12 @@ export class Spider{
      if(Math.abs(s)<.12){p=Rw+(gy-hub[1]);nx=0;ny=1;nz=0;py=gy;}else{p=Rw-Math.abs(s);nx=-fh[0]*Math.sign(s);ny=0;nz=-fh[2]*Math.sign(s);py=hub[1];}}
     else{const dx=hub[0]-gx,dy=hub[1]-gy,dz=hub[2]-gz,dd=Math.hypot(dx,dy,dz)||1e-6;p=Rw-dd;nx=dx/dd;ny=dy/dd;nz=dz/dd;py=gy;}
     const P=(ny<.35&&Math.abs(s)>.3)?pe:pg;// only a genuinely steep face counts as an edge patch
-    if(p>P.pen){P.pen=p;P.p=[gx,py,gz];}
+    if(p>P.pen){P.pen=p;P.p=[gx,py,gz];}if(P===pe&&p>0)pe.above=Math.max(pe.above,gy-hub[1]);
     if(p>0){P.ax+=nx*p;P.ay+=ny*p;P.az+=nz*p;}}
    wh.gSup=gSup;
    // two patches only when they are distinct contacts; otherwise one blended contact as before
    if(pg.pen>0&&pe.pen>0&&Math.hypot(pg.p[0]-pe.p[0],pg.p[1]-pe.p[1],pg.p[2]-pe.p[2])<.6){if(pe.pen>pg.pen){pg.pen=pe.pen;pg.p=pe.p;}pg.ax+=pe.ax;pg.ay+=pe.ay;pg.az+=pe.az;pe.pen=-1;}
-   const patches=[];for(const P of [pg,pe])if(P.pen>0){const l=Math.hypot(P.ax,P.ay,P.az)||1;patches.push({pen:P.pen,n:[P.ax/l,P.ay/l,P.az/l],pt:P.p});}
+   const patches=[];for(const P of [pg,pe])if(P.pen>0){const l=Math.hypot(P.ax,P.ay,P.az)||1;patches.push({pen:P.pen,n:[P.ax/l,P.ay/l,P.az/l],pt:P.p,grip:P===pe?clamp((1.2-(pe.above||0))/.3,0,1):1});}/* no clawing up a face that towers over the hub */
    const pen=patches.length?Math.max(...patches.map(q=>q.pen)):-1;
    let Fn=0,cn=[0,1,0],cpt=hub;
    wh.contact=pen>0;
@@ -155,8 +155,8 @@ export class Spider{
     const Fnom=this.totalMass*G/6;
     // 3.4 m lugged agricultural tyres bite harder than the surface's reference tyre, more so aired down on soft ground
     const lug=1.2+.35*pfac*surf.soft;let mu=surf.mu*lug*(1+.22*pfac*surf.soft)*(1-.07*(Fn/Fnom-1));const muS=surf.slide*lug*(1+.22*pfac*surf.soft);
-    if(wh.water>.3)mu*=.9;
-    const Ck=9,Ca=7;const den=Math.max(Math.abs(vx),1.5);
+    // Kevlar-belted lugged tyres: stiff carcass for high speed, sharper cornering response, no grip loss wading
+    const Ck=10,Ca=9.5;const den=Math.max(Math.abs(vx),1.5);
     let Fx,Fy;
     if(this.hold&&!wh.disabled&&!wh.lifted){
      // low-speed sticky anchor holds on slopes without creep
@@ -188,7 +188,7 @@ export class Spider{
     }
     wh.spin+=wh.omega*DT;
     // each patch carries its share of the tyre force along its own surface
-    for(const q of patches){const sh=Fn>0?q.Fn/Fn:1/patches.length;tf=add(tf,add(add(scl(q.n,q.Fn),scl(q.t,Fx*sh)),scl(q.l,Fy*sh)));}
+    for(const q of patches){const sh=Fn>0?q.Fn/Fn:1/patches.length;tf=add(tf,add(add(scl(q.n,q.Fn),scl(q.t,Fx*sh*q.grip)),scl(q.l,Fy*sh*q.grip)));}
     wh.fx=Fx;wh.fy=Fy;
    }else{wh.deflection=0;wh.anchor=null;const I=300;const wT=wh.targetOmega||0;wh.omega+=clamp((wT-wh.omega)*8,-20,20)*DT;wh.spin+=wh.omega*DT;wh.fx=wh.fy=0;}
    wh.load=Fn;wh.cp=cpt;wh.cn=cn;
@@ -317,10 +317,10 @@ export class Spider{
    // ballasted tyres: partial buoyancy
    const areaFrac=sub_<.5?(sub_*2)**1.5*.5:1-((1-sub_)*2)**1.5*.5;
    const vol=Math.PI*GEOM.R*GEOM.R*GEOM.tireWidth*areaFrac;
-   const buoy=RHO*G*vol*.28;applyAt([0,buoy,0],wh.hub);
+   const buoy=RHO*G*vol*.15;/* heavily ballasted tyres keep their bite in water */applyAt([0,buoy,0],wh.hub);
    // drag relative to current: side area of the tyre, frontal area of the leg
    const v=this.pointVel(wh.hub),rel=[v[0]-w.fx,0,v[2]-w.fz],rs=Math.hypot(rel[0],rel[2]);
-   if(rs>.01){const R_=this.R,right=[R_[0],R_[3],R_[6]],side=Math.abs((rel[0]*right[0]+rel[2]*right[2])/rs);const A=mix(GEOM.tireWidth*2*GEOM.R+.3,Math.PI*GEOM.R*GEOM.R*.9,side)*areaFrac;const f=.5*RHO*.32*A*rs;applyAt([-rel[0]*f,0,-rel[2]*f],wh.hub);}/* edge-on tyre and slender leg: low drag head-on */
+   if(rs>.01){const R_=this.R,right=[R_[0],R_[3],R_[6]],side=Math.abs((rel[0]*right[0]+rel[2]*right[2])/rs);const A=mix(GEOM.tireWidth*2*GEOM.R+.3,Math.PI*GEOM.R*GEOM.R*.9,side)*areaFrac;const f=.5*RHO*(this.cabinWet?.32:.12)*A*rs;/* slim legs and edge-on tyres cut through until the hull is in the water */applyAt([-rel[0]*f,0,-rel[2]*f],wh.hub);}/* edge-on tyre and slender leg: low drag head-on */
   }
   // cabin: buoyancy of the sealed lower hull and drag
   const cabinPts=[-4,-2,0,2,4];let wet=0;
@@ -335,6 +335,7 @@ export class Spider{
   const floorW=add(o,mv(R,[0,2.75,this.carriage])),fw=env.water(floorW[0],floorW[2],wtmp);this.flooded=fw.kind?Math.max(0,fw.level-floorW[1]):0;
   const intake=add(o,mv(R,[0,5.05,4.6+this.carriage])),iw=env.water(intake[0],intake[2],wtmp);
   if(iw.kind&&iw.level>intake[1]&&!this.engine.stalled){this.engine.stalled=true;this.engine.stallTimer=6;this.say('Engine stalled: water in the air intake',5);this.events.push({type:'stall'});}
+  this.cabinWet=wet>.05;
   this.wading=deepest;this.maxWade=Math.max(this.maxWade||0,deepest);
  }
  // ---------------------------------------------------------------- controller (60 Hz)
@@ -357,7 +358,7 @@ export class Spider{
   this.dampC1=this.suspMode==='soft'?8000:12500;this.dampC2=this.suspMode==='soft'?3200:4600;
   // ---- CTIS
   const pTarget=PRESSURES[c.tire];let hiss=0;for(const wh of this.wheels){const d=pTarget-wh.pressure;if(Math.abs(d)>.005){wh.pressure+=clamp(d,-.35*dt,.28*dt);hiss=1;}}this.hiss=hiss;
-  const safe=c.tire==="soft"?35/3.6:c.tire==="terrain"?70/3.6:105/3.6;this.safeSpeed=safe;
+  const safe=c.tire==="soft"?60/3.6:c.tire==="terrain"?110/3.6:145/3.6;/* Kevlar-belted: rated well past the drivetrain */this.safeSpeed=safe;
   // ---- engine
   const E=this.engine;
   if(E.stalled){E.stallTimer-=dt;E.rpm=mix(E.rpm,0,1-Math.exp(-dt*3));if(E.stallTimer<=0){const intake=add(o,mv(R,[0,5.05,4.6+this.carriage])),iw=env.water?env.water(intake[0],intake[2],{}):{};if(!iw.kind||iw.level<intake[1]-.2){E.stalled=false;this.say('Engine restarted',2);}else E.stallTimer=2;}}
@@ -365,9 +366,9 @@ export class Spider{
   // speed-sensitive lock: keep the steady-state lateral acceleration near 3.5 m/s^2 (a tall machine)
   // track change: the legs slide on the arms at a crawl (the tyres scrub sideways)
   {const tgt=c.track>=.5?1:0;if(Math.abs(tgt-this.trackFrac)>1e-4){if(speed<4){this.trackFrac+=clamp(tgt-this.trackFrac,-dt/5,dt/5);this._hp=null;}else if(this.t-(this._trMsg||0)>4){this._trMsg=this.t;this.say('Slow below 15 km/h to change the track',2.5);}}}
-  const trF=this.trackFrac,lock=Math.min(GEOM.maxLock*(.5+.5*trF),Math.max(1.5*Math.PI/180,Math.atan(GEOM.wheelbase*(2.3+1.2*trF)/Math.max(1e-3,speed*speed))));
+  const trF=this.trackFrac,lock=Math.min(GEOM.maxLock*(.5+.5*trF),Math.max(1.5*Math.PI/180,Math.atan(GEOM.wheelbase*(3.0+2.6*trF)/Math.max(1e-3,speed*speed))));
   const dTarget=clamp(c.steer,-1,1)*lock;
-  this.steer[0]+=clamp(dTarget-this.steer[0],-25*Math.PI/180*dt,25*Math.PI/180*dt);
+  {const sr=75*Math.PI/180*dt;this.steer[0]+=clamp(dTarget-this.steer[0],-sr,sr);}/* fast electro-hydraulic plate steering */
   this.steer[1]=Math.atan(Math.tan(this.steer[0])/2);this.steer[2]=0;
   // ---- longitudinal command (hydrostatic: release = controlled stop)
   let vt=c.throttle*c.limit;if(c.brake)vt=0;const gov=this.gov={};const tag=(n,v0)=>{if(Math.abs(vt)<Math.abs(v0)-.05)gov[n]=+(vt*3.6).toFixed(0);};
@@ -427,7 +428,7 @@ export class Spider{
   const eTouch=wheels.map((wh,i)=>wh.e+(wh.hub[1]-(gH[i]+GEOM.R-.035))/upY);this.eTouch=eTouch;
   // feedforward from the terrain: e_i = hubTop - (g_i + R) + a*x_i + b*z_i + y0, plus lean and the
   // attitude integrator; the level fraction f is the largest that keeps all of it inside the stroke
-  const lean=c.assist?clamp(latK*.3,-.087,.087):0;
+  const lean=c.assist?clamp(latK*.45,-.14,.14):0;/* bank into the turn */
   const need=f=>gH.map((g,i)=>GEOM.hubTop-(g+GEOM.R-.035)+((1-f)*tp.a+lean+this.integ[1])*hx[i]+((1-f)*tp.b+this.integ[2])*hz[i]);
   const feasible=f=>{const e=need(f);let mx=-1e9,mn=1e9;for(let i=0;i<6;i++)if(active[i]){mx=Math.max(mx,e[i]);mn=Math.min(mn,e[i]);}return mx-mn<=hi-lo-.06;};
   let f=0;if(c.assist){if(feasible(1))f=1;else{let a=0,b=1;for(let k=0;k<12;k++){const m=(a+b)/2;if(feasible(m))a=m;else b=m;}f=a;}}
@@ -459,7 +460,8 @@ export class Spider{
   const comH=[0,0];// CoM horizontal is at 0 in hr/hf coords relative to pos
   const rx=[],rz=[];for(let i=0;i<6;i++){const p=wheels[i].contact?wheels[i].cp:wheels[i].hub;const rr=sub(p,this.pos);// project along gravity
    rx.push(dot(rr,hr));rz.push(dot(rr,hf));}
-  const anyLift=wheels.some(w=>w.lifted);const idx=[];for(let i=0;i<6;i++)if(active[i]&&(wheels[i].contact||anyLift))idx.push(i);/* with a pair up, a skipping tyre keeps its share */// lifted legs are already out of the allocation (not active)
+  const anyLift=wheels.some(w=>w.lifted);const idx=[];for(let i=0;i<6;i++)if(active[i])idx.push(i);/* every supporting leg gets its share, so a hanging tyre is pressed back down */
+  const idxC=idx.filter(i=>wheels[i].contact);/* with a pair up, a skipping tyre keeps its share */// lifted legs are already out of the allocation (not active)
   const Ft=new Array(6).fill(0);
   if(idx.length>=3){const n=idx.length,Fb=W/n;// A = [1;rx;rz], b=[W,0,0]
    let S=[0,0,0,0,0,0,0,0,0],r0=[0,0,0];
@@ -469,8 +471,8 @@ export class Spider{
    this.allocOK=true;
   }else{for(let i=0;i<6;i++)if(active[i])Ft[i]=W/Math.max(1,active.filter(Boolean).length);this.allocOK=false;}
   // support polygon margin (for the HUD and the climb logic)
-  this.supportMargin=supportMargin(rx,rz,idx);
-  {let cz=0,n=0;for(const i of idx){cz+=rz[i];n++;}this.supportCentroid=n>=4?-cz/n:undefined;}// body-z offset of the support centroid from the CoM
+  this.supportMargin=supportMargin(rx,rz,idxC);
+  {let cz=0,n=0;for(const i of idxC){cz+=rz[i];n++;}this.supportCentroid=n>=4?-cz/n:undefined;}// body-z offset of the support centroid from the CoM
   // ---- heave integral on the supporting legs' extension error, and setpoint synthesis
   const cm=wheels.map((w,i)=>active[i]&&w.contact);let he=0,hn=0;for(let i=0;i<6;i++)if(cm[i]){he+=eT[i]-wheels[i].e;hn++;}
   const nearStop=wheels.some((w,i)=>cm[i]&&(w.e>GEOM.stroke-.1||w.e<.08));
@@ -544,7 +546,9 @@ export class Spider{
   const d=this.carriageTarget-this.carriage;if(Math.abs(d)>1e-4){this.carriage+=clamp(d,-.5*dt,.5*dt);this.recomputeMass();}
  }
  // Step climbing: crawl -> (carriage shift) -> lift pair -> advance -> place -> next pair.
- climbLogic(dt,R,o,hf,gH,vfwd){
+ climbLogic(dt,R,o,hf,gHs,vfwd){
+  /* rises are measured from the ground under the hubs: a tyre already up the face must not shrink the step */
+  const gH=this.wheels.map(w=>this.env.ground(w.hub[0],w.hub[2],1e9)-w.sink);
   const c=this.ctl,wheels=this.wheels;this.dropWarn=false;
   const dir=c.throttle>=0?1:-1;
   const kR=GEOM.R/1.35;// probe distances were tuned for a 1.35 m tyre
