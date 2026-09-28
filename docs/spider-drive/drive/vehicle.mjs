@@ -338,7 +338,7 @@ float n3(vec3 x){vec3 i=floor(x),f=fract(x);f=f*f*(3.0-2.0*f);return mix(mix(mix
   this.root.updateMatrixWorld();
   for(let i=0;i<6;i++){
    const w=sp.wheels[i],L=this.legs[i],W=this.wheels[i];
-   L.leg.position.x=L.side*(sp.ht()-AXLE);// telescoping arms: road track to full width
+   L.leg.position.x=L.side*(sp.ht(i)-AXLE);// telescoping arms: road track to full width
    const hubY=GEOM.hubTop-w.e-PLATE;// relative to the plate group
    L.hub.position.y=hubY;
    const rodTop=L.barrelBot+.1,len=Math.max(.05,rodTop-hubY-.2);L.rod.scale.y=len;L.rod.position.y=hubY+.2+len/2;const sl=Math.max(.05,len*.36),sl2=Math.max(.05,len*.68);L.stage.scale.y=sl;L.stage.position.y=rodTop-sl/2;L.stage2.scale.y=sl2;L.stage2.position.y=rodTop-sl2/2;

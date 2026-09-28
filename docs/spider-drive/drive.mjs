@@ -151,7 +151,7 @@ addEventListener('keydown',e=>{
   case 'Digit1':case 'Digit2':case 'Digit3':{const p=+e.code.slice(-1)-1;c.lift[p]=!c.lift[p];break;}
   case 'KeyT':{const o=['road','terrain','soft'];c.tire=o[(o.indexOf(c.tire)+1)%3];sound.hiss(1);spider.say(`Tyres to ${PRESSURES[c.tire]} bar (${{road:'road',terrain:'all-terrain',soft:'sand and mud'}[c.tire]})`,2.5);break;}
   case 'KeyV':{const o=['auto','soft','firm'];c.suspension=o[(o.indexOf(c.suspension)+1)%3];spider.say(`Suspension ${c.suspension}`,1.5);break;}
-  case 'KeyG':c.track=c.track>=.5?0:1;spider.say(c.track?'Track out to full width: more lock, more stability':'Track in for the road: 6 m wide, gentler turns, less side stability',3);break;
+  case 'KeyG':if(!spider.trackSeq)c.track=c.track>=.5?0:1;break;
   case 'KeyB':c.assist=!c.assist;spider.say(`Stability assist ${c.assist?'on':'off'}`,2);break;
   case 'KeyK':c.climb=!c.climb;spider.say(`Climb assist ${c.climb?'on':'off'}`,2);break;
   case 'Slash':c.carriageManual=null;spider.say('Carriage on automatic load trim',2);break;

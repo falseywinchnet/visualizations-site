@@ -38,7 +38,7 @@ export class Spider{
   this.water=VARIANTS[this.variant].tank;// litres ~ kg
   this.carriage=0;this.carriageTarget=0;
   // controls & modes
-  this.ctl={throttle:0,steer:0,brake:false,limit:40/3.6,retraction:.5,assist:true,climb:true,suspension:'auto',tire:'terrain',lift:[false,false,false],carriageManual:null,track:1};this.trackFrac=1;
+  this.ctl={throttle:0,steer:0,brake:false,limit:40/3.6,retraction:.5,assist:true,climb:true,suspension:'auto',tire:'terrain',lift:[false,false,false],carriageManual:null,track:1};this.trackFrac=1;this.wheelTrack=[1,1,1,1,1,1];this.trackSeq=null;this._trackReq=1;
   this.t=0;this.wheels=[];
   for(let i=0;i<6;i++)this.wheels.push({pair:i>>1,side:(i&1)?1:-1,e:GEOM.stroke/2,ev:0,eset:GEOM.stroke/2+.15,spin:0,omega:0,load:0,contact:false,pressure:1.6,sink:0,slip:0,slipAngle:0,surface:null,anchor:null,disabled:false,lifted:false,gas:PN,deflection:0,cp:[0,0,0],cn:[0,1,0],hub:[0,0,0],mount:[0,0,0],water:0,torque:0,depthUnder:0});
   this.steer=[0,0,0];// plate angles (front, middle, rear=0)
@@ -93,8 +93,8 @@ export class Spider{
  get R(){return qmat(this.q);}
  origin(R=qmat(this.q)){return sub(this.pos,mv(R,this.com));}
  // track: legs slide in along telescoping arms for roads (narrower, less lock, less side stability)
- ht(){return GEOM.roadHalfTrack+(GEOM.halfTrack-GEOM.roadHalfTrack)*this.trackFrac;}
- hubBody(wh,e=wh.e){const d=this.steer[wh.pair],zs=GEOM.stations[wh.pair],h=this.ht();return [wh.side*h*Math.cos(d),GEOM.hubTop-e,zs-wh.side*h*Math.sin(d)];}
+ ht(i){const f=i===undefined?this.trackFrac:this.wheelTrack[i];return GEOM.roadHalfTrack+(GEOM.halfTrack-GEOM.roadHalfTrack)*f;}
+ hubBody(wh,e=wh.e){const d=this.steer[wh.pair],zs=GEOM.stations[wh.pair],h=this.ht(this.wheels.indexOf(wh));return [wh.side*h*Math.cos(d),GEOM.hubTop-e,zs-wh.side*h*Math.sin(d)];}
  toWorld(pb,R=qmat(this.q),o=this.origin(R)){return add(o,mv(R,pb));}
  pointVel(pw){return add(this.vel,cross(this.w,sub(pw,this.pos)));}
  // ---------------------------------------------------------------- gas spring
@@ -112,7 +112,7 @@ export class Spider{
   let drivePower=0;
   for(let i=0;i<6;i++){
    const wh=this.wheels[i],pair=wh.pair,d=this.steer[pair];
-   const hT=this.ht(),mb=[wh.side*hT*Math.cos(d),GEOM.hubTop,GEOM.stations[pair]-wh.side*hT*Math.sin(d)];
+   const hT=this.ht(i),mb=[wh.side*hT*Math.cos(d),GEOM.hubTop,GEOM.stations[pair]-wh.side*hT*Math.sin(d)];
    const M=add(o,mv(R,mb)),hub=sub(M,scl(up,wh.e));wh.mount=M;wh.hub=hub;
    const vM=this.pointVel(M),vH=sub(vM,scl(up,wh.ev));
    const fb=[-Math.sin(d),0,-Math.cos(d)],fw=mv(R,fb);
@@ -365,7 +365,24 @@ export class Spider{
   // ---- steering: speed-sensitive lock, slew-limited, exact middle angle
   // speed-sensitive lock: keep the steady-state lateral acceleration near 3.5 m/s^2 (a tall machine)
   // track change: the legs slide on the arms at a crawl (the tyres scrub sideways)
-  {const tgt=c.track>=.5?1:0;if(Math.abs(tgt-this.trackFrac)>1e-4){if(speed<4){this.trackFrac+=clamp(tgt-this.trackFrac,-dt/5,dt/5);this._hp=null;}else if(this.t-(this._trMsg||0)>4){this._trMsg=this.t;this.say('Slow below 15 km/h to change the track',2.5);}}}
+  // track change (G): the middle pair, then the front pair, is lifted clear, slid along the arms and set down;
+  // the rear wheels, under the engine, go one side at a time so five tyres always carry the machine
+  {const tgt=c.track>=.5?1:0;
+   if(tgt!==this._trackReq&&!this.trackSeq){const why=speed>1.2?'Stop to change the track':c.retraction>=.95?'Raise the cabin off full retraction to change the track':this.climbState?'Finish the climb first':null;
+    if(why){c.track=this._trackReq;this.say(why,2.5);}
+    else{this._trackReq=tgt;this.trackSeq={tgt,order:[[2,3],[0,1],[4],[5]],k:0,phase:'shift',t:0};this.say(tgt?'Track out: walking the legs wide':'Track in: walking the legs narrow',2.5);}}
+   const Q=this.trackSeq;
+   if(Q){Q.t+=dt;const U=Q.order[Q.k],W=U.map(i=>this.wheels[i]),p=U[0]>>1;Q.carriage=U.length===1?-1.2:p===0?GEOM.carriageMax:0;
+    const rx=[],rz=[];for(let i=0;i<6;i++){const q=this.wheels[i].contact?this.wheels[i].cp:this.wheels[i].hub,rr=sub(q,this.pos);rx.push(dot(rr,[-hf[2],0,hf[0]]));rz.push(dot(rr,hf));}
+    const abort=m=>{for(const w of W)w.lifted=false;this.trackSeq=null;this.say(m+'. G walks them back',3);this._trackReq=tgt;c.track=tgt;};
+    if(Q.phase==='shift'){if(Math.abs(this.carriage-Q.carriage)<.08||Q.t>9){const idx=[];for(let i=0;i<6;i++)if(!U.includes(i)&&!this.wheels[i].disabled)idx.push(i);
+      const sm=supportMargin(rx,rz,idx);this.lastSeqMargin=sm;if(sm<.3)abort('Cannot lift those legs here: find level ground');else{Q.phase='lift';Q.t=0;for(const w of W)w.lifted=true;}}}
+    else if((Q.phase==='lift'||Q.phase==='slide')&&(Math.abs(this.pitch||0)>8||Math.abs(this.roll||0)>8))abort('Body tilting: legs set down, track change stopped');
+    else if(Q.phase==='lift'){let clear=true;for(const w of W){const needHub=this.env.ground(w.hub[0],w.hub[2],1e9)+GEOM.R+.35;w.liftE=clamp(w.eset-(needHub-w.hub[1]),-.3,GEOM.stroke);if(w.contact||w.hub[1]<needHub-.15)clear=false;}
+      if(clear&&Q.t>.4){Q.phase='slide';Q.t=0;}else if(Q.t>5)abort('Could not lift the legs clear');}
+    else if(Q.phase==='slide'){let done=true;for(const i of U){this.wheelTrack[i]+=clamp(Q.tgt-this.wheelTrack[i],-dt*.9,dt*.9);if(Math.abs(this.wheelTrack[i]-Q.tgt)>1e-3)done=false;else this.wheelTrack[i]=Q.tgt;}this._hp=null;if(done){Q.phase='lower';Q.t=0;for(const w of W)w.lifted=false;}}
+    else if(Q.phase==='lower'){const Fn=this.totalMass*G/6;if(W.every(w=>w.load>.35*Fn)||Q.t>3){Q.k++;Q.t=0;Q.phase='shift';if(Q.k>=Q.order.length){this.trackSeq=null;this.say(Q.tgt?'Track wide':'Track narrow: road width',2);}}}}
+   this.trackFrac=this.wheelTrack.reduce((a,b)=>a+b,0)/6;}
   const trF=this.trackFrac,lock=Math.min(GEOM.maxLock*(.5+.5*trF),Math.max(1.5*Math.PI/180,Math.atan(GEOM.wheelbase*(3.0+2.6*trF)/Math.max(1e-3,speed*speed))));
   const dTarget=clamp(c.steer,-1,1)*lock;
   {const sr=75*Math.PI/180*dt;this.steer[0]+=clamp(dTarget-this.steer[0],-sr,sr);}/* fast electro-hydraulic plate steering */
@@ -373,6 +390,7 @@ export class Spider{
   // ---- longitudinal command (hydrostatic: release = controlled stop)
   let vt=c.throttle*c.limit;if(c.brake)vt=0;const gov=this.gov={};const tag=(n,v0)=>{if(Math.abs(vt)<Math.abs(v0)-.05)gov[n]=+(vt*3.6).toFixed(0);};
   if(this.climbState&&this.climbState.cap!==undefined)vt=clamp(vt,-this.climbState.cap,this.climbState.cap);
+  if(this.trackSeq)vt=0;
   // terrain preview: cap speed so the vertical acceleration over the ground ahead stays tolerable
   if(c.assist&&Math.abs(vt)>2.5){const dir=vt>0?1:-1;let kmax=0,hazard=1e9,ledgeCap=1e9;const hx0=[-hf[2],0,hf[0]];
    for(const lat of [-this.ht(),0,this.ht()]){let prevG=null,prevH=null,g0=null;const dMax=Math.max(24,Math.abs(vfwd)*3.2);for(let d=4;d<=dMax;d+=6){const x=this.pos[0]+hf[0]*d*dir+hx0[0]*lat,z=this.pos[2]+hf[2]*d*dir+hx0[2]*lat,h=env.ground(x,z,1e9);if(prevH!==null){const g=(h-prevH)/6;if(prevG!==null)kmax=Math.max(kmax,Math.abs(g-prevG)/6);prevG=g;if(g0===null)g0=g;if(Math.abs(h-prevH)>1.9&&Math.abs(g)>.7&&Math.abs(g-g0)>.45&&d-6<hazard)hazard=d-6;}prevH=h;}
@@ -412,6 +430,7 @@ export class Spider{
   const all=[1,1,1,1,1,1];const tp=fit(gH,active.filter(Boolean).length>=4?active:all);/* lifted tyres do not define the ground plane */
   // requested ride height
   let sReq=c.retraction;if(this.climbState)sReq=0;
+  if(this.trackSeq&&this.trackSeq.phase!=='lower'&&this.trackSeq.phase!=='shift')sReq=0;/* the other legs carry the body up while a pair is off the ground */
   // wade assist: look ahead for water and raise the cabin so the belly clears it
   if(c.assist){let dW=0;const wt2=this._wt2||(this._wt2={}),dir=vfwd>=0?1:-1;for(const d of [0,6,12,18,26]){const x=this.pos[0]+hf[0]*d*dir,z=this.pos[2]+hf[2]*d*dir,w=env.water?env.water(x,z,wt2):null;if(w&&w.kind){const g=env.ground(x,z,1e9);dW=Math.max(dW,w.level-g);}}
    this.wadeAhead=dW;if(dW>.4){const lowC=GEOM.belly-(GEOM.hubTop-GEOM.R),need=dW+.45,sMax=clamp(1-(need-lowC)/GEOM.stroke,0,1);if(sReq>sMax){sReq=sMax;if(this.t-(this._wadeMsg||0)>8){this._wadeMsg=this.t;this.say(`Water ${dW.toFixed(1)} m deep ahead: raising the cabin`,2.5);}}}}
@@ -530,7 +549,7 @@ export class Spider{
   if(speed>safe+1&&c.tire!=='road'&&!this.message)this.say(`Tyre pressure ${wheels[0].pressure.toFixed(1)} bar: keep under ${Math.round(safe*3.6)} km/h`,1.2);
   if(this.flooded>.05&&this.t-(this._floodMsg||0)>4){this._floodMsg=this.t;this.say('Water at the cabin floor',2.5);}
   // pair lift requests from the driver
-  for(let p=0;p<3;p++){const want=c.lift[p];for(const k of [0,1]){const wh=wheels[p*2+k];if(want&&!wh.lifted&&!this.climbState){if(this.canLift(p,rx,rz)){wh.lifted=true;wh.liftE=.1;}else if(k===0){c.lift[p]=false;this.say(`Lifting the ${['front','middle','rear'][p]} pair would tip the Spider`,2.5);}}else if(!want&&wh.lifted&&!this.climbState&&!wh.disabled){wh.lifted=false;}}}
+  for(let p=0;p<3;p++){const want=c.lift[p];for(const k of [0,1]){const wh=wheels[p*2+k];if(want&&!wh.lifted&&!this.climbState&&!this.trackSeq){if(this.canLift(p,rx,rz)){wh.lifted=true;wh.liftE=.1;}else if(k===0){c.lift[p]=false;this.say(`Lifting the ${['front','middle','rear'][p]} pair would tip the Spider`,2.5);}}else if(!want&&wh.lifted&&!this.climbState&&!this.trackSeq&&!wh.disabled){wh.lifted=false;}}}
  }
  canLift(p,rx,rz){const idx=[];for(let i=0;i<6;i++)if((i>>1)!==p&&!this.wheels[i].disabled&&!this.wheels[i].lifted)idx.push(i);return supportMargin(rx,rz,idx)>.35;}
  updateCarriage(dt){
@@ -540,10 +559,11 @@ export class Spider{
   else if(this.supportCentroid!==undefined&&this.ctl.assist){const mm=this.items.filter(it=>it.moves).reduce((a,it)=>a+it.m,0);target=clamp(this.carriage+this.supportCentroid*this.mass/mm*.5,-GEOM.carriageMax,GEOM.carriageMax);}
   else if(!this.ctl.assist)target=0;
   if(this.climbState?.carriage!==undefined)target=this.climbState.carriage;
+  if(this.trackSeq?.carriage!==undefined)target=this.trackSeq.carriage;
   // disabled legs: move the cabin toward the remaining supports
   const dis=this.wheels.map(w=>w.disabled);if(dis[0]||dis[1])target=GEOM.carriageMax;else if(dis[4]||dis[5])target=-GEOM.carriageMax;
   this.carriageTarget=clamp(target,-GEOM.carriageMax,GEOM.carriageMax);
-  const d=this.carriageTarget-this.carriage;if(Math.abs(d)>1e-4){this.carriage+=clamp(d,-.5*dt,.5*dt);this.recomputeMass();}
+  const d=this.carriageTarget-this.carriage;if(Math.abs(d)>1e-4){const cr=this.trackSeq?1.1:.5;this.carriage+=clamp(d,-cr*dt,cr*dt);this.recomputeMass();}
  }
  // Step climbing: crawl -> (carriage shift) -> lift pair -> advance -> place -> next pair.
  climbLogic(dt,R,o,hf,gHs,vfwd){
