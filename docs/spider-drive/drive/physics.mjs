@@ -74,6 +74,7 @@ export class Spider{
  }
  // ---------------------------------------------------------------- placement
  place(x,z,yaw=0){
+  this.cancelTrack(true);
   this.vel=[0,0,0];this.w=[0,0,0];this.vcmd=0;this.overturned=false;this.integ=[0,0,0];
   // fit the terrain plane under the six tyres and stand on it at nominal posture
   const q0=qyaw(-yaw),R0=qmat(q0),hf=[-R0[2],0,-R0[8]],hr=[R0[0],0,R0[6]];
@@ -93,6 +94,8 @@ export class Spider{
  get R(){return qmat(this.q);}
  origin(R=qmat(this.q)){return sub(this.pos,mv(R,this.com));}
  // track: legs slide in along telescoping arms for roads (narrower, less lock, less side stability)
+ // abandon any track change; with snap, bring all six legs to one track (after a recovery or restart)
+ cancelTrack(snap){if(!this.wheelTrack)return;for(const w of this.wheels)if(!w.disabled)w.lifted=false;this.trackSeq=null;if(snap){const f=this.trackFrac>=.5?1:0;this.wheelTrack.fill(f);this.trackFrac=f;this._trackReq=f;this.ctl.track=f;this._hp=null;}}
  ht(i){const f=i===undefined?this.trackFrac:this.wheelTrack[i];return GEOM.roadHalfTrack+(GEOM.halfTrack-GEOM.roadHalfTrack)*f;}
  hubBody(wh,e=wh.e){const d=this.steer[wh.pair],zs=GEOM.stations[wh.pair],h=this.ht(this.wheels.indexOf(wh));return [wh.side*h*Math.cos(d),GEOM.hubTop-e,zs-wh.side*h*Math.sin(d)];}
  toWorld(pb,R=qmat(this.q),o=this.origin(R)){return add(o,mv(R,pb));}
@@ -365,23 +368,31 @@ export class Spider{
   // ---- steering: speed-sensitive lock, slew-limited, exact middle angle
   // speed-sensitive lock: keep the steady-state lateral acceleration near 3.5 m/s^2 (a tall machine)
   // track change: the legs slide on the arms at a crawl (the tyres scrub sideways)
-  // track change (G): the middle pair, then the front pair, is lifted clear, slid along the arms and set down;
-  // the rear wheels, under the engine, go one side at a time so five tyres always carry the machine
+  // track change (G): raise the body once, walk the legs across unit by unit (middle pair, front pair, then each
+  // rear leg on its own under the engine), then settle back to the ride height once. Only legs not already at the
+  // target move, so a half-finished change (stopped, recovered, restarted) is completed or reversed cleanly.
   {const tgt=c.track>=.5?1:0;
    if(tgt!==this._trackReq&&!this.trackSeq){const why=speed>1.2?'Stop to change the track':c.retraction>=.95?'Raise the cabin off full retraction to change the track':this.climbState?'Finish the climb first':null;
     if(why){c.track=this._trackReq;this.say(why,2.5);}
-    else{this._trackReq=tgt;this.trackSeq={tgt,order:[[2,3],[0,1],[4],[5]],k:0,phase:'shift',t:0};this.say(tgt?'Track out: walking the legs wide':'Track in: walking the legs narrow',2.5);}}
+    else{this._trackReq=tgt;const order=[[2,3],[0,1],[4],[5]].filter(U=>U.some(i=>Math.abs(this.wheelTrack[i]-tgt)>1e-3));
+     if(!order.length)this.say(tgt?'Track already wide':'Track already narrow',2);
+     else{this.trackSeq={tgt,order,k:0,phase:'raise',t:0};this.say(tgt?'Track out: raising, then walking the legs wide':'Track in: raising, then walking the legs narrow',2.5);}}}
    const Q=this.trackSeq;
-   if(Q){Q.t+=dt;const U=Q.order[Q.k],W=U.map(i=>this.wheels[i]),p=U[0]>>1;Q.carriage=U.length===1?-1.2:p===0?GEOM.carriageMax:0;
-    const rx=[],rz=[];for(let i=0;i<6;i++){const q=this.wheels[i].contact?this.wheels[i].cp:this.wheels[i].hub,rr=sub(q,this.pos);rx.push(dot(rr,[-hf[2],0,hf[0]]));rz.push(dot(rr,hf));}
-    const abort=m=>{for(const w of W)w.lifted=false;this.trackSeq=null;this.say(m+'. G walks them back',3);this._trackReq=tgt;c.track=tgt;};
-    if(Q.phase==='shift'){if(Math.abs(this.carriage-Q.carriage)<.08||Q.t>9){const idx=[];for(let i=0;i<6;i++)if(!U.includes(i)&&!this.wheels[i].disabled)idx.push(i);
-      const sm=supportMargin(rx,rz,idx);this.lastSeqMargin=sm;if(sm<.3)abort('Cannot lift those legs here: find level ground');else{Q.phase='lift';Q.t=0;for(const w of W)w.lifted=true;}}}
-    else if((Q.phase==='lift'||Q.phase==='slide')&&(Math.abs(this.pitch||0)>8||Math.abs(this.roll||0)>8))abort('Body tilting: legs set down, track change stopped');
-    else if(Q.phase==='lift'){let clear=true;for(const w of W){const needHub=this.env.ground(w.hub[0],w.hub[2],1e9)+GEOM.R+.35;w.liftE=clamp(w.eset-(needHub-w.hub[1]),-.3,GEOM.stroke);if(w.contact||w.hub[1]<needHub-.15)clear=false;}
+   if(Q){Q.t+=dt;
+    const abort=m=>{for(const w of this.wheels)if(!w.disabled)w.lifted=false;this.trackSeq=null;this._trackReq=Q.tgt;c.track=Q.tgt;this.say(m+'. G walks the legs back',3.5);};
+    if(Q.t>10&&Q.phase!=='settle')abort('Track change stalled: legs set down');
+    else if(speed>2||this.overturned)abort('Track change interrupted');
+    else if(Q.phase==='raise'){Q.carriage=0;let m=0,n=0;for(const w of this.wheels)if(!w.lifted){m+=w.e;n++;}if(m/n>GEOM.stroke-.75||Q.t>6){Q.phase='shift';Q.t=0;Q.holdE=this.wheels.map(w=>w.e);}}
+    else if(Q.phase==='settle'){Q.carriage=undefined;if(Q.t>1.5){this.trackSeq=null;this.say(Q.tgt?'Track wide':'Track narrow: road width',2);}}
+    else{const U=Q.order[Q.k],W=U.map(i=>this.wheels[i]),p=U[0]>>1;Q.carriage=U.length===1?-1.2:p===0?GEOM.carriageMax:0;
+     if(Q.phase==='shift'){if(Math.abs(this.carriage-Q.carriage)<.08||Q.t>9){const rx=[],rz=[];for(let i=0;i<6;i++){const q=this.wheels[i].contact?this.wheels[i].cp:this.wheels[i].hub,rr=sub(q,this.pos);rx.push(dot(rr,[-hf[2],0,hf[0]]));rz.push(dot(rr,hf));}
+       const idx=[];for(let i=0;i<6;i++)if(!U.includes(i)&&!this.wheels[i].disabled)idx.push(i);
+       if(supportMargin(rx,rz,idx)<.3)abort('Cannot lift those legs here: find level ground');else{Q.phase='lift';Q.t=0;for(const w of W)w.lifted=true;}}}
+     else if((Q.phase==='lift'||Q.phase==='slide')&&(Math.abs(this.pitch||0)>8||Math.abs(this.roll||0)>8))abort('Body tilting: legs set down, track change stopped');
+     else if(Q.phase==='lift'){let clear=true;for(const w of W){const needHub=this.env.ground(w.hub[0],w.hub[2],1e9)+GEOM.R+.35;w.liftE=clamp(w.eset-(needHub-w.hub[1]),-.3,GEOM.stroke);if(w.contact||w.hub[1]<needHub-.15)clear=false;}
       if(clear&&Q.t>.4){Q.phase='slide';Q.t=0;}else if(Q.t>5)abort('Could not lift the legs clear');}
-    else if(Q.phase==='slide'){let done=true;for(const i of U){this.wheelTrack[i]+=clamp(Q.tgt-this.wheelTrack[i],-dt*.9,dt*.9);if(Math.abs(this.wheelTrack[i]-Q.tgt)>1e-3)done=false;else this.wheelTrack[i]=Q.tgt;}this._hp=null;if(done){Q.phase='lower';Q.t=0;for(const w of W)w.lifted=false;}}
-    else if(Q.phase==='lower'){const Fn=this.totalMass*G/6;if(W.every(w=>w.load>.35*Fn)||Q.t>3){Q.k++;Q.t=0;Q.phase='shift';if(Q.k>=Q.order.length){this.trackSeq=null;this.say(Q.tgt?'Track wide':'Track narrow: road width',2);}}}}
+     else if(Q.phase==='slide'){let done=true;for(const i of U){this.wheelTrack[i]+=clamp(Q.tgt-this.wheelTrack[i],-dt*.9,dt*.9);if(Math.abs(this.wheelTrack[i]-Q.tgt)>1e-3)done=false;else this.wheelTrack[i]=Q.tgt;}this._hp=null;if(done){Q.phase='lower';Q.t=0;for(const w of W)w.lifted=false;}}
+     else if(Q.phase==='lower'){const Fn=this.totalMass*G/6;if(W.every(w=>w.load>.35*Fn)||Q.t>3){Q.k++;Q.t=0;Q.phase=Q.k>=Q.order.length?'settle':'shift';}}}}
    this.trackFrac=this.wheelTrack.reduce((a,b)=>a+b,0)/6;}
   const trF=this.trackFrac,lock=Math.min(GEOM.maxLock*(.5+.5*trF),Math.max(1.5*Math.PI/180,Math.atan(GEOM.wheelbase*(3.0+2.6*trF)/Math.max(1e-3,speed*speed))));
   const dTarget=clamp(c.steer,-1,1)*lock;
@@ -430,7 +441,7 @@ export class Spider{
   const all=[1,1,1,1,1,1];const tp=fit(gH,active.filter(Boolean).length>=4?active:all);/* lifted tyres do not define the ground plane */
   // requested ride height
   let sReq=c.retraction;if(this.climbState)sReq=0;
-  if(this.trackSeq&&this.trackSeq.phase!=='lower'&&this.trackSeq.phase!=='shift')sReq=0;/* the other legs carry the body up while a pair is off the ground */
+  if(this.trackSeq&&this.trackSeq.phase!=='settle')sReq=Math.min(sReq,.6/GEOM.stroke);/* raised once, leaving the planted legs 0.6 m to take up a lifted unit's load *//* the other legs carry the body up while a pair is off the ground */
   // wade assist: look ahead for water and raise the cabin so the belly clears it
   if(c.assist){let dW=0;const wt2=this._wt2||(this._wt2={}),dir=vfwd>=0?1:-1;for(const d of [0,6,12,18,26]){const x=this.pos[0]+hf[0]*d*dir,z=this.pos[2]+hf[2]*d*dir,w=env.water?env.water(x,z,wt2):null;if(w&&w.kind){const g=env.ground(x,z,1e9);dW=Math.max(dW,w.level-g);}}
    this.wadeAhead=dW;if(dW>.4){const lowC=GEOM.belly-(GEOM.hubTop-GEOM.R),need=dW+.45,sMax=clamp(1-(need-lowC)/GEOM.stroke,0,1);if(sReq>sMax){sReq=sMax;if(this.t-(this._wadeMsg||0)>8){this._wadeMsg=this.t;this.say(`Water ${dW.toFixed(1)} m deep ahead: raising the cabin`,2.5);}}}}
@@ -474,6 +485,8 @@ export class Spider{
    // (not when the tyre is light because the Spider is starting to tip: reaching down would push it over)
    if(c.assist&&wh.load<.25*Fnom6&&v<eTouch[i]+.03&&(this.tipMargin??9)>(this.climbState?.6:1.6))v=Math.min(eTouch[i]+.03,v+1.2*dt);
    this.eTs[i]=v;return v;});
+  // during a track change the planted legs hold the raised stance exactly (load-compensated), leveller paused
+  const TQ=this.trackSeq;if(TQ&&TQ.holdE)for(let i=0;i<6;i++)if(!wheels[i].lifted){eT[i]=TQ.holdE[i];this.eTs[i]=TQ.holdE[i];}
   // ---- load allocation: minimum-variance loads satisfying force and moment balance about the CoM
   const W=this.totalMass*G*Math.max(.3,1+dot(this.acc,[0,1,0])/G*.0);
   const comH=[0,0];// CoM horizontal is at 0 in hr/hf coords relative to pos
@@ -508,7 +521,7 @@ export class Spider{
     this.Fsm[i]+=(wh.load-this.Fsm[i])*(1-Math.exp(-dt/.9));
     const Fuse=clamp(anyLift?this.Fsm[i]*.2+(Ft[i]||Fnom6)*.8:this.Fsm[i]*.65+(Ft[i]||Fnom6)*.35,.5*Fnom6,3.4*Fnom6);// with a pair lifting, pre-load the others to their new share
     const ff=this.esetFor(Fuse-620*G,eT[i]);
-    const modal=this.integ[0];
+    const modal=TQ&&TQ.holdE?0:this.integ[0];
     const loadTrim=0;
     const vUp=this.pointVel(wh.mount)[1],vDb=Math.sign(vUp)*Math.max(0,Math.abs(vUp)-.04);const sky=c.assist?clamp(-vDb*.45,-.35,.35):0;
     target=ff+modal+loadTrim+sky;
