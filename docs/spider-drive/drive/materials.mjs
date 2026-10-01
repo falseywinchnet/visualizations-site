@@ -18,7 +18,7 @@ export function terrainTextures(size=256){
   // rock: layered grey with cracks
   {const strata=.5+.5*Math.sin((v*3.1+n1*2.4)*Math.PI*2/P*4),crack=smoothstep(.04,0,Math.abs(n2-.5))*.6,s=.42+.25*n1+.12*strata-.25*crack+.06*n4;put(2,x,y,s*1.02,s*.98,s*.92,.5+.35*n1-.4*crack);}
   // sand: warm, rippled
-  {const rip=.5+.5*Math.sin((u*9+n1*3)*Math.PI*2/P*2),s=.72+.12*n1+.05*rip+.04*n4;put(3,x,y,s*1.06,s*.92,s*.68,.35+.25*rip+.2*n1);}
+  {const rip=.5+.5*Math.sin((u*9+n1*3)*Math.PI*2/P*2),s=.72+.12*n1+.05*rip+.04*n4;put(3,x,y,s*1.06,s*.92,s*.68,.4+.07*rip+.2*n1);/* soft ripples: strong ones shimmer at grazing angles */}
   // snow: bright, soft, sparkle
   {const s=.9+.08*n1+.05*(n4>.93?1:0);put(4,x,y,s*.96,s*.98,s*1.02,.5+.3*n1);}
   // asphalt: dark with aggregate
@@ -48,10 +48,10 @@ export const shared={
  uSkyTop:{value:new T.Color(.35,.55,.85)},uSkyHorizon:{value:new T.Color(.75,.82,.9)},uFloodTint:{value:0},
 };
 // ------------------------------------------------------------ terrain material
-export function terrainMaterial(arr){
+export function terrainMaterial(arr,seed=0){
  const m=new T.MeshStandardMaterial({roughness:.9,metalness:0});
  m.onBeforeCompile=sh=>{
-  Object.assign(sh.uniforms,shared,{tArr:{value:arr}});
+  Object.assign(sh.uniforms,shared,{tArr:{value:arr},uSeed:{value:seed}});
   sh.vertexShader=sh.vertexShader.replace('#include <common>',`#include <common>
 attribute vec4 tint;attribute vec4 spl;attribute vec4 ext;
 varying vec3 vWPos;varying vec3 vWNrm;varying vec4 vTint;varying vec4 vSpl;varying vec4 vExt;`)
@@ -60,7 +60,18 @@ vWPos=(modelMatrix*vec4(transformed,1.0)).xyz;vWNrm=normalize(mat3(modelMatrix)*
   sh.fragmentShader=sh.fragmentShader.replace('#include <common>',`#include <common>
 precision highp sampler2DArray;
 uniform sampler2DArray tArr;uniform float uTime;uniform sampler2D uBurn;uniform vec4 uBurnRect;uniform float uBurnOn;
-uniform sampler2D uTrack;uniform vec4 uTrackRect;uniform float uTrackOn;uniform float uWetness;
+uniform sampler2D uTrack;uniform vec4 uTrackRect;uniform float uTrackOn;uniform float uWetness;uniform float uSeed;
+// the field layout (terrain.mjs field()), evaluated per pixel so boundaries and rows stay crisp at every LOD
+float h2(float x,float z,float sd){uint h=(uint(int(x))*0x27d4eb2du)^(uint(int(z))*0x165667b1u)^(uint(int(sd))*0x9e3779b1u);h=(h^(h>>15u))*0x85ebca6bu;h=(h^(h>>13u))*0xc2b2ae35u;return float(h^(h>>16u))/4294967296.0;}
+vec4 fieldAt(vec2 p){float B=480.0;float bi=floor(p.x/B),bj=floor(p.y/B);
+ float ang=(h2(bi,bj,uSeed+5.0)<.5?0.0:1.5707963)+(h2(bi,bj,uSeed+6.0)-.5)*.5;float ca=cos(ang),sa=sin(ang);
+ float lx=p.x-bi*B,lz=p.y-bj*B,u=lx*ca+lz*sa,v=-lx*sa+lz*ca;
+ float su=70.0+h2(bi,bj,uSeed+7.0)*70.0,sv=150.0+h2(bi,bj,uSeed+8.0)*140.0;
+ float iu=floor(u/su),iv=floor(v/sv),fu=u-iu*su,fv=v-iv*sv;
+ float r=h2(bi*31.0+iu,bj*37.0+iv,uSeed+10.0);float crop=r<.46?0.0:r<.7?1.0:r<.88?2.0:3.0;
+ float edge=min(min(fu,su-fu),min(fv,sv-fv)),be=min(min(lx,B-lx),min(lz,B-lz));
+ float ra=h2(bi*5.0+iu,bj*3.0+iv,uSeed+11.0)<.2?ang+1.5707963:ang;
+ return vec4(crop,min(edge,be),ra,0.0);}
 varying vec3 vWPos;varying vec3 vWNrm;varying vec4 vTint;varying vec4 vSpl;varying vec4 vExt;
 vec4 L(float l,vec2 uv){return texture(tArr,vec3(uv,l));}
 vec4 tri(float l,vec3 p,vec3 n,float s){vec3 w=pow(abs(n),vec3(4.0));w/=w.x+w.y+w.z;return L(l,p.zy*s)*w.x+L(l,p.xz*s)*w.y+L(l,p.xy*s)*w.z;}
@@ -86,31 +97,24 @@ vec4 bw=max(vec4(hG,hD,hS,hR)-mx,0.0);float bn=max(hN-mx,0.0);float bs=bw.x+bw.y
 vec3 col=(grass*bw.x+soil.rgb*bw.y+sand.rgb*bw.z+rock.rgb*vec3(1.0,.97,.92)*bw.w+snow.rgb*bn)/bs;
 float rough=(.95*bw.x+.92*bw.y+.9*bw.z+.82*bw.w+.55*bn)/bs;
 float hgt=(g.a*bw.x+soil.a*bw.y+sand.a*bw.z+rock.a*bw.w+snow.a*bn)/bs;
-// fields: crop code in ext.b (x40), row angle in ext.a
-float code=floor(vExt.b*255.0/40.0+.5);float rk=floor(mod(vExt.b*255.0+.5,40.0)/8.0);
-if(code>.5&&vExt.r<.02){
- float a=vExt.a*3.14159;float p=-vWPos.x*sin(a)+vWPos.z*cos(a);
- if(code<1.5){// corn: green canopy with soil between rows
-  float s=fract(p/.76);float fw=fwidth(p/.76);float row=smoothstep(.18+fw,.18-fw,abs(s-.5))*0.0+1.0-smoothstep(.22-fw,.22+fw,abs(s-.5));
+// fields: farm weight in ext.b; crop, headland distance and row direction from the layout
+float farmW=smoothstep(.42,.5,vExt.b)*(1.0-smoothstep(.0,.15,vExt.r));
+if(farmW>.01){
+ vec4 fd=fieldAt(vWPos.xz);float a=fd.z;float p=-vWPos.x*sin(a)+vWPos.z*cos(a);vec3 fc=col;float fr=rough,fh=hgt;
+ if(fd.x<.5){// corn: green canopy with soil between rows
+  float s=fract(p/.76);float fw=fwidth(p/.76);float row=1.0-smoothstep(.22-fw,.22+fw,abs(s-.5));
   vec3 canopy=vec3(.06,.1,.025)*(.8+.4*vnoise(vWPos.xz*.7))*(1.0+.2*macro);vec3 soilc=soil.rgb*.45;
-  float cov=mix(row,.78,smoothstep(.2,.6,fw*4.0));col=mix(soilc,canopy,cov);rough=.85;hgt=.3+.5*cov;}
- else if(code<2.5){// wheat
-  float s=fract(p/.2);vec3 w=vec3(.42,.3,.09)*(.85+.3*L(8.0,uv*1.3).r)*(1.0+.15*macro);col=mix(w*.8,w,smoothstep(.2,.5,s)*(1.0-far*.8)+far*.6);rough=.9;hgt=L(8.0,uv).a;}
- else if(code<3.5){col=grass*mix(vec3(1.05,1.1,.95),vec3(.95),macro);}// pasture
- else if(code<4.5){float s=fract(p/.6);col=soil.rgb*(.9+.25*smoothstep(.3,.7,s)*(1.0-far));rough=.97;}// fallow furrows
- else{col=grass*1.05;}
+  float cov=mix(row,.78,smoothstep(.2,.6,fw*4.0));fc=mix(soilc,canopy,cov);fr=.85;fh=.3+.5*cov;}
+ else if(fd.x<1.5){// wheat
+  float s=fract(p/.2);vec3 w=vec3(.42,.3,.09)*(.85+.3*L(8.0,uv*1.3).r)*(1.0+.15*macro);fc=mix(w*.8,w,smoothstep(.2,.5,s)*(1.0-far*.8)+far*.6);fr=.9;fh=L(8.0,uv).a;}
+ else if(fd.x<2.5){fc=grass*mix(vec3(1.05,1.1,.95),vec3(.95),macro);}// pasture
+ else{float s=fract(p/.6);fc=soil.rgb*(.9+.25*smoothstep(.3,.7,s)*(1.0-far));fr=.97;}// fallow furrows
+ // headlands: a grass margin round every field, a little rougher where the blocks meet
+ float hd=1.0-smoothstep(1.2,2.4,fd.y);fc=mix(fc,grass*vec3(.92,.98,.85),hd);fr=mix(fr,.95,hd);
+ col=mix(col,fc,farmW);rough=mix(rough,fr,farmW);hgt=mix(hgt,fh,farmW);
 }
-// roads
-if(vExt.r>.01){
- float lat=vExt.a*2.0-1.0;vec3 rc;float rr;
- if(rk<1.5){vec4 as=L(5.0,uv*1.5);rc=as.rgb;rr=.8;
-  float cl=1.0-smoothstep(.02,.05,abs(lat));float dash=step(.5,fract(vWPos.x*.0+(vWPos.z*0.0)+length(vWPos.xz)*.0+dot(vWPos.xz,vec2(.707))*.08));
-  float edge=smoothstep(.62,.66,abs(lat))*(1.0-smoothstep(.7,.74,abs(lat)));
-  rc=mix(rc,vec3(.62,.46,.1),cl*.85*(1.0-far));rc=mix(rc,vec3(.6),edge*.8*(1.0-far));}
- else if(rk<2.5){vec4 gr=L(6.0,uv*1.2);rc=gr.rgb;rr=.95;}
- else{vec4 d=L(1.0,uv*1.1);float rut=smoothstep(.12,.0,abs(abs(lat)-.42));rc=d.rgb*(1.0-.25*rut);float mid=smoothstep(.2,.0,abs(lat));rc=mix(rc,grass*.9,mid*.6);rr=.95;}
- col=mix(col,rc,vExt.r);rough=mix(rough,rr,vExt.r);hgt=mix(hgt,.5,vExt.r);
-}
+// graded verges: gravel shoulders either side of the road meshes
+if(vExt.r>.01){vec4 gr=L(6.0,uv*1.2);vec3 vc=gr.rgb*vec3(.92,.9,.85);col=mix(col,vc,vExt.r);rough=mix(rough,.95,vExt.r);hgt=mix(hgt,gr.a,vExt.r);}
 // forest floor litter under trees
 // wetness: darker, glossier
 float wet=clamp(vExt.g+uWetness*.6,0.0,1.0);col*=mix(1.0,.55,wet);rough=mix(rough,.28,wet*.8);
@@ -174,5 +178,32 @@ void main(){
  #include <colorspace_fragment>
  #include <fog_fragment>
 }`});
+ return m;
+}
+// ------------------------------------------------------------ road surface (ribbon meshes)
+// uv.x across the carriageway 0..1, uv.y along it in metres; kind 0 main (asphalt, lines), 1 minor (gravel), 2 track (dirt, ruts)
+export function roadMaterial(arr,kind){
+ const m=new T.MeshStandardMaterial({roughness:.85,metalness:0,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-3-kind});
+ m.onBeforeCompile=sh=>{
+  Object.assign(sh.uniforms,shared,{tArr:{value:arr}});
+  sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nvarying vec3 vWPos;varying vec2 vRUv;').replace('#include <begin_vertex>','#include <begin_vertex>\nvWPos=(modelMatrix*vec4(transformed,1.0)).xyz;vRUv=uv;');
+  sh.fragmentShader=sh.fragmentShader.replace('#include <common>',`#include <common>
+precision highp sampler2DArray;uniform sampler2DArray tArr;uniform sampler2D uTrack;uniform vec4 uTrackRect;uniform float uTrackOn;uniform float uWetness;
+varying vec3 vWPos;varying vec2 vRUv;vec4 L(float l,vec2 uv){return texture(tArr,vec3(uv,l));}`)
+  .replace('#include <map_fragment>',`
+vec2 uv=vWPos.xz*.22;float lat=vRUv.x*2.0-1.0;float dist=length(vWPos-cameraPosition);float far=smoothstep(80.0,500.0,dist);vec3 col;float rough;
+${kind===0?`vec4 as=L(5.0,uv*1.5);col=as.rgb*(1.0+.12*L(5.0,uv*.11).r);rough=.78;
+ float fw=fwidth(lat);float cl=(1.0-smoothstep(.025-fw,.025+fw,abs(lat)))*step(fract(vRUv.y/12.0),.42);
+ float edge=(1.0-smoothstep(.035-fw,.035+fw,abs(abs(lat)-.9)));
+ col=mix(col,vec3(.66,.5,.12),cl*.9*(1.0-far*.7));col=mix(col,vec3(.72),edge*.85*(1.0-far*.7));
+ col*=mix(.92,1.0,smoothstep(.3,.6,abs(lat)));`:kind===1?`vec4 gr=L(6.0,uv*1.2);col=gr.rgb*vec3(.95,.93,.88);rough=.95;
+ float rut=smoothstep(.16,.0,abs(abs(lat)-.45));col*=1.0-.12*rut;`:`vec4 d=L(1.0,uv*1.1);float rut=smoothstep(.14,.0,abs(abs(lat)-.42));col=d.rgb*(1.0-.22*rut);rough=.95;
+ vec4 g=L(0.0,uv);float mid=smoothstep(.22,.05,abs(lat));col=mix(col,g.rgb*vec3(.35,.45,.18)*1.6,mid*.6);`}
+float wet=uWetness*.6;col*=mix(1.0,.6,wet);rough=mix(rough,.3,wet*.8);
+if(uTrackOn>.5){vec2 tu=(vWPos.xz-uTrackRect.xy)/uTrackRect.zw;if(tu.x>0.0&&tu.y>0.0&&tu.x<1.0&&tu.y<1.0){float tr=texture2D(uTrack,tu).r;col=mix(col,col*.8,tr*.5);}}
+diffuseColor.rgb=col;float vRoughT=rough;`)
+  .replace('#include <roughnessmap_fragment>','float roughnessFactor = vRoughT;');
+ };
+ m.customProgramCacheKey=()=>'road'+kind;
  return m;
 }

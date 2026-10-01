@@ -4,7 +4,7 @@
 // grids -> towns, graded roads, bridges and special sites. Deterministic from a seed.
 import {Noise,rng,hash2,clamp,mix,smooth,smoothstep} from './noise.mjs';
 
-export const GENERATOR_VERSION=8;
+export const GENERATOR_VERSION=10;
 export const WORLD=Object.freeze({size:6144,half:3072,N:512,cell:12,N0:256,cell0:24});
 
 // ---------------------------------------------------------------- binary heap
@@ -423,10 +423,19 @@ export function generateWorld(seed=711,onProgress=()=>{}){
   while(k<n){const [x,z]=rs[k];const i=clamp(Math.floor((z+half)/cell),0,N-1)*N+clamp(Math.floor((x+half)/cell),0,N-1);const c=chRaster[i];
    if(c>=0&&chan[c].cls>=1&&chWidth[i]>(kind==='track'?9999:5)){let e=k;while(e<n-1){const [x2,z2]=rs[e+1];const i2=clamp(Math.floor((z2+half)/cell),0,N-1)*N+clamp(Math.floor((x2+half)/cell),0,N-1);if(chRaster[i2]>=0&&chan[chRaster[i2]].cls>=1)e++;else break;}
     const s0=Math.max(0,k-3),s1=Math.min(n-1,e+3);let wl=-1e9;for(let q=k;q<=e;q++){const [xq,zq]=rs[q];const iq=clamp(Math.floor((zq+half)/cell),0,N-1)*N+clamp(Math.floor((xq+half)/cell),0,N-1);wl=Math.max(wl,chLevel[iq]);}
-    const deck=Math.max(wl+3.2,sm[s0],sm[s1]);for(let q=s0;q<=s1;q++)sm[q]=deck;
+    let deck=Math.max(wl+3.2,sm[s0],sm[s1]);
+    // a road crossing beside an existing bridge on the same channel shares its deck level (the two decks meet)
+    {const cx=(rs[s0][0]+rs[s1][0])/2,cz=(rs[s0][1]+rs[s1][1])/2;for(const o of roads)for(const ob of o.bridges)if(ob.channel===c&&Math.hypot((ob.x0+ob.x1)/2-cx,(ob.z0+ob.z1)/2-cz)<90)deck=ob.deck;}
+    for(let q=s0;q<=s1;q++)sm[q]=deck;
     bridges.push({s0,s1,deck,x0:rs[s0][0],z0:rs[s0][1],x1:rs[s1][0],z1:rs[s1][1],water:wl,channel:c,name:chan[c].name});k=s1+1;continue;}
    k++;}
   const fixed=new Uint8Array(n);for(const b of bridges)for(let q=b.s0;q<=b.s1;q++)fixed[q]=1;
+  // where this road runs on or beside an earlier one it takes that road's level, so junctions and shared
+  // stretches are one surface (two profiles crossing would bury one carriageway under the other)
+  for(let q=0;q<n;q++){if(fixed[q])continue;let best=null;for(const o of roads){const lim=(o.width+(kind==='main'?7.2:kind==='minor'?5.2:3.6))*.5+1.5;
+    for(let j=0;j<o.n-1;j++){const x0=o.xz[j*2],z0=o.xz[j*2+1];if(Math.abs(x0-rs[q][0])>lim+5||Math.abs(z0-rs[q][1])>lim+5)continue;const ex=o.xz[j*2+2]-x0,ez=o.xz[j*2+3]-z0,L2=ex*ex+ez*ez||1;let t=((rs[q][0]-x0)*ex+(rs[q][1]-z0)*ez)/L2;t=t<0?0:t>1?1:t;
+     const d=Math.hypot(rs[q][0]-x0-ex*t,rs[q][1]-z0-ez*t);if(d<lim&&(!best||d<best.d))best={d,y:o.y[j]+(o.y[j+1]-o.y[j])*t};}}
+   if(best){sm[q]=best.y;fixed[q]=1;}}
   for(let it=0;it<3;it++){for(let q=1;q<n;q++)if(!fixed[q])sm[q]=clamp(sm[q],sm[q-1]-g*4,sm[q-1]+g*4);for(let q=n-2;q>=0;q--)if(!fixed[q])sm[q]=clamp(sm[q],sm[q+1]-g*4,sm[q+1]+g*4);}
   const xz=new Float32Array(n*2);for(let q=0;q<n;q++){xz[q*2]=rs[q][0];xz[q*2+1]=rs[q][1];}
   const road={id:roads.length,kind,name,width:kind==='main'?7.2:kind==='minor'?5.2:3.6,n,xz,y:sm,bridges};
@@ -520,7 +529,11 @@ export function generateWorld(seed=711,onProgress=()=>{}){
    }
   }
   // site buildings
-  for(const s of sites)if(s.town===ti){const kind=s.type==='fire-station'?'firestation':'clinic';const b={type:kind,x:s.x,z:s.z,w:kind==='firestation'?16:14,d:kind==='firestation'?20:22,h:kind==='firestation'?7:6,rot:0,y:t.y,town:ti,seed:ti};buildings.push(b);}
+  // site buildings: on the site, or the nearest spot nearby clear of the roads (and their graded shoulders)
+  for(const s of sites)if(s.town===ti){const kind=s.type==='fire-station'?'firestation':'clinic';const b={type:kind,x:s.x,z:s.z,w:kind==='firestation'?16:14,d:kind==='firestation'?20:22,h:kind==='firestation'?7:6,rot:0,y:t.y,town:ti,seed:ti};
+   const clear=(x,z)=>{for(const r of roads){for(let q=0;q<r.n;q++){if(Math.hypot(r.xz[q*2]-x,r.xz[q*2+1]-z)<r.width*.5+Math.max(b.w,b.d)*.62+5)return false;}}for(const o of placed)if(Math.hypot(o.x-x,o.z-z)<(Math.max(o.w,o.d)+Math.max(b.w,b.d))*.62)return false;return true;};
+   if(!clear(b.x,b.z)){search:for(let rr=6;rr<=90;rr+=6)for(let a=0;a<16;a++){const x=s.x+Math.cos(a/16*Math.PI*2)*rr,z=s.z+Math.sin(a/16*Math.PI*2)*rr;if(clear(x,z)){b.x=x;b.z=z;break search;}}}
+   placed.push(b);buildings.push(b);}
  }
  mark('buildings');
  // ---- pack

@@ -77,7 +77,7 @@ export function placeChunk(t,cx,cz,opts={}){
   if(wt.farm>.45){const f=t.field(x,z);ps=f.blockEdge<4.5?.5:f.edge<2.5&&f.crop!==2?.04:0;}
   if(wt.snow>.4||sl>1.1)continue;
   if(r3>pb+ps)continue;
-  if(!roadClear(x,z,3.2))continue;const td=townNear(x,z);if(td<1&&(td<.85||buildingNear(x,z,3)))continue;
+  if(!roadClear(x,z,5))continue;const td=townNear(x,z);if(td<1&&(td<.85||buildingNear(x,z,3)))continue;
   let wet=false;for(const c of t.channelsNear(x,z,t._vn)){if(c.c.cls>=1&&c.d<c.w*.5+1){wet=true;break;}}if(wet)continue;
   push(sp,x,t.height(x,z),z,r1*6.283,.6+r4*1.2,r2);
  }

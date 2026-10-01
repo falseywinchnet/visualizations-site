@@ -19,6 +19,11 @@ export const SURFACES={
 const smin=(a,b,k)=>{const q=Math.max(k-Math.abs(a-b),0)/k;return Math.min(a,b)-q*q*k*.25;};
 const BIOME_LABEL=['Snowfield','Alpine tundra','Cliffs and bare rock','Scree slopes','Conifer forest','Mixed forest','Broadleaf woods','Riverside woods','Marsh','Meadow','Farmland','Scrub hills','Badlands','Lake'];
 export const CROPS=['corn','wheat','pasture','fallow'];
+// road formation: a flat graded bed (carriageway plus gravel shoulders wide enough for the Spider's full
+// track), then a batter down or up to the natural ground
+export const ROAD={shoulder:3.4,batter:1.8,pad:28};
+// bridge deck width: the carriageway plus walkways, never narrower than the Spider's full track
+export const deckWidth=r=>Math.max(r.width+1.4,11.6);
 
 export class Terrain{
  constructor(world){
@@ -47,10 +52,10 @@ export class Terrain{
   this.segs=Int32Array.from(segs);this.cBuckets=buckets;
  }
  _buildRoadIndex(){
-  const B=64,G=Math.ceil((this.half*2+2400)/B);this.rB=B;this.rG=G;
-  const buckets=new Map(),segs=[];
+  const B=32,G=Math.ceil((this.half*2+2400)/B);this.rB=B;this.rG=G;
+  const buckets=new Map(),segs=[],bb=new Map();
   for(const r of this.w.roads){
-   const pad=r.width*.5+9;
+   const pad=r.width*.5+ROAD.pad;
    for(let k=0;k<r.n-1;k++){
     const x0=r.xz[k*2],z0=r.xz[k*2+1],x1=r.xz[k*2+2],z1=r.xz[k*2+3];const id=segs.length/2;segs.push(r.id,k);
     const bx0=Math.floor((Math.min(x0,x1)-pad+this.cOff)/B),bx1=Math.floor((Math.max(x0,x1)+pad+this.cOff)/B),bz0=Math.floor((Math.min(z0,z1)-pad+this.cOff)/B),bz1=Math.floor((Math.max(z0,z1)+pad+this.cOff)/B);
@@ -58,8 +63,11 @@ export class Terrain{
    }
    // mark bridge sample ranges
    r.onBridge=new Int16Array(r.n).fill(-1);r.bridges.forEach((b,bi)=>{for(let q=b.s0;q<=b.s1;q++)r.onBridge[q]=bi;});
+   // bridge segments get their own small index: the physics ground only asks about decks where there are any
+   const bp=deckWidth(r)*.5+2;for(const b of r.bridges)for(let k=Math.max(0,b.s0-1);k<Math.min(r.n-1,b.s1+1);k++){const x0=r.xz[k*2],z0=r.xz[k*2+1],x1=r.xz[k*2+2],z1=r.xz[k*2+3];
+    for(let bz=Math.floor((Math.min(z0,z1)-bp+this.cOff)/B);bz<=Math.floor((Math.max(z0,z1)+bp+this.cOff)/B);bz++)for(let bx=Math.floor((Math.min(x0,x1)-bp+this.cOff)/B);bx<=Math.floor((Math.max(x0,x1)+bp+this.cOff)/B);bx++)bb.set(bz*G+bx,1);}
   }
-  this.rsegs=Int32Array.from(segs);this.rBuckets=buckets;
+  this.rsegs=Int32Array.from(segs);this.rBuckets=buckets;this.bBuckets=bb;
  }
  // ---------------------------------------------------------------- grids
  gx(x){return (x+this.half)/this.cell-.5;}
@@ -72,7 +80,8 @@ export class Terrain{
   if(out<=0)return h;
   // keep the trunk river valley open where it enters and leaves
   let open=1;for(const p of this._riverGates()){const dx=x-p[0],dz=z-p[1],t=dx*p[2]+dz*p[3];if(t>0){const lat=Math.abs(-dx*p[3]+dz*p[2]);open=Math.min(open,smoothstep(120+t*.18,520+t*.4,lat));}}
-  const ridge=this.noise.ridged(x/2200,z/2200,5)*1;const rise=smoothstep(0,2600,out)*(260+900*ridge)*open+out*.03*open;
+  // the ranges beyond the map: broad massifs with softened ridgelines rather than a wall of spikes
+  const ridge=this.noise.ridged(x/2600,z/2600,4)*.55+(this.noise.fbm(x/1900,z/1900,4)*.5+.5)*.45;const rise=smoothstep(0,3200,out)*(220+820*ridge*ridge)*open+out*.025*open;
   return h+rise;
  }
  _riverGates(){
@@ -101,16 +110,25 @@ export class Terrain{
   const key=Math.floor((z+this.cOff)/this.rB)*this.rG+Math.floor((x+this.cOff)/this.rB);const a=this.rBuckets.get(key);if(!a)return null;
   let best=null,bd=1e9;const segs=this.rsegs,roads=this.w.roads;
   for(let q=0;q<a.length;q++){const s=a[q],r=roads[segs[s*2]],k=segs[s*2+1];const x0=r.xz[k*2],z0=r.xz[k*2+1],dx=r.xz[k*2+2]-x0,dz=r.xz[k*2+3]-z0,L2=dx*dx+dz*dz||1;let t=((x-x0)*dx+(z-z0)*dz)/L2;t=t<0?0:t>1?1:t;
-   const d=Math.hypot(x-x0-dx*t,z-z0-dz*t)-r.width*.5;if(d<bd){bd=d;best={r,k,t,d,y:r.y[k]+(r.y[k+1]-r.y[k])*t,dx:dx/Math.sqrt(L2),dz:dz/Math.sqrt(L2),signed:Math.sign((x-x0)*-dz+(z-z0)*dx)*(d+r.width*.5)};}}
+   const ex=x-x0-dx*t,ez=z-z0-dz*t,hw=r.width*.5,lim=bd+hw;if(ex*ex+ez*ez>=lim*lim)continue;const d=Math.sqrt(ex*ex+ez*ez)-hw;if(d<bd){bd=d;best={r,k,t,d,y:r.y[k]+(r.y[k+1]-r.y[k])*t,dx:dx/Math.sqrt(L2),dz:dz/Math.sqrt(L2),signed:Math.sign((x-x0)*-dz+(z-z0)*dx)*(d+hw)};}}
   return best;
  }
+ // nearest segment of every road around (x,z), nearest last
+ roadsNear(x,z,out){
+  out.length=0;const key=Math.floor((z+this.cOff)/this.rB)*this.rG+Math.floor((x+this.cOff)/this.rB);const a=this.rBuckets.get(key);if(!a)return out;const segs=this.rsegs,roads=this.w.roads;
+  for(let q=0;q<a.length;q++){const s=a[q],r=roads[segs[s*2]],k=segs[s*2+1];const x0=r.xz[k*2],z0=r.xz[k*2+1],dx=r.xz[k*2+2]-x0,dz=r.xz[k*2+3]-z0,L2=dx*dx+dz*dz||1;let t=((x-x0)*dx+(z-z0)*dz)/L2;t=t<0?0:t>1?1:t;
+   const ex=x-x0-dx*t,ez=z-z0-dz*t,hw=r.width*.5,lim=hw+ROAD.pad;const e2=ex*ex+ez*ez;if(e2>=lim*lim)continue;const d=Math.sqrt(e2)-hw;let j=-1;for(let i=0;i<out.length;i++)if(out[i].r===r){j=i;break;}if(j>=0&&out[j].d<=d)continue;
+   const rec={r,k,t,d,y:r.y[k]+(r.y[k+1]-r.y[k])*t};if(j>=0)out[j]=rec;else out.push(rec);}
+  out.sort((p,q)=>q.d-p.d);return out;}
  bridgeAt(road,k){const bi=road.onBridge[k];if(bi<0)return null;if(this.bridgeRemoved.has(road.id+':'+bi))return null;return road.bridges[bi];}
  // ---------------------------------------------------------------- height
  terraceParams(x,z){
   const dry=this.grid('dry',x,z),hard=this.grid('hard',x,z),sl=this.grid('slope',x,z);
   const w=smoothstep(.25,.55,dry)*smoothstep(.08,.22,sl)+smoothstep(.62,.8,hard)*smoothstep(.35,.7,sl)*.8;
   const cliffy=smoothstep(.45,.75,this.n2.fbm(x/520,z/520,2)*.5+.5+hard*.3);
-  return {w:clamp(w,0,1),H:mix(1.6,11,cliffy)};
+  // ledges come and go along the hillside instead of running as unbroken bands
+  const patch=smoothstep(.25,.6,this.n2.fbm(x/260+7.3,z/260-2.1,2)*.5+.5);
+  return {w:clamp(w*patch,0,1),H:mix(1.6,11,cliffy)};
  }
  height(x,z,info){
   let h=this.base(x,z);
@@ -120,12 +138,13 @@ export class Terrain{
   const n=this.noise;
   h+=(n.fbm(x/64,z/64,2)*1.4+n.simplex(x/16,z/16)*.38+n.simplex(x/4.3,z/4.3)*.07)*rough;
   // strata terraces in mesa country and hard-rock bands
-  if(inside){const tp=this.terraceParams(x,z);if(tp.w>.02){const H=tp.H,s=(h+n.simplex(x/90,z/90)*H*.25)/H,f=s-Math.floor(s),riser=H>5?.22:.4;const tt=f<1-riser?0:(f-(1-riser))/riser;const ht=(Math.floor(s)+smooth(tt))*H;h=mix(h,ht,tp.w);if(info){info.terrace=tp.w;info.riser=H;}}}
+  if(inside){const tp=this.terraceParams(x,z);if(tp.w>.02){const H=tp.H,s=(h+n.simplex(x/90,z/90)*H*.3+n.simplex(x/23,z/23)*H*.12)/H,f=s-Math.floor(s),riser=Math.min(.6,Math.max(H>5?.22:.4,3.2/H));/* risers at least ~3 m across, contours that wander */const tt=f<1-riser?0:(f-(1-riser))/riser;const ht=(Math.floor(s)+smooth(tt))*H;h=mix(h,ht,tp.w);if(info){info.terrace=tp.w;info.riser=H;}}}
   // town pads
   if(inside)for(const t of this.w.towns){const d=Math.hypot(x-t.x,z-t.z);if(d<t.r+70)h=mix(t.y,h,smoothstep(t.r-50,t.r+70,d));}
   // channel carving
+  let nearC=null;
   if(inside||Math.abs(x)<this.half+600&&Math.abs(z)<this.half+600){
-   const near=this.channelsNear(x,z,this._cn||(this._cn=[]));
+   const near=nearC=this.channelsNear(x,z,this._cn||(this._cn=[]));
    // floodplain: keep banks just above water
    for(const c of near){if(c.c.cls===0)continue;const L=c.level,hw=c.w*.5;if(c.d>hw+1&&c.d<hw+c.w*1.2+14){const fp=L+.3+(c.d-hw)*.015;const wgt=1-smoothstep(hw+c.w*.6+6,hw+c.w*1.2+14,c.d);if(h<fp)h=mix(h,fp,wgt*.85);}}
    for(const c of near){
@@ -136,19 +155,28 @@ export class Terrain{
     if(info&&c.d<hw+2&&(!info.channel||c.c.cls>info.channel.c.cls))info.channel=c;
    }
   }
-  // roads: cut and fill
-  const r=this.roadNear(x,z);
-  if(r&&r.d<7){const br=this.bridgeAt(r.r,r.k)||this.bridgeAt(r.r,Math.min(r.r.n-1,r.k+1));
-   if(!br){const wgt=1-smoothstep(0,6.5,r.d);const top=r.y+(r.r.kind==='main'?.18:.08)*(r.d<0?1:0);h=mix(h,top,wgt);}
-   if(info){info.road=r;info.bridge=br;}}
+  // roads: graded formation (crowned carriageway, flat shoulders) and batters to the natural ground;
+  // every road nearby in turn, farthest first, so junctions blend instead of switching at a seam
+  const rs=this.roadsNear(x,z,this._rn||(this._rn=[]));
+  for(const r of rs){if(r.d>=ROAD.pad-2)continue;
+   const br=r.r.onBridge[r.k]>=0||r.r.onBridge[Math.min(r.r.n-1,r.k+1)]>=0;/* standing or washed out: no fill in the channel */
+   const hw=r.r.width*.5,lat=r.d+hw,crown=r.r.kind==='track'?.03:.05;
+   const top=r.d<0?r.y+crown*(1-(lat/hw)**2):r.y-Math.min(.05,r.d*.02);
+   const bw=Math.min(ROAD.pad-ROAD.shoulder-2,Math.max(2.5,Math.abs(h-r.y)*ROAD.batter));
+   let wgt=r.d<=ROAD.shoulder?1:1-smoothstep(ROAD.shoulder,ROAD.shoulder+bw,r.d);
+   // across a river the deck carries the road: earth ramps only on dry ground, none in the channel
+   if(br){let gap=1e9;if(nearC)for(const c of nearC)if(c.c.cls>=1)gap=Math.min(gap,c.d-c.w*.5);wgt*=smoothstep(3,12,gap);}
+   h=mix(h,top,wgt);
+   if(info&&(!info.road||r.d<info.road.d)){info.road=r;info.bridge=br?this.bridgeAt(r.r,r.k):null;}}
   return h;
  }
  // physics ground: render height plus bridge decks
  groundHeight(x,z,yHint=1e9){
   const h=this.tileHeight(x,z);
-  const r=this.roadNear(x,z);
-  if(r&&r.d<.6){const br=this.bridgeAt(r.r,r.k);if(br){const deck=r.y+.35;if(yHint>deck-1.2&&deck>h)return deck;}}
-  return h;
+  // any bridge deck here (two roads may cross a river side by side)
+  if(!this.bBuckets.has(Math.floor((z+this.cOff)/this.rB)*this.rG+Math.floor((x+this.cOff)/this.rB)))return h;
+  let g=h;for(const r of this.roadsNear(x,z,this._gn||(this._gn=[]))){if(r.d>=(deckWidth(r.r)-r.r.width)*.5||!this.bridgeAt(r.r,r.k))continue;const deck=r.y+(r.r.kind==='track'?.03:.05);if(yHint>deck-1.2&&deck>g)g=deck;}
+  return g;
  }
  // ---------------------------------------------------------------- 1 m tile cache
  tile(tx,tz){
@@ -158,6 +186,8 @@ export class Terrain{
   if(this.tiles.size>this.maxTiles){let old=null;for(const [k,v] of this.tiles)if(!old||v.used<old[1].used)old=[k,v];this.tiles.delete(old[0]);}
   return t;
  }
+ // a tile built off the main thread (terrain worker) joins the cache
+ putTile(tx,tz,a){const key=tx*100003+tz;if(this.tiles.has(key))return;this.tiles.set(key,{a,used:this.frame||0,tx,tz});if(this.tiles.size>this.maxTiles){let old=null;for(const [k,v] of this.tiles)if(!old||v.used<old[1].used)old=[k,v];this.tiles.delete(old[0]);}}
  hasTile(x,z){return this.tiles.has(Math.floor(x/64)*100003+Math.floor(z/64));}
  // Same triangle split as the render mesh: quads split along the (i+1,j)-(i,j+1) diagonal.
  tileHeight(x,z){

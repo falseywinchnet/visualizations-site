@@ -4,7 +4,10 @@ import * as T from 'three';
 import {GEOM} from './physics.mjs';
 import {mergeNonIndexed} from './scenery.mjs';
 
-const LEG_X=4.02,AXLE=GEOM.halfTrack-LEG_X,PLATE=GEOM.plateY,RIM_R=GEOM.R*.58;
+const AXLE=.78,PLATE=GEOM.plateY,RIM_R=GEOM.R*.58;
+// splayed struts: the knee sits inboard of the tyre; the strut runs down and out at GEOM.splay
+const SPL=GEOM.splay,cS=Math.cos(SPL),sS=Math.sin(SPL),DROP=(PLATE-GEOM.hubTop)/cS;// strut length from knee to hub at e=0
+const kneeX=ht=>ht-AXLE-sS*GEOM.stroke/2-sS*DROP;
 const mixN=(a,b,t)=>a+(b-a)*t;
 const LIVERY={scout:{paint:0x55604a,accent:0x2c3329},troop:{paint:0x4a5240,accent:0x2a2f27},rescue:{paint:0xd8d6cf,accent:0xc2412d},fire:{paint:0xa8321f,accent:0xe6d9b8}};
 const UNIFORM={scout:[0x5d6a4c,0x3b4436],troop:[0x55603f,0x2f3a2a],rescue:[0xd06a28,0xf2f2ee],fire:[0xb8872e,0xd8c56a]};
@@ -35,11 +38,11 @@ float n3(vec3 x){vec3 i=floor(x),f=fract(x);f=f*f*(3.0-2.0*f);return mix(mix(mix
    brass:new T.MeshStandardMaterial({color:0xb08d4f,roughness:.35,metalness:.9}),
    rubber:dirty(new T.MeshStandardMaterial({color:0x2a2a27,roughness:.9,metalness:0})),
    redPaint:new T.MeshStandardMaterial({color:0xa3261b,roughness:.45,metalness:.2}),
-   aramid:dirty(new T.MeshStandardMaterial({color:0xc9a227,roughness:.55,metalness:.1})),
+   aramid:dirty(new T.MeshStandardMaterial({color:0x7d6a34,roughness:.6,metalness:.15})),
    webbing:new T.MeshStandardMaterial({color:0x3c3f2e,roughness:.9}),
    lamp:new T.MeshStandardMaterial({color:0xfff4dc,emissive:0xfff0d0,emissiveIntensity:.6,roughness:.4}),
    hose:new T.MeshStandardMaterial({color:0x151617,roughness:.7}),
-   rim:dirty(new T.MeshStandardMaterial({color:0x6b7064,roughness:.45,metalness:.7})),
+   rim:dirty(new T.MeshStandardMaterial({color:0x8b9085,roughness:.4,metalness:.75})),
    glass:new T.MeshStandardMaterial({color:0x9cc6c8,roughness:.04,metalness:.15,transparent:true,opacity:.16,depthWrite:false,side:T.DoubleSide,envMapIntensity:1.6}),
    seat:new T.MeshStandardMaterial({color:0x2d2f2c,roughness:.7}),
    floorGlass:new T.MeshStandardMaterial({color:0x9ab8b8,roughness:.08,metalness:.1,transparent:true,opacity:.22,depthWrite:false}),
@@ -57,10 +60,21 @@ float n3(vec3 x){vec3 i=floor(x),f=fract(x);f=f*f*(3.0-2.0*f);return mix(mix(mix
   this.buildTop();this.buildCabin();this.buildPairs();this.buildVariant();
   // merge static parts per material to keep draw calls low
   const keep=new Set([this.hatch,this.gauge,this.searchlight,...this.legs.map(l=>l.rod),...this.legs.map(l=>l.stage),...this.legs.map(l=>l.stage2),...this.wheels.map(w=>w.tire),...this.lights.head,...this.lights.nose,...this.lights.tail,...this.lights.beacons,...(this.lights.bar||[])]);
-  const groups=[this.top,this.cabin,...this.seats,...this.pairs,...this.legs.map(l=>l.leg),...this.legs.map(l=>l.hub),...this.wheels.map(w=>w.spin)];
+  const groups=[this.top,this.cabin,...this.seats,...this.pairs,...this.legs.map(l=>l.leg),...this.legs.map(l=>l.st),...this.legs.map(l=>l.hub),...this.wheels.map(w=>w.spin)];
   this.cabin.children.filter(c=>c.isGroup&&c!==this.ladder&&!this.seats.includes(c)).forEach(g=>groups.push(g));
-  for(const g of groups)mergeByMaterial(g,keep);
-  this.root.traverse(o=>{if(o.isMesh){o.castShadow=o.material!==M.glass&&o.material!==M.floorGlass;o.receiveShadow=true;}});
+  for(const L of this.legs){L.st.updateMatrix();for(const c of [...L.st.children]){if(!c.isMesh||keep.has(c)||c.children.length)continue;c.updateMatrix();c.matrix.premultiply(L.st.matrix);c.matrix.decompose(c.position,c.quaternion,c.scale);L.st.remove(c);L.leg.add(c);}}
+  // one material for every opaque standard part: colour, roughness, metalness and grime ride on vertex attributes,
+  // so each rigid group of the machine is a single draw (and a single shadow draw)
+  const uber=new T.MeshStandardMaterial({vertexColors:true,roughness:1,metalness:1});if(envMap)uber.envMap=envMap;
+  uber.onBeforeCompile=sh=>{M.paint.onBeforeCompile(sh);
+   sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nattribute vec3 rm;varying vec3 vRM;').replace('#include <begin_vertex>','#include <begin_vertex>\nvRM=rm;');
+   sh.fragmentShader=sh.fragmentShader.replace('#include <common>','#include <common>\nvarying vec3 vRM;').replace('*step(.02,uDirt);','*step(.02,uDirt)*vRM.z;')
+    .replace('#include <roughnessmap_fragment>','#include <roughnessmap_fragment>\nroughnessFactor=vRM.x;').replace('#include <metalnessmap_fragment>','#include <metalnessmap_fragment>\nmetalnessFactor=vRM.y;');};
+  uber.customProgramCacheKey=()=>'uber';this.uber=uber;
+  for(const g of groups){mergeAll(g,keep,uber);mergeByMaterial(g,keep);}
+  // shadows from the parts that read in a shadow: not glass, not the cabin's interior fittings, not small trim
+  const inside=new Set();this.cabin.traverse(o=>{if(o.name==='Interior'||this.seats.includes(o))o.traverse(c=>inside.add(c));});
+  this.root.traverse(o=>{if(o.isMesh){o.geometry.computeBoundingSphere();o.castShadow=o.material!==M.glass&&o.material!==M.floorGlass&&!inside.has(o)&&o.geometry.boundingSphere.radius>.5;o.receiveShadow=true;}});/* small fittings add a shadow-pass draw each for a few pixels */
  }
  // ------------------------------------------------------------ helpers
  mesh(g,m,p=[0,0,0],parent=this.root,r){const o=new T.Mesh(g,m);o.position.set(...p);if(r)o.rotation.set(...r);parent.add(o);return o;}
@@ -212,60 +226,63 @@ float n3(vec3 x){vec3 i=floor(x),f=fract(x);f=f*f*(3.0-2.0*f);return mix(mix(mix
   const M=this.mats;
   for(let i=0;i<3;i++){
    const z=GEOM.stations[i],g=new T.Group();g.position.set(0,PLATE,z);this.root.add(g);g.name=['Front slide plate pair','Middle slide plate pair','Rear fixed pair'][i];
-   // crossbar housing the two telescoping arm beams (side by side, so both can run in past the centre)
-   this.box([2.5,.5,.9],[0,.08,0],M.frame,g);for(const e of [-1,1])this.box([.12,.56,.96],[e*1.25,.08,0],M.dark,g);
+   // crossbar housing the two telescoping arm tubes (side by side, so both can run in past the centre)
+   for(const zz of [-1,1])this.mesh(new T.CylinderGeometry(.25,.25,2.5,28),M.frame,[0,.1,zz*.21],g,[0,0,Math.PI/2]);
+   this.mesh(new T.CylinderGeometry(.16,.16,.9,20),M.frame,[0,.1,0],g,[Math.PI/2,0,0]);// pivot tube across the pair
+   for(const e of [-1,1])for(const zz of [-1,1])this.mesh(new T.TorusGeometry(.25,.045,10,28),M.dark,[e*1.25,.1,zz*.21],g,[0,Math.PI/2,0]);
    for(const s of [-1,1]){
-    // fixed outer sleeve of the arm, then the sliding beam that carries the leg
-    this.box([.95,.42,.4],[s*1.65,.1,s*.21],M.paint,g);this.box([.08,.48,.46],[s*2.1,.1,s*.21],M.frame,g);
-    // leg: knee knuckle, barrel with accumulator, chrome rod, hub motor, axle, wheel
-    const leg=new T.Group();leg.position.set(s*LEG_X,0,0);g.add(leg);
-    this.box([2.5,.32,.3],[s*-1.25,.1,s*.21],M.chrome,leg);// sliding arm beam (runs into the sleeve)
-    this.box([.5,.36,.34],[s*-.2,.1,s*.21],M.paint,leg);// arm head
-    for(let k=0;k<5;k++)this.mesh(new T.CylinderGeometry(.03,.03,.34,6),M.dark,[s*(-.5-k*.45),.27,s*.21],leg);// rack teeth for the slide motor
-    this.mesh(new T.SphereGeometry(.32,18,14),M.frame,[0,-.18,0],leg);
-    this.mesh(new T.CylinderGeometry(.22,.22,.78,16),M.frame,[0,-.18,0],leg,[Math.PI/2,0,0]);// knee pin boss
-    for(const zz of [-1,1])this.mesh(new T.CylinderGeometry(.1,.1,.06,12),M.chrome,[0,-.18,zz*.42],leg,[Math.PI/2,0,0]);
-    const barrelTop=-.42,barrelBot=GEOM.hubTop+.78-PLATE;// clears the fork crown at full retraction
-    this.rod([0,barrelTop,0],[0,barrelBot,0],.26,M.paint,leg,18);
-    this.mesh(new T.CylinderGeometry(.31,.31,.2,18),M.frame,[0,barrelBot+.06,0],leg);// gland
-    this.mesh(new T.CylinderGeometry(.3,.3,.14,18),M.frame,[0,barrelTop-.05,0],leg);
-    for(let y=barrelTop-.7;y>barrelBot+.4;y-=.9)this.mesh(new T.CylinderGeometry(.285,.285,.06,18),M.frame,[0,y,0],leg);// barrel hoops
-    // knee braces: twin tubes from the arm down to a collar on the barrel, with a gusset plate between
+    // fixed outer sleeve of the arm, then the sliding tube that carries the leg
+    this.mesh(new T.CylinderGeometry(.22,.22,.95,28),M.paint,[s*1.65,.1,s*.21],g,[0,0,Math.PI/2]);this.mesh(new T.TorusGeometry(.22,.05,10,28),M.frame,[s*2.12,.1,s*.21],g,[0,Math.PI/2,0]);
+    // leg: knee knuckle, splayed strut (barrel with accumulator, sleeves, chrome rod), hub motor, axle, wheel
+    const leg=new T.Group();leg.position.set(s*kneeX(GEOM.halfTrack),0,0);g.add(leg);
+    this.mesh(new T.CylinderGeometry(.15,.15,2.5,24),M.chrome,[s*-1.25,.1,s*.21],leg,[0,0,Math.PI/2]);// sliding arm tube (runs into the sleeve)
+    this.mesh(new T.CylinderGeometry(.21,.21,.46,24),M.paint,[s*-.22,.1,s*.21],leg,[0,0,Math.PI/2]);// arm head
+    for(let k=0;k<5;k++)this.mesh(new T.CylinderGeometry(.03,.03,.3,6),M.dark,[s*(-.5-k*.45),.26,s*.21],leg);// rack teeth for the slide motor
+    this.mesh(new T.SphereGeometry(.33,24,18),M.frame,[0,-.18,0],leg);
+    this.mesh(new T.CylinderGeometry(.22,.22,.78,20),M.frame,[0,-.18,0],leg,[Math.PI/2,0,0]);// knee pin boss
+    for(const zz of [-1,1])this.mesh(new T.CylinderGeometry(.1,.1,.06,14),M.chrome,[0,-.18,zz*.42],leg,[Math.PI/2,0,0]);
+    const st=new T.Group();st.rotation.z=s*SPL;leg.add(st);// the strut leans out from the knee
+    const toLeg=(x,y,z)=>{const c=Math.cos(s*SPL),n=Math.sin(s*SPL);return [x*c-y*n,x*n+y*c,z];};
+    const barrelTop=-.42,barrelBot=-DROP+.78;// clears the fork crown at full retraction
+    this.rod([0,barrelTop,0],[0,barrelBot,0],.26,M.paint,st,28);
+    this.mesh(new T.CylinderGeometry(.31,.31,.2,28),M.frame,[0,barrelBot+.06,0],st);// gland
+    for(let k=0;k<6;k++)this.mesh(new T.TorusGeometry(.245-k*.004,.035,8,24),M.rubber,[0,barrelBot-.06-k*.07,0],st,[Math.PI/2,0,0]);// dust boot over the sleeve
+    this.mesh(new T.CylinderGeometry(.3,.3,.14,28),M.frame,[0,barrelTop-.05,0],st);
+    for(let y=barrelTop-.7;y>barrelBot+.4;y-=.9)this.mesh(new T.TorusGeometry(.27,.03,8,28),M.frame,[0,y,0],st,[Math.PI/2,0,0]);// barrel hoops
+    // knee braces: twin tubes from the arm down to a collar on the barrel, with a web between
     const kx=-.85,ky=-.02,by_=-1.1;// short enough to clear the cabin at road track
-    for(const zz of [-1,1]){this.rod([s*kx,ky,zz*.17],[s*-.3,by_,zz*.17],.1,M.paint,leg,10);
-     this.mesh(new T.CylinderGeometry(.13,.13,.1,12),M.frame,[s*kx,ky,zz*.17],leg,[Math.PI/2,0,0]);}
-    this.mesh(new T.CylinderGeometry(.3,.3,.34,18),M.frame,[0,by_,0],leg);// brace collar
-    this.mesh(new T.CylinderGeometry(.08,.08,.5,10),M.chrome,[s*-.3,by_,0],leg,[Math.PI/2,0,0]);// collar pin
-    // a strut web between the twin braces, tying them into one knee truss
-    for(const t of [.35,.7])this.rod([s*mixN(kx,-.3,t),mixN(ky,by_,t),-.17],[s*mixN(kx,-.3,t),mixN(ky,by_,t),.17],.05,M.frame,leg,6);
-    this.rod([s*mixN(kx,-.3,.35),mixN(ky,by_,.35),0],[s*-.05,mixN(ky,by_,.35),0],.06,M.frame,leg,8);
+    for(const zz of [-1,1]){this.rod([s*kx,ky,zz*.17],toLeg(s*-.3,by_,zz*.17),.1,M.paint,leg,16);
+     this.mesh(new T.CylinderGeometry(.13,.13,.1,16),M.frame,[s*kx,ky,zz*.17],leg,[Math.PI/2,0,0]);}
+    this.mesh(new T.CylinderGeometry(.3,.3,.34,28),M.frame,[0,by_,0],st);// brace collar
+    this.mesh(new T.CylinderGeometry(.08,.08,.5,12),M.chrome,[s*-.3,by_,0],st,[Math.PI/2,0,0]);// collar pin
+    for(const t of [.35,.7]){const a=toLeg(s*-.3,by_,0);this.rod([mixN(s*kx,a[0],t),mixN(ky,a[1],t),-.17],[mixN(s*kx,a[0],t),mixN(ky,a[1],t),.17],.05,M.frame,leg,8);}
     // accumulator (the pneumatic spring) and its hoses, forward of the braces
-    const acc=this.mesh(new T.SphereGeometry(.28,18,14),M.accent,[s*-.42,barrelTop-.7,.58],leg);
-    this.rod([s*-.25,barrelTop-.62,.4],[0,barrelTop-.5,.2],.055,M.frame,leg,6);
-    this.tube([[0,barrelBot+.35,.26],[s*-.12,barrelTop-1.6,.4],[s*-.3,barrelTop-.4,.5],[s*-.65,.12,.2]],.038,M.hose,leg,false,24);
-    this.tube([[0,barrelBot+.6,-.26],[s*-.14,barrelTop-1.3,-.38],[s*-.34,barrelTop-.3,-.34],[s*-.6,.1,-.16]],.034,M.hose,leg,false,24);
+    const acc=this.mesh(new T.SphereGeometry(.28,20,16),M.accent,[s*-.42,barrelTop-.7,.58],st);
+    this.rod([s*-.25,barrelTop-.62,.4],[0,barrelTop-.5,.2],.055,M.frame,st,8);
+    this.tube([[0,barrelBot+.35,.26],[s*-.12,barrelTop-1.6,.4],[s*-.3,barrelTop-.4,.5],[s*-.65,.12,.2]],.038,M.hose,st,false,24);
+    this.tube([[0,barrelBot+.6,-.26],[s*-.14,barrelTop-1.3,-.38],[s*-.34,barrelTop-.3,-.34],[s*-.6,.1,-.16]],.034,M.hose,st,false,24);
     // three-stage telescopic leg: two sleeves run out of the barrel, the chrome rod out of the inner sleeve
-    const stage=this.mesh(new T.CylinderGeometry(.215,.215,1,16),M.chrome,[0,0,0],leg);stage.name='Leg sleeve';
-    const stage2=this.mesh(new T.CylinderGeometry(.19,.19,1,16),M.chrome,[0,0,0],leg);stage2.name='Leg sleeve 2';
-    const rod=this.mesh(new T.CylinderGeometry(.16,.16,1,16),M.chrome,[0,0,0],leg);rod.name='Chrome rod';
-    const hub=new T.Group();leg.add(hub);
-    this.mesh(new T.CylinderGeometry(.44,.44,.5,20),M.engine,[s*.14,0,0],hub,[0,0,Math.PI/2]);// hub motor
+    const stage=this.mesh(new T.CylinderGeometry(.215,.215,1,24),M.chrome,[0,0,0],st);stage.name='Leg sleeve';
+    const stage2=this.mesh(new T.CylinderGeometry(.19,.19,1,24),M.chrome,[0,0,0],st);stage2.name='Leg sleeve 2';
+    const rod=this.mesh(new T.CylinderGeometry(.16,.16,1,24),M.chrome,[0,0,0],st);rod.name='Chrome rod';
+    const hub=new T.Group();hub.rotation.z=-s*SPL;st.add(hub);// the knuckle keeps the wheel upright
+    this.mesh(new T.CylinderGeometry(.44,.44,.5,28),M.engine,[s*.14,0,0],hub,[0,0,Math.PI/2]);// hub motor
     for(let k=0;k<10;k++){const a=k/10*Math.PI*2;this.box([.46,.05,.05],[s*.14,Math.cos(a)*.44,Math.sin(a)*.44],M.frame,hub,[a,0,0]);}// cooling fins
-    this.mesh(new T.CylinderGeometry(.13,.13,AXLE,12),M.chrome,[s*AXLE*.5,0,0],hub,[0,0,Math.PI/2]);
-    this.box([.34,.62,.46],[0,.42,0],M.frame,hub);// fork crown
-    this.box([.2,.2,.9],[0,.18,0],M.frame,hub);// torque arm
+    this.mesh(new T.CylinderGeometry(.13,.13,AXLE,16),M.chrome,[s*AXLE*.5,0,0],hub,[0,0,Math.PI/2]);
+    this.mesh(new T.CylinderGeometry(.24,.28,.62,24),M.frame,[0,.42,0],hub);// fork crown
+    this.mesh(new T.CylinderGeometry(.1,.1,.9,14),M.frame,[0,.18,0],hub,[Math.PI/2,0,0]);// torque arm
     const wheel=new T.Group();wheel.position.set(s*AXLE,0,0);hub.add(wheel);
     const spin=new T.Group();wheel.add(spin);
     const tireMat=M.rubber.clone();tireMat.onBeforeCompile=tireShader(M.rubber.onBeforeCompile);tireMat.customProgramCacheKey=()=>'tire';tireMat.userData.flat={value:0};tireMat.userData.down={value:new T.Vector3(0,-1,0)};
     const tire=this.mesh(tireGeometry(),tireMat,[0,0,0],spin);tire.name='Tyre';
     this.buildRim(spin,s);
     // Kevlar-belted tyre: a woven aramid band on both sidewalls
-    for(const e of [-1,1]){const bandR=(RIM_R+GEOM.R)/2+.05;this.mesh(new T.TorusGeometry(bandR,.035,6,72),M.aramid,[e*GEOM.tireWidth*.53,0,0],spin,[0,Math.PI/2,0]);}
+    for(const e of [-1,1]){const bandR=(RIM_R+GEOM.R)/2+.05;this.mesh(new T.TorusGeometry(bandR,.022,6,72),M.aramid,[e*GEOM.tireWidth*.53,0,0],spin,[0,Math.PI/2,0]);}
     // front pair: a driving-lamp pod on each knee that turns with the steering
     if(i===0){const pod=new T.Group();pod.position.set(0,-.05,-.52);leg.add(pod);this.box([.12,.12,.3],[0,0,.18],M.frame,pod);
      this.mesh(new T.CylinderGeometry(.19,.16,.26,18),M.dark,[0,0,-.02],pod,[Math.PI/2,0,0]);const f=this.mesh(new T.CylinderGeometry(.16,.16,.02,18),M.headlamp,[0,0,-.16],pod,[Math.PI/2,0,0]);this.lights.head.push(f);
      this.lampMounts.push({parent:leg,pos:[0,-.05,-.7],aim:[s*1.5,-8,-30],angle:.42,power:1,steer:true});}
-    this.legs.push({pair:i,side:s,leg,rod,stage,stage2,hub,barrelBot,acc});this.wheels.push({spin,tire,tireMat,side:s,wheel});
+    this.legs.push({pair:i,side:s,leg,st,rod,stage,stage2,hub,barrelBot,acc});this.wheels.push({spin,tire,tireMat,side:s,wheel});
    }
    this.pairs.push(g);
   }
@@ -338,8 +355,8 @@ float n3(vec3 x){vec3 i=floor(x),f=fract(x);f=f*f*(3.0-2.0*f);return mix(mix(mix
   this.root.updateMatrixWorld();
   for(let i=0;i<6;i++){
    const w=sp.wheels[i],L=this.legs[i],W=this.wheels[i];
-   L.leg.position.x=L.side*(sp.ht(i)-AXLE);// telescoping arms: road track to full width
-   const hubY=GEOM.hubTop-w.e-PLATE;// relative to the plate group
+   L.leg.position.x=L.side*kneeX(sp.ht(i));// telescoping arms: road track to full width
+   const hubY=-(DROP+w.e);// along the splayed strut, from the knee
    L.hub.position.y=hubY;
    const rodTop=L.barrelBot+.1,len=Math.max(.05,rodTop-hubY-.2);L.rod.scale.y=len;L.rod.position.y=hubY+.2+len/2;const sl=Math.max(.05,len*.36),sl2=Math.max(.05,len*.68);L.stage.scale.y=sl;L.stage.position.y=rodTop-sl/2;L.stage2.scale.y=sl2;L.stage2.position.y=rodTop-sl2/2;
    W.spin.rotation.x=-w.spin;
@@ -399,6 +416,17 @@ function person(u1,u2,k,variant){
  const g=mergeNonIndexed(parts);const m=new T.Mesh(g,new T.MeshStandardMaterial({vertexColors:true,roughness:.8}));m.castShadow=true;return m;
 }
 
+function mergeAll(parent,keep,uber){
+ const ok=m=>m&&m.isMeshStandardMaterial&&!m.transparent&&!m.map&&m.side===T.FrontSide&&!(m.emissive&&m.emissive.getHex()!==0&&m.emissiveIntensity>0)&&!(m.customProgramCacheKey&&m.customProgramCacheKey()==='tire');
+ const list=[...parent.children].filter(c=>c.isMesh&&!c.isInstancedMesh&&!keep.has(c)&&!c.children.length&&c.name!=='Glazing'&&ok(c.material));if(list.length<2)return;
+ const geos=[];for(const c of list){c.updateMatrix();let g=c.geometry.index?c.geometry.toNonIndexed():c.geometry.clone();for(const a of Object.keys(g.attributes))if(!['position','normal'].includes(a))g.deleteAttribute(a);g.applyMatrix4(c.matrix);
+  const n=g.attributes.position.count,m=c.material,col=new Float32Array(n*3),rm=new Float32Array(n*3),dirt=(m.customProgramCacheKey&&String(m.customProgramCacheKey()).startsWith('dirty'))?1:0;
+  for(let i=0;i<n;i++){col[i*3]=m.color.r;col[i*3+1]=m.color.g;col[i*3+2]=m.color.b;rm[i*3]=m.roughness;rm[i*3+1]=m.metalness;rm[i*3+2]=dirt;}
+  g.setAttribute('color',new T.BufferAttribute(col,3));g.setAttribute('rm',new T.BufferAttribute(rm,3));geos.push(g);parent.remove(c);}
+ let n=0;for(const g of geos)n+=g.attributes.position.count;const A={position:new Float32Array(n*3),normal:new Float32Array(n*3),color:new Float32Array(n*3),rm:new Float32Array(n*3)};let o=0;
+ for(const g of geos){for(const k in A)A[k].set(g.attributes[k].array,o*3);o+=g.attributes.position.count;}
+ const mg=new T.BufferGeometry();for(const k in A)mg.setAttribute(k,new T.BufferAttribute(A[k],3));mg.computeBoundingSphere();
+ const m=new T.Mesh(mg,uber);m.name=list.map(c=>c.name).filter(Boolean)[0]||'';parent.add(m);}
 function mergeByMaterial(parent,keep){
  const buckets=new Map();
  for(const c of [...parent.children]){if(!c.isMesh||keep.has(c)||c.children.length||c.name==='Glazing')continue;const k=c.material.uuid;if(!buckets.has(k))buckets.set(k,[]);buckets.get(k).push(c);}

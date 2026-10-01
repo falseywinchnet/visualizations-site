@@ -64,6 +64,7 @@ async function boot(){
  texArr=terrainTextures(256);wNormals=waterNormals(256);
  const nW=Math.max(1,Math.min(3,(navigator.hardwareConcurrency||4)-2));
  workers=await Promise.all(Array.from({length:nW},()=>new Promise(res=>{const w=new Worker(new URL('./drive/terrain-worker.mjs',import.meta.url),{type:'module'});w.addEventListener('message',function f(e){if(e.data.type==='ready'){w.removeEventListener('message',f);res(w);}});w.postMessage({type:'init',world});})));
+ for(const w of workers)w.addEventListener('message',e=>{if(e.data.type==='tile'){tileWant.delete(e.data.tx*100003+e.data.tz);terrain.putTile(e.data.tx,e.data.tz,e.data.a);}});
  atmo=new Atmosphere(scene,renderer,{quality:G.quality});
  scenery=new Scenery(scene,terrain,{texArray:texArr,waterNormals:wNormals,workers,quality:G.quality});
  veg=new Vegetation(scene,terrain,renderer,{workers,quality:G.quality});
@@ -352,13 +353,19 @@ renderer.setAnimationLoop(now=>{
  // frame-time based quality auto-detect (downgrade only)
  frames++;fpsT+=dt;if(fpsT>2){fps=frames/fpsT;frames=0;fpsT=0;if(G.state==='drive'&&!G.paused&&fps<24&&G.quality!=='low'&&!params.get('quality')){lowFps++;if(lowFps>=3){setQuality(G.quality==='high'?'medium':'low');spider.say(`Quality lowered to ${G.quality} for smoother driving`,3);lowFps=0;}}else lowFps=0;}
 });
-function terrainPrefetch(){// build physics tiles ahead of the Spider (one per frame)
- const x=spider.pos[0]+spider.vel[0]*3,z=spider.pos[2]+spider.vel[2]*3;for(const [dx,dz] of [[0,0],[40,0],[-40,0],[0,40],[0,-40],[40,40],[-40,-40],[40,-40],[-40,40]]){if(!terrain.hasTile(x+dx,z+dz)){terrain.tile(Math.floor((x+dx)/64),Math.floor((z+dz)/64));break;}}
+// physics tiles ahead of the Spider are built in the terrain workers; the main thread only builds one
+// itself when the Spider is already standing on ground that has not arrived yet
+const tileWant=new Set();let tileRR=0;
+function terrainPrefetch(){
+ const T0=[spider.pos[0],spider.pos[2]];
+ for(const ahead of [0,1.5,3,5]){const x=T0[0]+spider.vel[0]*ahead,z=T0[1]+spider.vel[2]*ahead;
+  for(const [dx,dz] of [[0,0],[40,0],[-40,0],[0,40],[0,-40],[40,40],[-40,-40],[40,-40],[-40,40]]){const tx=Math.floor((x+dx)/64),tz=Math.floor((z+dz)/64),k=tx*100003+tz;
+   if(terrain.hasTile(x+dx,z+dz)||tileWant.has(k))continue;if(tileWant.size>6)break;tileWant.add(k);workers[tileRR++%workers.length].postMessage({type:'tile',tx,tz});}}
  terrain.frame=G.frame;}
 function resize(){const w=canvas.clientWidth,h=canvas.clientHeight;renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();if(post){const s=renderer.getDrawingBufferSize(new T.Vector2());post.setSize(w,h);}}
 addEventListener('resize',resize);
 // ------------------------------------------------------------------ debug hook (headless tests drive the page through this)
-window.spiderDrive={G,get spider(){return spider;},get model(){return model;},get terrain(){return terrain;},get world(){return world;},scene,camera,renderer,
+window.spiderDrive={G,get spider(){return spider;},get scenery(){return scenery;},get veg(){return veg;},get model(){return model;},get terrain(){return terrain;},get world(){return world;},scene,camera,renderer,
  start:(id='free')=>startMission(MISSIONS.find(m=>m.id===id)||MISSIONS[0]),setView,
  advance:(seconds,ctl={})=>{const k0=new Set(keys);for(let t=0;t<seconds;t+=1/60){Object.assign(spider.ctl,ctl);spider.control(1/60);for(let k=0;k<4;k++)spider.step(DT);missionT+=1/60;if(G.mission&&missionT>=.1){G.mission.update(missionT);missionT=0;}}ready=false;return spider.telemetry();},
  teleport:(x,z,yaw=0)=>{spider.recover(x,z,yaw);ready=false;},

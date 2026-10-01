@@ -133,11 +133,11 @@ export class Vegetation{
   // instanced meshes: near LOD for every species, impostor LOD for trees
   this.inst=[];
   const cap=sp=>({[SP.grass]:26000,[SP.drygrass]:20000,[SP.flowers]:4000,[SP.wheat]:30000,[SP.reeds]:8000,[SP.corn]:14000,[SP.cornfar]:14000,[SP.shrub]:12000,[SP.sage]:10000,[SP.boulder]:8000,[SP.log]:2000,[SP.yucca]:2000,[SP.sapling]:3000})[sp]||7000;
-  this.defs.forEach((d,sp)=>{if(!d)return;const meshes=d.parts.map(([g,m])=>{const im=new T.InstancedMesh(g,m,cap(sp));im.count=0;im.frustumCulled=false;im.castShadow=SPECIES[sp].tree||sp===SP.boulder||sp===SP.shrub;im.receiveShadow=true;im.instanceMatrix.setUsage(T.DynamicDrawUsage);this.scene.add(im);return im;});
+  this.defs.forEach((d,sp)=>{if(!d)return;const meshes=d.parts.map(([g,m])=>{const im=new T.InstancedMesh(g,m,cap(sp));im.instanceColor=new T.InstancedBufferAttribute(new Float32Array(cap(sp)*3).fill(1),3);im.instanceColor.setUsage(T.DynamicDrawUsage);im.count=0;im.frustumCulled=false;im.castShadow=SPECIES[sp].tree||sp===SP.boulder||sp===SP.shrub;im.receiveShadow=true;im.instanceMatrix.setUsage(T.DynamicDrawUsage);this.scene.add(im);return im;});
    this.inst[sp]={meshes,cap:cap(sp)};});
   // impostors rendered from the 3D models
   this.imp=[];for(const sp of [SP.conifer,SP.broadleaf,SP.birch,SP.snag]){const tex=this.renderImpostor(this.defs[sp]);const m=foliageMat({map:tex,bend:.3,push:0,burn:1,hScale:1,alphaTest:.4});const g=crossGeo(sp===SP.conifer?.62:.8,1,2,0);
-   const im=new T.InstancedMesh(g,m,16000);im.count=0;im.frustumCulled=false;im.castShadow=false;im.receiveShadow=false;im.instanceMatrix.setUsage(T.DynamicDrawUsage);this.scene.add(im);this.imp[sp]={mesh:im,cap:16000};}
+   const im=new T.InstancedMesh(g,m,16000);im.instanceColor=new T.InstancedBufferAttribute(new Float32Array(16000*3).fill(1),3);im.instanceColor.setUsage(T.DynamicDrawUsage);im.count=0;im.frustumCulled=false;im.castShadow=false;im.receiveShadow=false;im.instanceMatrix.setUsage(T.DynamicDrawUsage);this.scene.add(im);this.imp[sp]={mesh:im,cap:16000};}
  }
  renderImpostor(def){
   const size=256,rt=new T.WebGLRenderTarget(size,size,{samples:4});rt.texture.colorSpace=T.SRGBColorSpace;
@@ -166,28 +166,39 @@ export class Vegetation{
   if(moved>10||(this.dirty&&(performance.now()-(this._lastBuild||0))>250)){this.rebuild(cam);this.last.copy(cam);this.dirty=false;this._lastBuild=performance.now();}
   this.updateFalling(dt);
  }
- rebuild(cam){
-  const counts=[],impC=[];const M=new T.Matrix4(),Q=new T.Quaternion(),S=new T.Vector3(),P=new T.Vector3(),Y=new T.Vector3(0,1,0),C=new T.Color();
-  for(let sp=0;sp<this.inst.length;sp++)counts[sp]=0;for(const sp of [0,1,2,3])impC[sp]=0;
-  const nearR=this.Rnear;
-  const put=(sp,L,k,key,imp)=>{
-   const x=L[k],y=L[k+1],z=L[k+2],rot=L[k+3],s=L[k+4],tint=L[k+5],aux=L[k+6];
-   if(this.broken.has(key+':'+(k/STRIDE)))return;
+ // instance transforms and tints for one chunk list, computed once and then copied in bulk
+ _cache(L,sp){if(L._m)return L;const n=L.length/STRIDE,mat=new Float32Array(n*16),col=new Float32Array(n*3);
+  const M=new T.Matrix4(),Q=new T.Quaternion(),S=new T.Vector3(),P=new T.Vector3(),Y=new T.Vector3(0,1,0);
+  for(let i=0;i<n;i++){const k=i*STRIDE,x=L[k],y=L[k+1],z=L[k+2],rot=L[k+3],s=L[k+4],tint=L[k+5],aux=L[k+6];
    P.set(x,y,z);Q.setFromAxisAngle(Y,rot);
-   if(sp===SP.log){S.set(s,aux,aux);}else if(sp===SP.boulder){S.set(s,s*(.7+aux*.5),s*(.8+tint*.3));P.y=y;}else if(sp===SP.cornfar||sp===SP.corn){S.set(1,s,1);}else S.set(s,s,s);
-   M.compose(P,Q,S);
-   const hue=SPECIES[sp].tree?mix(.85,1.12,tint):mix(.88,1.1,tint);C.setRGB(hue,hue*(sp===SP.conifer?1:1.02),hue*.95);
-   if(imp){const I=this.imp[sp];if(impC[sp]<I.cap){I.mesh.setMatrixAt(impC[sp],M);I.mesh.setColorAt(impC[sp],C);impC[sp]++;}return;}
-   const I=this.inst[sp];if(!I||counts[sp]>=I.cap)return;for(const m of I.meshes){m.setMatrixAt(counts[sp],M);if(m.instanceColor||true)m.setColorAt(counts[sp],C);}counts[sp]++;
-  };
-  for(const [key,lists] of this.chunks){const x=Math.floor(key/10007+.5),z=key-x*10007,cx=(x+.5)*CHUNK,cz=(z+.5)*CHUNK;const dc=Math.hypot(cx-cam.x,cz-cam.z);if(dc>this.Rt+CHUNK)continue;
-   lists.forEach((L,sp)=>{if(!L)return;
-    const tree=SPECIES[sp].tree&&sp!==SP.sapling;
-    for(let k=0;k<L.length;k+=STRIDE){const d=Math.hypot(L[k]-cam.x,L[k+2]-cam.z);
-     if(sp===SP.cornfar){if(d<this.Rc-6||d>this.Rcf)continue;put(sp,L,k,key,false);continue;}
-     if(tree){if(d>this.Rt)continue;put(sp,L,k,key,d>nearR);}else{const lim=sp===SP.boulder?this.Rt*.6:sp===SP.log?nearR*1.3:sp===SP.sapling?nearR*1.2:nearR*1.4;if(d<lim)put(sp,L,k,key,false);}}
-   });}
-  for(const [key,lists] of this.near){lists.forEach((L,sp)=>{if(!L)return;const lim=sp===SP.corn?this.Rc:this.Rg;for(let k=0;k<L.length;k+=STRIDE){const d=Math.hypot(L[k]-cam.x,L[k+2]-cam.z);if(d<lim)put(sp,L,k,key,false);}});}
+   if(sp===SP.log){S.set(s,aux,aux);}else if(sp===SP.boulder){S.set(s,s*(.7+aux*.5),s*(.8+tint*.3));}else if(sp===SP.cornfar||sp===SP.corn){S.set(1,s,1);}else S.set(s,s,s);
+   M.compose(P,Q,S);mat.set(M.elements,i*16);
+   const hue=SPECIES[sp].tree?mix(.85,1.12,tint):mix(.88,1.1,tint);col[i*3]=hue;col[i*3+1]=hue*(sp===SP.conifer?1:1.02);col[i*3+2]=hue*.95;}
+  L._m=mat;L._c=col;return L;}
+ rebuild(cam){
+  const counts=[],impC=[];for(let sp=0;sp<this.inst.length;sp++)counts[sp]=0;for(const sp of [0,1,2,3])impC[sp]=0;
+  const nearR=this.Rnear;const brokenBy=new Map();for(const b of this.broken){const i=b.lastIndexOf(':');const k=+b.slice(0,i);let set=brokenBy.get(k);if(!set)brokenBy.set(k,set=new Set());set.add(+b.slice(i+1));}
+  // copy instances [i0,i1) of a cached list into a species' instanced meshes (or its impostor)
+  const put=(sp,L,i,imp)=>{
+   if(imp){const I=this.imp[sp];if(impC[sp]>=I.cap)return;I.mesh.instanceMatrix.array.set(L._m.subarray(i*16,i*16+16),impC[sp]*16);if(I.mesh.instanceColor)I.mesh.instanceColor.array.set(L._c.subarray(i*3,i*3+3),impC[sp]*3);impC[sp]++;return;}
+   const I=this.inst[sp];if(!I||counts[sp]>=I.cap)return;for(const m of I.meshes){m.instanceMatrix.array.set(L._m.subarray(i*16,i*16+16),counts[sp]*16);if(m.instanceColor)m.instanceColor.array.set(L._c.subarray(i*3,i*3+3),counts[sp]*3);}counts[sp]++;};
+  const putAll=(sp,L,br)=>{const I=this.inst[sp];if(!I)return;const n=L.length/STRIDE;if(br){for(let i=0;i<n;i++)if(!br.has(i))put(sp,L,i,false);return;}
+   const room=Math.min(n,I.cap-counts[sp]);if(room<=0)return;for(const m of I.meshes){m.instanceMatrix.array.set(L._m.subarray(0,room*16),counts[sp]*16);if(m.instanceColor)m.instanceColor.array.set(L._c.subarray(0,room*3),counts[sp]*3);}counts[sp]+=room;};
+  const half=CHUNK*.71;
+  for(const [key,lists] of this.chunks){const x=Math.floor(key/10007+.5),z=key-x*10007,cx=(x+.5)*CHUNK,cz=(z+.5)*CHUNK;const dc=Math.hypot(cx-cam.x,cz-cam.z);if(dc>this.Rt+CHUNK)continue;const br=brokenBy.get(key);
+   lists.forEach((L,sp)=>{if(!L||!L.length)return;this._cache(L,sp);
+    const tree=SPECIES[sp].tree&&sp!==SP.sapling;const n=L.length/STRIDE;
+    if(sp===SP.cornfar){if(dc+half<this.Rc-6||dc-half>this.Rcf)return;for(let i=0;i<n;i++){const d=Math.hypot(L[i*STRIDE]-cam.x,L[i*STRIDE+2]-cam.z);if(d>=this.Rc-6&&d<=this.Rcf)put(sp,L,i,false);}return;}
+    if(tree){if(dc-half>this.Rt)return;
+     // whole chunk inside the near ring: one bulk copy
+     if(dc+half<=nearR&&!br){putAll(sp,L,null);return;}
+     for(let i=0;i<n;i++){if(br&&br.has(i))continue;const d=Math.hypot(L[i*STRIDE]-cam.x,L[i*STRIDE+2]-cam.z);if(d>this.Rt)continue;put(sp,L,i,d>nearR);}return;}
+    const lim=sp===SP.boulder?this.Rt*.6:sp===SP.log?nearR*1.3:sp===SP.sapling?nearR*1.2:nearR*1.4;if(dc-half>lim)return;
+    if(dc+half<=lim){putAll(sp,L,br);return;}
+    for(let i=0;i<n;i++){if(br&&br.has(i))continue;if(Math.hypot(L[i*STRIDE]-cam.x,L[i*STRIDE+2]-cam.z)<lim)put(sp,L,i,false);}});}
+  for(const [key,lists] of this.near){const x=Math.floor(key/10007+.5),z=key-x*10007,dc=Math.hypot((x+.5)*CHUNK-cam.x,(z+.5)*CHUNK-cam.z);
+   lists.forEach((L,sp)=>{if(!L||!L.length)return;this._cache(L,sp);const lim=sp===SP.corn?this.Rc:this.Rg;if(dc-half>lim)return;if(dc+half<=lim){putAll(sp,L,null);return;}
+    const n=L.length/STRIDE;for(let i=0;i<n;i++)if(Math.hypot(L[i*STRIDE]-cam.x,L[i*STRIDE+2]-cam.z)<lim)put(sp,L,i,false);});}
   this.inst.forEach((I,sp)=>{if(!I)return;for(const m of I.meshes){m.count=counts[sp];m.instanceMatrix.needsUpdate=true;if(m.instanceColor)m.instanceColor.needsUpdate=true;}});
   for(const sp of [0,1,2,3]){const I=this.imp[sp];I.mesh.count=impC[sp];I.mesh.instanceMatrix.needsUpdate=true;if(I.mesh.instanceColor)I.mesh.instanceColor.needsUpdate=true;}
   this.stats={instances:counts.reduce((a,b)=>a+(b||0),0),impostors:impC.reduce((a,b)=>a+(b||0),0),chunks:this.chunks.size,near:this.near.size};

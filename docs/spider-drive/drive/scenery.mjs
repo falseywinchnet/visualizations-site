@@ -1,21 +1,22 @@
 // Terrain quadtree LOD (meshed in workers), rivers and lakes, bridges, towns and roadside details.
 import * as T from 'three';
-import {terrainMaterial,waterMaterial,shared} from './materials.mjs';
+import {terrainMaterial,waterMaterial,roadMaterial,shared} from './materials.mjs';
+import {deckWidth} from './terrain.mjs';
 import {hash2,clamp,mix,rng} from './noise.mjs';
 
-const ROOT=32768,MAXL=10;// 32 m leaves at 1 m spacing
+const ROOT=32768,MAXL=9,NODE_N=64;// 64 m leaves at 1 m spacing (64x64 quads per node: a quarter of the draw calls of 32x32 nodes)
 export class Scenery{
  constructor(scene,terrain,{texArray,waterNormals,workers,quality='medium'}){
   this.scene=scene;this.t=terrain;this.w=terrain.w;this.workers=workers;this.quality=quality;
-  this.mat=terrainMaterial(texArray);this.nodes=new Map();this.pending=new Map();this.visible=new Set();
+  this.mat=terrainMaterial(texArray,this.w.seed);this.nodes=new Map();this.pending=new Map();this.visible=new Set();
   this.group=new T.Group();this.group.name='terrain';scene.add(this.group);
-  this.K=quality==='low'?1.55:quality==='high'?2.3:1.9;this.inflight=0;this.maxInflight=16;this.frame=0;
+  this.K=quality==='low'?.65:quality==='high'?.95:.8;this.inflight=0;this.maxInflight=16;this.frame=0;
   for(const wk of workers)wk.addEventListener('message',e=>{if(e.data.type==='node')this._onNode(e.data);});
   this.waterMat=waterMaterial(waterNormals);
-  this.buildWater();this.buildBridges();this.buildTowns();this.buildRoadside();this.buildSites();this.buildBoundary();
+  this.texArray=texArray;this.buildWater();this.buildRoads();this.buildBridges();this.buildTowns();this.buildRoadside();this.buildSites();this.buildBoundary();
   this.rr=0;
  }
- setQuality(q){this.quality=q;this.K=q==='low'?1.55:q==='high'?2.3:1.9;}
+ setQuality(q){this.quality=q;this.K=q==='low'?.65:q==='high'?.95:.8;}
  key(l,i,j){return l*1e8+i*1e4+j;}
  _onNode(d){
   this.inflight--;const p=this.pending.get(d.key);this.pending.delete(d.key);if(!p)return;
@@ -25,7 +26,7 @@ export class Scenery{
   g.setIndex(new T.BufferAttribute(d.idx,1));
   const c=new T.Vector3(p.x0+p.size/2,(d.ymin+d.ymax)/2,p.z0+p.size/2);g.boundingSphere=new T.Sphere(c,Math.hypot(p.size*.71,(d.ymax-d.ymin)/2+1));
   g.boundingBox=new T.Box3(new T.Vector3(p.x0,d.ymin,p.z0),new T.Vector3(p.x0+p.size,d.ymax,p.z0+p.size));
-  const m=new T.Mesh(g,this.mat);m.receiveShadow=true;m.castShadow=p.level>=MAXL-3;m.matrixAutoUpdate=false;m.visible=false;
+  const m=new T.Mesh(g,this.mat);m.receiveShadow=true;m.castShadow=p.level>=MAXL-1;/* only the near terrain self-shadows; far nodes are under the shadow map's reach anyway */m.matrixAutoUpdate=false;m.visible=false;
   m.userData={level:p.level,x0:p.x0,z0:p.z0,size:p.size,ymax:d.ymax,ymin:d.ymin,used:this.frame};
   this.group.add(m);this.nodes.set(d.key,m);this._dirty=true;
  }
@@ -63,7 +64,7 @@ export class Scenery{
   this.stats={nodes:this.nodes.size,visible:show.size,pending:this.pending.size,queued:this.queue.length};
   return this.queue.length===0&&this.pending.size===0;
  }
- dispatch(){while(this.queue.length&&this.inflight<this.maxInflight){const r=this.queue.shift();if(this.nodes.has(r.k)||this.pending.has(r.k))continue;this.inflight++;this.pending.set(r.k,r);const wk=this.workers[this.rr++%this.workers.length];wk.postMessage({type:'node',key:r.k,x0:r.x0,z0:r.z0,size:r.size,n:32});}}
+ dispatch(){while(this.queue.length&&this.inflight<this.maxInflight){const r=this.queue.shift();if(this.nodes.has(r.k)||this.pending.has(r.k))continue;this.inflight++;this.pending.set(r.k,r);const wk=this.workers[this.rr++%this.workers.length];wk.postMessage({type:'node',key:r.k,x0:r.x0,z0:r.z0,size:r.size,n:NODE_N});}}
  // ---------------------------------------------------------------- water
  buildWater(){
   const t=this.t,W=this.w;
@@ -84,32 +85,84 @@ export class Scenery{
    for(let z=z0;z<=z1;z++)for(let x=x0;x<=x1;x++){const wx=-half+x*cell,wz=-half+z*cell;P.push(wx,lk.level,wz);F.push(.05,.03);D.push(lk.level-t.height(wx,wz));K.push(0);}
    for(let z=z0;z<z1;z++)for(let x=x0;x<x1;x++){if(!inL(x,z))continue;const a=base+(z-z0)*cols+(x-x0),b=a+1,c=a+cols,d=c+1;I.push(a,c,b,b,c,d);}
   }
-  const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(P,3));g.setAttribute('flow',new T.Float32BufferAttribute(F,2));g.setAttribute('depth',new T.Float32BufferAttribute(D,1));g.setAttribute('floodW',new T.Float32BufferAttribute(K,1));
-  g.setIndex(I.length>65535?new T.Uint32BufferAttribute(I,1):new T.Uint16BufferAttribute(I,1));g.computeBoundingSphere();
-  this.waterBase=Float32Array.from(P);this.water=new T.Mesh(g,this.waterMat);this.water.renderOrder=2;this.water.name='water';this.scene.add(this.water);
+  // split into ~600 m cells so the camera only draws the water it can see
+  const cells=new Map();for(let t=0;t<I.length;t+=3){const a=I[t],b=I[t+1],c=I[t+2];const cx=(P[a*3]+P[b*3]+P[c*3])/3,cz=(P[a*3+2]+P[b*3+2]+P[c*3+2])/3;const key=Math.floor((cx+20000)/600)*1000+Math.floor((cz+20000)/600);let L=cells.get(key);if(!L)cells.set(key,L=[]);L.push(a,b,c);}
+  this.water=new T.Group();this.water.name='water';this.scene.add(this.water);this.waterParts=[];
+  for(const L of cells.values()){const map=new Map(),p=[],f=[],d=[],kw=[],idx=[];for(const v of L){let n=map.get(v);if(n===undefined){n=map.size;map.set(v,n);p.push(P[v*3],P[v*3+1],P[v*3+2]);f.push(F[v*2],F[v*2+1]);d.push(D[v]);kw.push(K[v]);}idx.push(n);}
+   const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(p,3));g.setAttribute('flow',new T.Float32BufferAttribute(f,2));g.setAttribute('depth',new T.Float32BufferAttribute(d,1));g.setAttribute('floodW',new T.Float32BufferAttribute(kw,1));
+   g.setIndex(idx.length>65535?new T.Uint32BufferAttribute(idx,1):new T.Uint16BufferAttribute(idx,1));g.computeBoundingSphere();
+   const m=new T.Mesh(g,this.waterMat);m.renderOrder=2;m.matrixAutoUpdate=false;this.water.add(m);this.waterParts.push({g,base:Float32Array.from(p),depthBase:Float32Array.from(d)});}
  }
- setFlood(boost){const g=this.water.geometry,p=g.attributes.position,k=g.attributes.floodW,d=g.attributes.depth;
-  if(!this._depthBase)this._depthBase=Float32Array.from(d.array);
-  for(let i=0;i<p.count;i++){p.array[i*3+1]=this.waterBase[i*3+1]+boost*k.array[i];d.array[i]=this._depthBase[i]+boost*k.array[i];}
-  p.needsUpdate=true;d.needsUpdate=true;shared.uFloodTint.value=boost>0?.8:0;}
+ setFlood(boost){for(const W of this.waterParts){const p=W.g.attributes.position,k=W.g.attributes.floodW,d=W.g.attributes.depth;
+  for(let i=0;i<p.count;i++){p.array[i*3+1]=W.base[i*3+1]+boost*k.array[i];d.array[i]=W.depthBase[i]+boost*k.array[i];}
+  p.needsUpdate=true;d.needsUpdate=true;W.g.computeBoundingSphere();}shared.uFloodTint.value=boost>0?.8:0;}
+ // ---------------------------------------------------------------- roads
+ // Each road is a ribbon mesh laid on its graded formation (the terrain under it is the same profile), so
+ // the carriageway and its markings stay crisp at any terrain LOD. Bridge spans are drawn with their bridge.
+ static crown(r){return r.kind==='track'?.03:.05;}
+ static ribbon(r,k0,k1,lift=0){
+  const hw=r.width*.5,cr=Scenery.crown(r),S=[-1,-.92,-.5,0,.5,.92,1],P=[],U=[],I=[];let v=0;
+  for(let k=k0;k<=k1;k++){const a=Math.max(0,k-1),b=Math.min(r.n-1,k+1),dx=r.xz[b*2]-r.xz[a*2],dz=r.xz[b*2+1]-r.xz[a*2+1],dl=Math.hypot(dx,dz)||1,nx=-dz/dl,nz=dx/dl;
+   if(k>k0)v+=Math.hypot(r.xz[k*2]-r.xz[k*2-2],r.xz[k*2+1]-r.xz[k*2-1]);
+   for(const q of S){const lat=q*hw;P.push(r.xz[k*2]+nx*lat,r.y[k]+cr*(1-q*q)+.06+lift,r.xz[k*2+1]+nz*lat);U.push((q+1)/2,v);}}
+  const C=S.length;for(let k=0;k<k1-k0;k++)for(let q=0;q<C-1;q++){const a=k*C+q,b=a+1,c=a+C,d=c+1;I.push(a,b,c,b,d,c);}
+  const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(P,3));g.setAttribute('uv',new T.Float32BufferAttribute(U,2));g.setIndex(I);g.computeVertexNormals();g.computeBoundingSphere();return g;}
+ buildRoads(){
+  this.roadMats={main:roadMaterial(this.texArray,0),minor:roadMaterial(this.texArray,1),track:roadMaterial(this.texArray,2)};
+  this.roadGroup=new T.Group();this.roadGroup.name='roads';this.scene.add(this.roadGroup);
+  for(const r of this.w.roads){
+   // runs of samples off the bridges, and off stretches another (earlier) road already covers: roads
+   // that share an alignment are drawn once
+   const skip=new Uint8Array(r.n);for(const b of r.bridges)for(let q=b.s0+1;q<b.s1;q++)skip[q]=1;
+   const rn=[];for(let q=0;q<r.n;q++){if(skip[q])continue;for(const o of this.t.roadsNear(r.xz[q*2],r.xz[q*2+1],rn))if(o.r.id<r.id&&o.d<-.5&&(o.r.kind==='main'||o.r.kind===r.kind)&&o.r._skip&&!o.r._skip[o.k]&&!o.r._skip[Math.min(o.r.n-1,o.k+1)]){skip[q]=2;break;}}/* only where that road is drawn itself */
+   r._skip=skip;
+   const spans=[];let k0=-1;for(let q=0;q<r.n;q++){const on=!skip[q];if(on&&k0<0)k0=q;if((!on||q===r.n-1)&&k0>=0){spans.push([k0,q]);k0=-1;}}
+   for(const [a,b] of spans){if(b<=a)continue;const m=new T.Mesh(Scenery.ribbon(r,a,b,(r.id%5)*.004),this.roadMats[r.kind]);m.receiveShadow=true;m.renderOrder=1;m.matrixAutoUpdate=false;this.roadGroup.add(m);}}
+ }
  // ---------------------------------------------------------------- bridges
+ // Deck, kerbs, rails and girders follow the road's own samples across the span; piers stand where the
+ // ground drops away; earth ramps (terrain.mjs) carry the road up to the deck at both ends.
  buildBridges(){
-  const conc=new T.MeshStandardMaterial({color:0x9a9790,roughness:.85}),steel=new T.MeshStandardMaterial({color:0x5b6a70,roughness:.5,metalness:.6}),deckM=new T.MeshStandardMaterial({color:0x444446,roughness:.9});
+  const conc=new T.MeshStandardMaterial({color:0x9a9790,roughness:.85}),steel=new T.MeshStandardMaterial({color:0x5b6a70,roughness:.5,metalness:.6}),deckM=new T.MeshStandardMaterial({color:0x6d6c68,roughness:.9});
   this.bridgeGroup=new T.Group();this.bridgeGroup.name='bridges';this.scene.add(this.bridgeGroup);this.bridges=[];
+  // extrude a cross-section (pairs of [lateral, height] around a closed outline) along road samples
+  const extrude=(r,k0,k1,sec,y0)=>{const P=[],I=[];const C=sec.length;
+   for(let k=k0;k<=k1;k++){const a=Math.max(0,k-1),b=Math.min(r.n-1,k+1),dx=r.xz[b*2]-r.xz[a*2],dz=r.xz[b*2+1]-r.xz[a*2+1],dl=Math.hypot(dx,dz)||1,nx=-dz/dl,nz=dx/dl;
+    // extend the ends a little so neighbouring spans and ramps overlap
+    let ex=0,ez=0;if(k===k0){ex=-dx/dl*1.2;ez=-dz/dl*1.2;}if(k===k1){ex=dx/dl*1.2;ez=dz/dl*1.2;}
+    for(const [lat,h] of sec)P.push(r.xz[k*2]+nx*lat+ex,y0(k)+h,r.xz[k*2+1]+nz*lat+ez);}
+   for(let k=0;k<k1-k0;k++)for(let q=0;q<C;q++){const q2=(q+1)%C,a=k*C+q,b=k*C+q2,c=a+C,d=b+C;I.push(a,b,c,b,d,c);}
+   // end caps
+   const cap=(o,flip)=>{for(let q=1;q<C-1;q++)flip?I.push(o,o+q+1,o+q):I.push(o,o+q,o+q+1);};cap(0,false);cap((k1-k0)*C,true);
+   let g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(P,3));g.setIndex(I);g=g.toNonIndexed();g.computeVertexNormals();g.computeBoundingSphere();return g;};
   for(const r of this.w.roads)r.bridges.forEach((b,bi)=>{
-   const g=new T.Group();const dx=b.x1-b.x0,dz=b.z1-b.z0,L=Math.hypot(dx,dz),ang=Math.atan2(dx,dz),W=r.width+1.4;
-   g.position.set((b.x0+b.x1)/2,b.deck,(b.z0+b.z1)/2);g.rotation.y=ang;
-   const deck=new T.Mesh(new T.BoxGeometry(W,.6,L+2),deckM);deck.position.y=.05;deck.castShadow=deck.receiveShadow=true;g.add(deck);
-   for(const s of [-1,1]){const rail=new T.Mesh(new T.BoxGeometry(.12,.12,L+2),steel);rail.position.set(s*W/2,1.05,0);g.add(rail);const kerb=new T.Mesh(new T.BoxGeometry(.4,.35,L+2),conc);kerb.position.set(s*(W/2-.2),.5,0);g.add(kerb);
-    for(let z=-L/2;z<=L/2;z+=2.5){const post=new T.Mesh(new T.BoxGeometry(.1,1,.1),steel);post.position.set(s*W/2,.6,z);g.add(post);}}
-   const girder=new T.Mesh(new T.BoxGeometry(W*.8,1.1,L+2),conc);girder.position.y=-.7;g.add(girder);
-   const nP=Math.max(1,Math.floor(L/14));for(let k=1;k<=nP;k++){const zz=-L/2+k*L/(nP+1);const wx=g.position.x+Math.sin(ang)*zz,wz=g.position.z+Math.cos(ang)*zz;const bed=this.t.height(wx,wz);const h=b.deck-bed+.5;if(h<1)continue;const pier=new T.Mesh(new T.BoxGeometry(W*.7,h,1.2),conc);pier.position.set(0,-h/2-.6,zz);pier.castShadow=true;g.add(pier);}
-   this.bridgeGroup.add(g);this.bridges.push({g,road:r.id,index:bi,b});
+   const g=new T.Group();g.name=`${b.name} bridge`;const W=deckWidth(r),hw=W/2,cr=Scenery.crown(r);
+   const top=k=>r.y[k]+cr;// deck surface level with the crown of the approach
+   const k0=b.s0,k1=b.s1;
+   const add=(geo,m,shadow=true)=>{const o=new T.Mesh(geo,m);o.castShadow=shadow;o.receiveShadow=true;o.matrixAutoUpdate=false;g.add(o);return o;};
+   add(extrude(r,k0,k1,[[-hw,0],[hw,0],[hw,-.55],[-hw,-.55]],top),deckM);// deck slab
+   add(extrude(r,k0,k1,[[-hw*.72,-.5],[hw*.72,-.5],[hw*.6,-1.7],[-hw*.6,-1.7]],top),conc);// box girder
+   for(const s of [-1,1]){add(extrude(r,k0,k1,[[s*hw,0],[s*(hw-.45),0],[s*(hw-.45),.32],[s*hw,.32]].map(([l,h])=>[l,h]),top),conc);// kerb
+    add(extrude(r,k0,k1,[[s*(hw-.12),1.05],[s*(hw-.02),1.05],[s*(hw-.02),1.17],[s*(hw-.12),1.17]],top),steel,false);// rail
+    add(extrude(r,k0,k1,[[s*(hw-.12),.62],[s*(hw-.02),.62],[s*(hw-.02),.7],[s*(hw-.12),.7]],top),steel,false);}// mid rail
+   // posts and piers
+   const postG=new T.BoxGeometry(.12,1.1,.12),posts=[];let acc=0;
+   for(let k=k0;k<=k1;k++){if(k>k0)acc+=4;const a=Math.max(0,k-1),bb=Math.min(r.n-1,k+1),dx=r.xz[bb*2]-r.xz[a*2],dz=r.xz[bb*2+1]-r.xz[a*2+1],dl=Math.hypot(dx,dz)||1,nx=-dz/dl,nz=dx/dl;
+    for(const s of [-1,1]){const p=new T.Matrix4().makeTranslation(r.xz[k*2]+nx*s*(hw-.07),top(k)+.6,r.xz[k*2+1]+nz*s*(hw-.07));posts.push(p);
+     if(k%2===0&&k<k1){const p2=new T.Matrix4().makeTranslation(r.xz[k*2]+dx/dl*2+nx*s*(hw-.07),top(k)+.6,r.xz[k*2+1]+dz/dl*2+nz*s*(hw-.07));posts.push(p2);}}
+    const interior=k>k0+1&&k<k1-1&&(k-k0)%4===2;
+    if(interior){const bed=this.t.height(r.xz[k*2],r.xz[k*2+1]),h=top(k)-1.7-bed;if(h>.8){const pier=new T.Mesh(new T.BoxGeometry(W*.55,h+1,1.3),conc);pier.position.set(r.xz[k*2],bed+h/2-.5,r.xz[k*2+1]);pier.rotation.y=Math.atan2(nx,nz);pier.castShadow=true;pier.receiveShadow=true;g.add(pier);
+     const capG=new T.Mesh(new T.BoxGeometry(W*.7,.5,1.6),conc);capG.position.set(r.xz[k*2],top(k)-1.85,r.xz[k*2+1]);capG.rotation.y=pier.rotation.y;g.add(capG);}}}
+   const im=new T.InstancedMesh(postG,steel,posts.length);posts.forEach((p,i)=>im.setMatrixAt(i,p));im.castShadow=false;g.add(im);
+   // carriageway on the deck
+   const road=new T.Mesh(Scenery.ribbon(r,k0,k1,0),this.roadMats[r.kind]);road.receiveShadow=true;road.renderOrder=1;road.matrixAutoUpdate=false;g.add(road);
+   this.bridgeGroup.add(g);this.bridges.push({g,road:r.id,index:bi,b,r});
   });
  }
- washOut(roadId,index){const br=this.bridges.find(b=>b.road===roadId&&b.index===index);if(br){br.g.children.forEach((c,i)=>{if(i>0&&c.geometry?.parameters?.depth>3)c.visible=false;});br.g.children[0].visible=false;br.g.children.filter(c=>c.position.y>0).forEach(c=>c.visible=false);
-  // broken stubs at the ends
-  const stubM=new T.MeshStandardMaterial({color:0x444446,roughness:.9});const L=Math.hypot(br.b.x1-br.b.x0,br.b.z1-br.b.z0);for(const s of [-1,1]){const st=new T.Mesh(new T.BoxGeometry(8,.6,3),stubM);st.position.set(0,-.2,s*(L/2-.5));st.rotation.x=s*.25;br.g.add(st);}}
+ washOut(roadId,index){const br=this.bridges.find(b=>b.road===roadId&&b.index===index);if(br){br.g.visible=false;
+  // broken stubs where the deck tore away from the ramps
+  const r=br.r,b=br.b,stubM=new T.MeshStandardMaterial({color:0x6d6c68,roughness:.9}),W=deckWidth(r);
+  for(const [k,kin] of [[b.s0,b.s0+1],[b.s1,b.s1-1]]){const dx=r.xz[kin*2]-r.xz[k*2],dz=r.xz[kin*2+1]-r.xz[k*2+1],dl=Math.hypot(dx,dz)||1;const st=new T.Mesh(new T.BoxGeometry(W*.9,.55,3),stubM);st.position.set(r.xz[k*2]+dx/dl*1.5,r.y[k]+Scenery.crown(r)-.3,r.xz[k*2+1]+dz/dl*1.5);st.rotation.y=Math.atan2(dx,dz);st.rotation.x=.2;st.castShadow=true;this.bridgeGroup.add(st);}}
   this.t.bridgeRemoved.add(roadId+':'+index);this.t.tiles.clear();}
  // ---------------------------------------------------------------- towns
  buildTowns(){
