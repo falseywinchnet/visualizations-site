@@ -217,7 +217,7 @@ class Rescue extends Mission{
     const d=Math.hypot(x-this.pad[0],z-this.pad[1]);if(d<700||d>3800)continue;if(t.water(x,z,{}).kind)continue;if(!flat(x,z))continue;const sc=Math.abs(d-2000)*.05-up*4;if(!best||sc<best.sc)best={x,z,sc};}
    if(best)casualties.push({kind:'cliff',x:best.x,z:best.z,text:'Climber injured at the foot of a cliff band',short:'Cliff foot'});}
   // C: washed-out bridge with a motorist beyond it
-  {let best=null;for(const r of W.roads){if(r.kind==='track')continue;r.bridges.forEach((b,bi)=>{const d=Math.hypot(b.x0-this.pad[0],b.z0-this.pad[1]);if(d<600||d>3500)return;const sc=Math.abs(d-1800);if(!best||sc<best.sc)best={r,b,bi,sc};});}
+  {let best=null;for(const r of W.roads){if(r.kind==='track')continue;r.bridges.forEach((b,bi)=>{if(b.shared)return;const d=Math.hypot(b.x0-this.pad[0],b.z0-this.pad[1]);if(d<600||d>3500)return;const sc=Math.abs(d-1800);if(!best||sc<best.sc)best={r,b,bi,sc};});}
    if(best){const {r,b,bi}=best;this.G.scenery.washOut(r.id,bi);const e0=Math.hypot(b.x0-this.pad[0],b.z0-this.pad[1]),e1=Math.hypot(b.x1-this.pad[0],b.z1-this.pad[1]);const far=e0>e1?b.s0:b.s1,dir=e0>e1?-1:1;const q=clamp(far+dir*7,0,r.n-1);const x=r.xz[q*2],z=r.xz[q*2+1];
     const car_=this.add(this.place(car(),x+1.5,z));car_.rotation.y=Math.atan2(r.xz[Math.min(r.n-1,q+1)*2]-x,r.xz[Math.min(r.n-1,q+1)*2+1]-z);casualties.push({kind:'bridge',x:x+4,z:z+3,text:`Motorist cut off by the washed-out ${b.name} bridge`,short:'Washout'});}}
   if(!casualties.length)casualties.push({kind:'field',x:this.pad[0]+1200,z:this.pad[1]+900,text:'Farmer stranded by floodwater',short:'Farmer'});

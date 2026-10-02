@@ -3,6 +3,7 @@ import * as T from 'three';
 import {OrbitControls} from './vendor/OrbitControls.js';
 import {GENERATOR_VERSION} from './drive/worldgen.mjs';
 import {loadWorld,saveWorld} from './drive/world-cache.mjs';
+import {Birds} from './drive/birds.mjs';
 import {Terrain} from './drive/terrain.mjs';
 import {Spider,DT,GEOM,PRESSURES} from './drive/physics.mjs';
 import {terrainTextures,waterNormals,shared} from './drive/materials.mjs';
@@ -31,6 +32,7 @@ try{renderer=new T.WebGLRenderer({canvas,antialias:false,powerPreference:'high-p
 catch(e){$('#gen-stage').textContent='This browser could not start WebGL 2. The Spider idea is illustrated at paymenottowork.com/ideas/spider.';throw e;}
 const autoQ=()=>{const mob=/Mobi|Android|iPhone|iPad/.test(navigator.userAgent)||matchMedia('(pointer:coarse)').matches;return mob?'low':(navigator.hardwareConcurrency||4)>=8?'high':'medium';};
 G.quality=params.get('quality')||autoQ();
+G.units=(()=>{try{return localStorage.getItem('spider-units')||'metric';}catch{return 'metric';}})();
 renderer.setPixelRatio(Math.min(devicePixelRatio,G.quality==='high'?1.75:G.quality==='low'?1:1.4));
 renderer.shadowMap.enabled=true;renderer.shadowMap.type=T.PCFSoftShadowMap;renderer.toneMapping=T.ACESFilmicToneMapping;renderer.toneMappingExposure=1;renderer.outputColorSpace=T.SRGBColorSpace;
 const scene=new T.Scene();
@@ -47,7 +49,7 @@ async function getWorld(seed){
   w.onerror=e=>rej(e);w.postMessage({seed});});
 }
 // ------------------------------------------------------------------ world-dependent systems (created after generation)
-let world,terrain,scenery,veg,model,spider,atmo,post,wmap,fx,sound,workers,texArr,wNormals;
+let world,terrain,scenery,veg,model,spider,atmo,post,wmap,fx,sound,workers,texArr,wNormals,birds;
 const env={
  ground:(x,z,y)=>{let h=terrain.groundHeight(x,z,y);const c=veg?veg.capHeight(x,z):-1e9;if(c>h)h=c;if(G.mission){const m=G.mission.capHeight(x,z);if(m>h)h=m;}return h;},
  normal:(x,z)=>terrain.normal(x,z),
@@ -57,6 +59,7 @@ const env={
  onBreak:(ob,dx,dz)=>{const p=veg.breakTree(ob,dx,dz);fx.leaves(p.x,p.y,p.z,26);sound.crack(Math.min(1,ob.r*6));},
 };
 let buildingBoxes=[];
+canvas.addEventListener('webglcontextlost',()=>{G.ctxLost=(G.ctxLost||0)+1;console.warn('WebGL context lost');});canvas.addEventListener('webglcontextrestored',()=>{console.warn('WebGL context restored');if(spider)spider.say('Graphics device was reset by the browser; carrying on',4);});
 async function boot(){
  world=await getWorld(G.seed);
  $('#gen-stage').textContent='Laying out the country';await frameWait();
@@ -69,7 +72,7 @@ async function boot(){
  scenery=new Scenery(scene,terrain,{texArray:texArr,waterNormals:wNormals,workers,quality:G.quality});
  veg=new Vegetation(scene,terrain,renderer,{workers,quality:G.quality});
  buildingBoxes=world.buildings.map(b=>({type:'box',x:b.x,z:b.z,w:b.w,d:b.d,h:b.h+4,y:terrain.height(b.x,b.z)-1,rot:b.rot}));
- wmap=new WorldMap(world,terrain);fx=new FX(scene,terrain);sound=new Sound();
+ wmap=new WorldMap(world,terrain);fx=new FX(scene,terrain);sound=new Sound();birds=new Birds(scene,terrain,env);G.birds=birds;
  post=new Post(renderer,scene,camera,{quality:G.quality});G.post=post;
  G.world=world;G.terrain=terrain;G.findClear=findClear;G.scene=scene;G.fx=fx;G.sound=sound;G.scenery=scenery;G.veg=veg;G.atmo=atmo;G.camera=camera;G.hud=hud;G.env=env;
  setupVehicle('scout');
@@ -77,6 +80,7 @@ async function boot(){
  const s0=world.sites.find(s=>s.type==='staging')||{x:world.towns[0].x+60,z:world.towns[0].z};
  spider.place(s0.x,s0.z,0);syncModel(0);resize();
  $('#gen-stage').textContent='Meshing the near country';
+ if(renderer.compileAsync){$('#gen-stage').textContent='Compiling shaders';try{await renderer.compileAsync(scene,camera);}catch{}}
  await prime(8000);
  G.state='menu';body.dataset.state='menu';$('#menu').hidden=false;buildMenu();
  G.menuT=0;
@@ -112,7 +116,8 @@ $('#opt-volume').oninput=$('#p-volume').oninput=e=>{G.volume=+e.target.value;sou
 $('#opt-music').oninput=$('#p-music').oninput=e=>{G.music=+e.target.value;sound?.music.setVolume(G.music);sound?.music.setOn(G.music>0);$('#opt-music').value=$('#p-music').value=G.music;store('music',G.music);};
 $('#opt-quality').onchange=$('#p-quality').onchange=e=>{const v=e.target.value==='auto'?autoQ():e.target.value;setQuality(v);};
 $('#go').onclick=()=>{const seed=+$('#opt-seed').value||711;if(seed!==G.seed){const u=new URL(location.href);u.searchParams.set('seed',seed);location.href=u.href;return;}startMission(G.missionDef);};
-function setQuality(q){G.quality=q;scenery.setQuality(q);veg.cfg(q);veg.dirty=true;renderer.setPixelRatio(Math.min(devicePixelRatio,q==='high'?1.75:q==='low'?1:1.4));post.bloom.enabled=q!=='low';post.enabled=q!=='low';resize();$('#p-quality').value=q;}
+function setQuality(q){G.quality=q;scenery.setQuality(q);veg.cfg(q);veg.dirty=true;renderer.setPixelRatio(Math.min(devicePixelRatio,q==='high'?1.75:q==='low'?1:1.4));post.bloom.enabled=q!=='low';post.enabled=q!=='low';resize();
+ /* resizing clears the canvas: draw a frame in the same task so no black frame is ever presented */if(world&&post){try{post.frame(0,scene,camera);}catch{}}$('#p-quality').value=q;}
 // ------------------------------------------------------------------ missions
 function startMission(def){
  sound.start();sound.setVolume(G.volume);sound.music.setVolume(G.music);sound.music.setOn(G.music>0);sound.music.setMood(def.id);
@@ -134,7 +139,7 @@ function startMission(def){
 }
 // ------------------------------------------------------------------ input
 const keys=new Set();let stick={x:0,y:0,on:false};let pad=null;
-const K={KeyW:'fwd',ArrowUp:'fwd',KeyS:'rev',ArrowDown:'rev',KeyA:'left',ArrowLeft:'left',KeyD:'right',ArrowRight:'right',Space:'brake',KeyF:'action',KeyR:'draft',KeyE:'load',Comma:'carFwd',Period:'carAft'};
+const K={KeyW:'fwd',ArrowUp:'fwd',KeyS:'rev',ArrowDown:'rev',KeyA:'left',ArrowLeft:'left',KeyD:'right',ArrowRight:'right',Space:'brake',ShiftLeft:'boost',ShiftRight:'boost',KeyF:'action',KeyR:'draft',KeyE:'load',Comma:'carFwd',Period:'carAft'};
 addEventListener('keydown',e=>{
  if(/INPUT|SELECT|TEXTAREA/.test(e.target.tagName))return;
  if(G.state==='menu'&&e.code==='Enter'){$('#go').click();return;}
@@ -162,6 +167,7 @@ addEventListener('keydown',e=>{
   case 'KeyL':G.lights=!G.lights;break;
   case 'KeyN':{const on=!(sound.music.on);sound.music.setOn(on);if(on&&!G.music){G.music=.55;sound.music.setVolume(G.music);}$('#opt-music').value=$('#p-music').value=on?G.music:0;store('music',on?G.music:0);hud.toast(on?'Music on':'Music off',1.5);break;}
   case 'KeyI':spider.setEngine(spider.engine.off);break;
+  case 'KeyU':{G.units=G.units==='imperial'?'metric':'imperial';store('units',G.units);hud.toast(G.units==='imperial'?'Miles per hour':'Kilometres per hour',1.5);break;}
   case 'KeyX':recover();break;
   case 'KeyO':G.mission?.debugSkip?.();break;
  }
@@ -260,8 +266,8 @@ const hud={
 function clearHud(){hud.objectives('',[]);hud.gauges([]);}
 const miniCtx=$('#mini').getContext('2d'),feetCtx=$('#feet').getContext('2d'),horCtx=$('#horizon').getContext('2d'),spdCtx=$('#speedo').getContext('2d'),bigCtx=$('#bigmap').getContext('2d');
 function drawHud(){
- const sp=spider,kmh=sp.speed()*3.6;
- $('#speed').textContent=kmh.toFixed(0);$('#limit').textContent=Math.round(sp.ctl.limit*3.6);$('#rpm').textContent=`${Math.round(sp.engine.rpm/10)*10} rpm${sp.engine.stalled?' · stalled':sp.engine.crank>0?' · starting':sp.engine.off?' · off':''}`;
+ const sp=spider,kmh=sp.speed()*3.6,U=G.units==='imperial',uk=U?.621371:1;
+ $('#speed').textContent=(kmh*uk).toFixed(0);$('#limit').textContent=Math.round(sp.ctl.limit*3.6*uk);$('#speed-unit').textContent=U?'mph':'km/h';$('#rpm').textContent=`${Math.round(sp.engine.rpm/10)*10} rpm${sp.engine.stalled?' · stalled':sp.engine.crank>0?' · starting':sp.engine.off?' · off':sp.engine.boost>.3?' · TURBO':''}`;{const tb=$('#turbo');tb.hidden=!(sp.engine.heat>.01||sp.engine.boost>.05);tb.firstElementChild.firstElementChild.style.width=`${Math.round(sp.engine.heat*100)}%`;tb.classList.toggle('cut',!!sp.engine.cut);}
  const f=terrain.feature(sp.pos[0],sp.pos[2]);$('#place').textContent=f.label;
  $('#terrain-surf').textContent=sp.wheels[2].surface?.name||'';
  $('#status').textContent=G.paused?'Paused':(sp.message||(sp.climbState?`Climbing: ${['front','middle','rear'][sp.climbState.pair]} pair ${sp.climbState.phase}`:sp.hold?'Holding':''));
@@ -271,7 +277,7 @@ function drawHud(){
  $('#m-tyre').textContent=`Kevlar ${sp.wheels[0].pressure.toFixed(1)} bar`;$('#m-carr').textContent=`${sp.carriage>=0?'aft ':'fwd '}${Math.abs(sp.carriage).toFixed(1)} m`;
  const L=sp.wheels.map(w=>w.load),m=L.reduce((a,b)=>a+b,0)/6||1,dev=Math.max(...L.map(l=>Math.abs(l-m)))/m;$('#m-bal').textContent=`${Math.round(clamp(1-dev*.5,0,1)*100)}%`;
  const bearing=G.mission?.bearing?.();$('#bearing').textContent=bearing||'';
- drawFeet();drawHorizon();drawSpeedo(kmh);
+ drawFeet();drawHorizon();drawSpeedo(kmh*uk,U);
  const over=G.mission?.mapOverlay?G.mission.mapOverlay.bind(G.mission):null;
  wmap.drawMini(miniCtx,200,200,sp.pos[0],sp.pos[2],sp.heading(),900,over?(ctx,toPx,px,pz,s)=>over(ctx,toPx,s,true):null);
  if(G.mapOpen){const c=$('#bigmap');const W=c.clientWidth*devicePixelRatio,H=c.clientHeight*devicePixelRatio;if(c.width!==W){c.width=W;c.height=H;}wmap.drawFull(bigCtx,W,H,sp.pos[0],sp.pos[2],sp.heading(),over?(ctx,toPx,s)=>over(ctx,toPx,s,false):null);}
@@ -293,13 +299,13 @@ function drawFeet(){const c=feetCtx,W=176,H=200;c.clearRect(0,0,W,H);const sp=sp
  else{c.fillStyle='#8aa';c.fillText(`level ${Math.round((sp.levelFraction||0)*100)}% · margin ${(sp.tipMargin||0).toFixed(1)} m`,4,196);}}
 function drawHorizon(){const c=horCtx,S=96,sp=spider;c.clearRect(0,0,S,S);c.save();c.beginPath();c.arc(S/2,S/2,S/2-2,0,Math.PI*2);c.clip();c.translate(S/2,S/2);c.rotate(-(sp.roll||0)*Math.PI/180);const py=(sp.pitch||0)*1.6;c.fillStyle='#35607a';c.fillRect(-S,-S*2+py,S*2,S*2);c.fillStyle='#5b4a32';c.fillRect(-S,py,S*2,S*2);c.strokeStyle='#fff';c.beginPath();c.moveTo(-S,py);c.lineTo(S,py);c.stroke();c.restore();
  c.strokeStyle='#f0b95a';c.lineWidth=2;c.beginPath();c.moveTo(S/2-22,S/2);c.lineTo(S/2-8,S/2);c.moveTo(S/2+8,S/2);c.lineTo(S/2+22,S/2);c.stroke();c.strokeStyle='#cfe';c.lineWidth=1;c.beginPath();c.arc(S/2,S/2,S/2-2,0,Math.PI*2);c.stroke();}
-function drawSpeedo(kmh){const c=spdCtx,S=150;c.clearRect(0,0,S,S);const a0=Math.PI*.75,a1=Math.PI*2.25,v2a=v=>a0+(a1-a0)*clamp(v/150,0,1);
+function drawSpeedo(kmh,U){const c=spdCtx,S=150,full=U?95:150;c.clearRect(0,0,S,S);const a0=Math.PI*.75,a1=Math.PI*2.25,v2a=v=>a0+(a1-a0)*clamp(v/full,0,1);
  c.lineWidth=9;c.strokeStyle='#ffffff14';c.beginPath();c.arc(S/2,S/2,S/2-10,a0,a1);c.stroke();
  const safe=spider.safeSpeed*3.6;c.strokeStyle='#ff6a4f55';c.beginPath();c.arc(S/2,S/2,S/2-10,v2a(Math.min(150,safe)),a1);c.stroke();
  c.strokeStyle='#6fe0c8';c.beginPath();c.arc(S/2,S/2,S/2-10,a0,v2a(kmh));c.stroke();
  const la=v2a(spider.ctl.limit*3.6);c.strokeStyle='#f0b95a';c.lineWidth=3;c.beginPath();c.moveTo(S/2+Math.cos(la)*(S/2-18),S/2+Math.sin(la)*(S/2-18));c.lineTo(S/2+Math.cos(la)*(S/2-2),S/2+Math.sin(la)*(S/2-2));c.stroke();
  const rp=clamp(spider.engine.rpm/2000,0,1);c.lineWidth=4;c.strokeStyle='#f0b95a88';c.beginPath();c.arc(S/2,S/2,S/2-24,a0,a0+(a1-a0)*rp);c.stroke();
- c.fillStyle='#eef3ee';c.font='600 30px system-ui';c.textAlign='center';c.fillText(kmh.toFixed(0),S/2,S/2+10);c.font='11px system-ui';c.fillStyle='#b9c6c2';c.fillText('km/h',S/2,S/2+26);}
+ c.fillStyle='#eef3ee';c.font='600 30px system-ui';c.textAlign='center';c.fillText(kmh.toFixed(0),S/2,S/2+10);c.font='11px system-ui';c.fillStyle='#b9c6c2';c.fillText(U?'mph':'km/h',S/2,S/2+26);}
 // ------------------------------------------------------------------ frame
 function syncModel(dt){
  const gy=terrain.height(spider.pos[0],spider.pos[2]);
@@ -312,7 +318,7 @@ function syncModel(dt){
 let last=performance.now(),acc=0,hudT=0,missionT=0,fpsT=0,frames=0,fps=60,lowFps=0;
 function step(dt){
  const inp=readInput();const c=spider.ctl;
- c.throttle=inp.throttle;c.steer=inp.steer;c.brake=inp.brake;
+ c.throttle=inp.throttle;c.steer=inp.steer;c.brake=inp.brake;c.boost=keys.has('boost');
  if(keys.has('carFwd'))c.carriageManual=clamp((c.carriageManual??spider.carriage)-.8*dt,-GEOM.carriageMax,GEOM.carriageMax);if(keys.has('carAft'))c.carriageManual=clamp((c.carriageManual??spider.carriage)+.8*dt,-GEOM.carriageMax,GEOM.carriageMax);
  G.input={action:keys.has('action'),draft:keys.has('draft'),load:keys.has('load')};
  acc+=dt;let n=0;
@@ -330,6 +336,7 @@ function renderFrame(dt){
  if(atmo)atmo.update(camera.position.clone().setY(spider?spider.pos[1]:0),dt);
  if(scenery)scenery.update(camera.position);
  if(veg)veg.update(camera.position,spider.pos,dt);
+ if(birds&&spider){birds.update(dt,spider,camera,G);for(const e of birds.events){const d=Math.hypot(e.x-spider.pos[0],e.z-spider.pos[2]);sound.flock(e.n,d);}birds.events.length=0;}
  // brush pushers: six tyres, legs, the cabin belly and the top
  if(spider){let k=0;const P=pushers.value;for(const w of spider.wheels){P[k++].set(w.hub[0],w.hub[1],w.hub[2],GEOM.R*1.05);}
   for(const w of spider.wheels){const m=w.mount,h=w.hub;P[k++].set((m[0]+h[0])/2,(m[1]+h[1])/2,(m[2]+h[2])/2,.7);}
@@ -365,7 +372,7 @@ function terrainPrefetch(){
 function resize(){const w=canvas.clientWidth,h=canvas.clientHeight;renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();if(post){const s=renderer.getDrawingBufferSize(new T.Vector2());post.setSize(w,h);}}
 addEventListener('resize',resize);
 // ------------------------------------------------------------------ debug hook (headless tests drive the page through this)
-window.spiderDrive={G,get spider(){return spider;},get scenery(){return scenery;},get veg(){return veg;},get model(){return model;},get terrain(){return terrain;},get world(){return world;},scene,camera,renderer,
+window.spiderDrive={G,get spider(){return spider;},get scenery(){return scenery;},get veg(){return veg;},get birds(){return birds;},get model(){return model;},get terrain(){return terrain;},get world(){return world;},scene,camera,renderer,
  start:(id='free')=>startMission(MISSIONS.find(m=>m.id===id)||MISSIONS[0]),setView,
  advance:(seconds,ctl={})=>{const k0=new Set(keys);for(let t=0;t<seconds;t+=1/60){Object.assign(spider.ctl,ctl);spider.control(1/60);for(let k=0;k<4;k++)spider.step(DT);missionT+=1/60;if(G.mission&&missionT>=.1){G.mission.update(missionT);missionT=0;}}ready=false;return spider.telemetry();},
  teleport:(x,z,yaw=0)=>{spider.recover(x,z,yaw);ready=false;},

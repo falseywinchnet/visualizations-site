@@ -46,6 +46,7 @@ body[data-state=menu] #hud-head,body[data-state=loading] #hud-head,body[data-sta
 .modes{display:grid;grid-template-columns:1fr 1fr;gap:2px 8px;margin:0;font-size:11px}.modes div{display:flex;justify-content:space-between}.modes dt{color:var(--mute)}.modes dd{margin:0;font-variant-numeric:tabular-nums}
 #gauges{display:grid;gap:4px}#gauges .g{font-size:11px;display:grid;gap:2px}#gauges .g i{display:block;height:5px;border-radius:3px;background:#ffffff1c;overflow:hidden}#gauges .g i b{display:block;height:100%;background:var(--teal)}
 #dash{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);display:flex;align-items:center;gap:12px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:6px 14px 6px 6px;z-index:4;backdrop-filter:blur(6px);max-width:calc(100vw - 460px)}
+#turbo i{display:inline-block;width:54px;height:6px;vertical-align:middle;border:1px solid var(--line);border-radius:3px;margin-right:4px;overflow:hidden}#turbo i b{display:block;height:100%;background:var(--amber);font-size:0}#turbo.cut i b{background:var(--red)}
 #speedo{width:96px;height:96px}.dash-read p{margin:0;font-size:12px;color:var(--mute);font-variant-numeric:tabular-nums}.dash-read b{font-size:24px;color:var(--ink);font-weight:500}
 #status{margin:0;font-size:13px;max-width:280px;color:#e9e3c8;min-width:120px}
 .dash-btns{display:flex;gap:5px}.dash-btns button{padding:5px 9px;font-size:12px}

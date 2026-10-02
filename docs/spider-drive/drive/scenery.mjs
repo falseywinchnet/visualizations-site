@@ -70,7 +70,7 @@ export class Scenery{
   const t=this.t,W=this.w;
   const P=[],F=[],D=[],I=[],K=[];// K: flood weight
   for(const c of W.channels){if(c.cls<1)continue;
-   const n=c.n,S=c.cls===3?[-1.25,-1,-.75,-.5,-.25,0,.25,.5,.75,1,1.25]:[-1.3,-1,-.5,0,.5,1,1.3];const cols=S.length;const base=P.length/3;
+   const n=c.n,S=c.cls===3?[-1.25,-1,-.75,-.5,-.25,0,.25,.5,.75,1,1.25]:[-1.6,-1.2,-.6,0,.6,1.2,1.6];const cols=S.length;const base=P.length/3;
    for(let k=0;k<n;k++){const o=k*8,a=Math.max(0,k-1),b=Math.min(n-1,k+1),dx=c.P[b*8]-c.P[a*8],dz=c.P[b*8+1]-c.P[a*8+1],dl=Math.hypot(dx,dz)||1,nx=-dz/dl,nz=dx/dl;
     const w=c.P[o+3],L=c.P[o+2],dep=c.P[o+4],sp=c.P[o+6],m=2.5+w*.12;
     for(const s of S){const off=Math.abs(s)<=1?s*w*.5:Math.sign(s)*(w*.5+m*(Math.abs(s)-1)/.3);P.push(c.P[o]+nx*off,L,c.P[o+1]+nz*off);F.push(dx/dl*sp,dz/dl*sp);const q=Math.abs(off)/(w*.5);D.push(q<=1?dep*(1-q*q):-(Math.abs(off)-w*.5)*.4);K.push(c.cls>=2?1:.4);}
@@ -116,7 +116,7 @@ export class Scenery{
    const skip=new Uint8Array(r.n);for(const b of r.bridges)for(let q=b.s0+1;q<b.s1;q++)skip[q]=1;
    const rn=[];for(let q=0;q<r.n;q++){if(skip[q])continue;for(const o of this.t.roadsNear(r.xz[q*2],r.xz[q*2+1],rn))if(o.r.id<r.id&&o.d<-.5&&(o.r.kind==='main'||o.r.kind===r.kind)&&o.r._skip&&!o.r._skip[o.k]&&!o.r._skip[Math.min(o.r.n-1,o.k+1)]){skip[q]=2;break;}}/* only where that road is drawn itself */
    r._skip=skip;
-   const spans=[];let k0=-1;for(let q=0;q<r.n;q++){const on=!skip[q];if(on&&k0<0)k0=q;if((!on||q===r.n-1)&&k0>=0){spans.push([k0,q]);k0=-1;}}
+   const spans=[];let k0=-1;for(let q=0;q<r.n;q++){const on=!skip[q];if(on&&k0<0)k0=q;if((!on||q===r.n-1)&&k0>=0){spans.push([Math.max(0,k0-2),Math.min(r.n-1,q+2)]);k0=-1;}/* overlap the neighbour by two samples: no square step at a merge */}
    for(const [a,b] of spans){if(b<=a)continue;const m=new T.Mesh(Scenery.ribbon(r,a,b,(r.id%5)*.004),this.roadMats[r.kind]);m.receiveShadow=true;m.renderOrder=1;m.matrixAutoUpdate=false;this.roadGroup.add(m);}}
  }
  // ---------------------------------------------------------------- bridges
@@ -135,7 +135,7 @@ export class Scenery{
    // end caps
    const cap=(o,flip)=>{for(let q=1;q<C-1;q++)flip?I.push(o,o+q+1,o+q):I.push(o,o+q,o+q+1);};cap(0,false);cap((k1-k0)*C,true);
    let g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(P,3));g.setIndex(I);g=g.toNonIndexed();g.computeVertexNormals();g.computeBoundingSphere();return g;};
-  for(const r of this.w.roads)r.bridges.forEach((b,bi)=>{
+  for(const r of this.w.roads)r.bridges.forEach((b,bi)=>{if(b.shared)return;/* this road rides another road's bridge */
    const g=new T.Group();g.name=`${b.name} bridge`;const W=deckWidth(r),hw=W/2,cr=Scenery.crown(r);
    const top=k=>r.y[k]+cr;// deck surface level with the crown of the approach
    const k0=b.s0,k1=b.s1;

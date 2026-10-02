@@ -61,6 +61,7 @@ export class Sound{
  set(g,v,tc=.08){g.gain.setTargetAtTime(v,this.ctx.currentTime,tc);}
  burst(dur,freq,q,gain,type='bandpass',dest=this.ext,buf=this.white){if(!this.ctx)return;const C=this.ctx,s=C.createBufferSource();s.buffer=buf;const f=C.createBiquadFilter();f.type=type;f.frequency.value=freq;f.Q.value=q;const g=C.createGain();const t=C.currentTime;g.gain.setValueAtTime(gain,t);g.gain.exponentialRampToValueAtTime(.001,t+dur);s.connect(f).connect(g).connect(dest);s.start(t,Math.random());s.stop(t+dur+.05);}
  tone(f0,f1,dur,gain,type='sine',dest=this.ext){if(!this.ctx)return;const C=this.ctx,o=C.createOscillator();o.type=type;const g=C.createGain();const t=C.currentTime;o.frequency.setValueAtTime(f0,t);o.frequency.exponentialRampToValueAtTime(Math.max(1,f1),t+dur);g.gain.setValueAtTime(gain,t);g.gain.exponentialRampToValueAtTime(.001,t+dur);o.connect(g).connect(dest);o.start(t);o.stop(t+dur+.05);}
+ flock(n,dist){if(!this.ctx)return;const k=clamp(1-dist/260,0,1)*Math.min(1,n/6);if(k<=0)return;const C=this.ctx;for(let i=0;i<Math.min(n,8);i++){setTimeout(()=>{this.burst(.06,1500+Math.random()*900,1.2,.09*k,'bandpass');this.burst(.09,520,1.5,.07*k,'bandpass',this.ext,this.brown);},i*70+Math.random()*60);}if(Math.random()<.7)setTimeout(()=>this.tone(2600+Math.random()*800,1800,.12,.05*k,'sine'),200);}
  starter(){if(!this.ctx)return;this.tone(95,150,1.1,.14,'sawtooth');this.tone(190,300,1.1,.05,'square');this.burst(1.1,700,1.5,.08,'bandpass');}
  catchUp(){this.thump(.7);this.burst(.5,220,.7,.5,'lowpass',this.ext,this.brown);}
  engineStop(){this.burst(.8,160,.7,.35,'lowpass',this.ext,this.brown);this.hiss(.5);}
@@ -80,7 +81,7 @@ export class Sound{
   e.drive.gain.setTargetAtTime(1+load*1.4,now,.08);e.lp.frequency.setTargetAtTime(150+load*110+rpm*.05,now,.08);e.lp2.frequency.setTargetAtTime(340+load*220,now,.1);
   this.set(e.g,on?(.26+load*.04)*run:0);this.set(e.subG,on?(.14+load*.08)*run:0);
   this.set(e.knockG,on?.45*(1-load*.45)*(1.1-rpm/2400)*run:0);
-  e.turbo.frequency.setTargetAtTime(700+e.boost*1300,now,.15);this.set(e.turboG,on?e.boost*.004:0,.2);e.intake.f.frequency.setTargetAtTime(600+e.boost*700,now,.2);this.set(e.intake.g,on?e.boost*.04:0,.2);
+  const ob=sp.engine.boost||0;e.turbo.frequency.setTargetAtTime(700+e.boost*1300+ob*900,now,.15);this.set(e.turboG,on?e.boost*.004+ob*.012:0,.2);e.intake.f.frequency.setTargetAtTime(600+e.boost*700,now,.2);this.set(e.intake.g,on?e.boost*.04:0,.2);
   this.set(e.rumble.g,on?(.28+load*.2)*run:0);this.set(e.roar.g,on?load*.35:0,.15);
   const flow=sp.engine.pumpFlow||0;this.pump.o.frequency.setTargetAtTime(70+rpm*.05,C.currentTime,.05);this.pump.o2.frequency.setTargetAtTime(140+rpm*.1,C.currentTime,.05);this.set(this.pump.g,clamp(flow/.006,0,1)*.07);
   // valve clicks on leg reversals, accumulator thumps on hard compressions

@@ -51,10 +51,13 @@ function coniferGeo(seed=1){const r=rng(seed),cards=[];const tiers=8;for(let t=0
 function coniferCrossGeo(seed=2){const r=rng(seed),cards=[];for(let t=0;t<6;t++){const y=.25+t*.12,rad=(1-t/6)*.25+.05;for(let k=0;k<3;k++){const a=k/3*Math.PI+t*.6;cards.push([0,y,0,Math.cos(a)*.5,.7,Math.sin(a)*.5,rad*2,.22,a,0]);}}return cardsGeo(cards);}
 function boulderGeo(seed){const g=new T.IcosahedronGeometry(1,1),p=g.attributes.position,r=rng(seed);for(let i=0;i<p.count;i++){const x=p.getX(i),y=p.getY(i),z=p.getZ(i);const f=.78+.3*Math.sin(x*3.1+seed)*Math.cos(z*2.7+y*1.9)+.12*r();p.setXYZ(i,x*f,Math.max(-.2,y*f*.72),z*f*.85);}g.computeVertexNormals();return g;}
 // ------------------------------------------------------------ foliage material with wind + brush
+// fade ranges: vec4(inStart,inEnd,outStart,outEnd) in metres from the camera; a dithered discard crossfades LODs
+export const FADE={near:{value:new T.Vector4(0,0,1e5,1e6)},imp:{value:new T.Vector4(0,0,1e5,1e6)},ground:{value:new T.Vector4(0,0,1e5,1e6)},shrub:{value:new T.Vector4(0,0,1e5,1e6)},corn:{value:new T.Vector4(0,0,1e5,1e6)},cornfar:{value:new T.Vector4(0,0,1e5,1e6)}};
 function foliageMat(opts){
  const m=new T.MeshStandardMaterial({map:opts.map||null,color:opts.color||0xffffff,alphaTest:opts.alphaTest??.45,side:opts.side??T.DoubleSide,roughness:opts.rough??.85,metalness:0,transparent:false});
  const bend=opts.bend??1,push=opts.push??1,burnMode=opts.burn??0,hScale=opts.hScale??1;
- m.onBeforeCompile=sh=>{sh.uniforms.uTime=shared.uTime;sh.uniforms.uPush=pushers;sh.uniforms.uBurn=shared.uBurn;sh.uniforms.uBurnRect=shared.uBurnRect;sh.uniforms.uBurnOn=shared.uBurnOn;sh.uniforms.uWind=windU;
+ const fade=opts.fade||null;
+ m.onBeforeCompile=sh=>{sh.uniforms.uTime=shared.uTime;sh.uniforms.uPush=pushers;if(fade)sh.uniforms.uFade=fade;sh.uniforms.uBurn=shared.uBurn;sh.uniforms.uBurnRect=shared.uBurnRect;sh.uniforms.uBurnOn=shared.uBurnOn;sh.uniforms.uWind=windU;
   sh.uniforms.uTrack=shared.uTrack;sh.uniforms.uTrackRect=shared.uTrackRect;
   sh.vertexShader=sh.vertexShader.replace('#include <common>',`#include <common>
 uniform float uTime;uniform vec4 uPush[20];uniform vec4 uWind;uniform sampler2D uTrack;uniform vec4 uTrackRect;varying vec3 vFW;varying float vFH;`).replace('#include <project_vertex>',`
@@ -76,12 +79,13 @@ ${push>0.9?`{vec2 tu=(wp.xz-uTrackRect.xy)/uTrackRect.zw;if(tu.x>0.0&&tu.y>0.0&&
 vFW=wp.xyz;vFH=hf;
 vec4 mvPosition=viewMatrix*wp;gl_Position=projectionMatrix*mvPosition;`);
   sh.fragmentShader=sh.fragmentShader.replace('#include <common>',`#include <common>
-uniform sampler2D uBurn;uniform vec4 uBurnRect;uniform float uBurnOn;varying vec3 vFW;varying float vFH;`).replace('#include <map_fragment>',`#include <map_fragment>
+uniform sampler2D uBurn;uniform vec4 uBurnRect;uniform float uBurnOn;varying vec3 vFW;varying float vFH;${fade?'uniform vec4 uFade;':''}`).replace('#include <map_fragment>',`#include <map_fragment>
+${fade?'{float dc=length(vFW-cameraPosition);float fa=smoothstep(uFade.x,uFade.y,dc)*(1.0-smoothstep(uFade.z,uFade.w,dc));float dth=fract(52.9829189*fract(dot(gl_FragCoord.xy,vec2(.06711056,.00583715))));if(fa<=dth)discard;}':''}
 diffuseColor.rgb*=mix(.62,1.08,clamp(vFH,0.0,1.0));
 if(uBurnOn>.5){vec2 bu=(vFW.xz-uBurnRect.xy)/uBurnRect.zw;if(bu.x>0.0&&bu.y>0.0&&bu.x<1.0&&bu.y<1.0){vec4 b=texture2D(uBurn,bu);
  ${burnMode===1?'if(b.g>.45)discard;diffuseColor.rgb=mix(diffuseColor.rgb,vec3(.5,.18,.03),b.r);':'diffuseColor.rgb=mix(diffuseColor.rgb,vec3(.04),b.g*.95);'}}}`);
  };
- m.customProgramCacheKey=()=>'fol-'+bend+'-'+push+'-'+burnMode+'-'+hScale;return m;
+ m.customProgramCacheKey=()=>'fol-'+bend+'-'+push+'-'+burnMode+'-'+hScale+(fade?'-f':'');return m;
 }
 const windU={value:new T.Vector4(.8,.4,1,0)};
 // ------------------------------------------------------------ the manager
@@ -93,17 +97,20 @@ export class Vegetation{
   for(const w of workers)w.addEventListener('message',e=>{const d=e.data;if(d.type!=='veg')return;if(d.nearOnly){this.pendingN.delete(d.key);this.near.set(d.key,d.lists);}else{this.pendingF.delete(d.key);this.chunks.set(d.key,d.lists);}this.dirty=true;});
   this.makeSpecies();this.last=new T.Vector3(1e9,0,1e9);this.dirty=true;this.rr=0;
  }
- cfg(q){this.q=q;this.Rt=q==='low'?520:q==='high'?1100:800;this.Rnear=q==='low'?110:q==='high'?200:150;this.Rg=q==='low'?38:q==='high'?75:55;this.Rc=q==='low'?38:q==='high'?72:52;this.Rcf=q==='low'?180:q==='high'?340:260;}
+ cfg(q){this.q=q;this.Rt=q==='low'?650:q==='high'?1300:950;this.Rnear=q==='low'?130:q==='high'?240:180;this.Rg=q==='low'?95:q==='high'?200:150;this.Rc=q==='low'?85:q==='high'?170:125;this.Rcf=q==='low'?300:q==='high'?520:400;
+  // staged LOD: full trees to Rnear (crossfading to impostors over the last 35 m), impostors to Rt; ground cover fades out over its last 30 m
+  FADE.near.value.set(0,0,this.Rnear-35,this.Rnear);FADE.imp.value.set(this.Rnear-35,this.Rnear,this.Rt-120,this.Rt);
+  FADE.ground.value.set(0,0,this.Rg-30,this.Rg);FADE.shrub.value.set(0,0,this.Rnear*1.4-40,this.Rnear*1.4);FADE.corn.value.set(0,0,this.Rc-14,this.Rc);FADE.cornfar.value.set(this.Rc-14,this.Rc,this.Rcf-60,this.Rcf);}
  makeSpecies(){
   const leaf=leafCluster([80,112],[16,34],110),birchLeaf=leafCluster([62,90],[30,50],80,'small'),sageLeaf=leafCluster([70,100],[40,58],120,'small'),shrubLeaf=leafCluster([70,110],[14,30],120);
   const needles=needleBranch(),bark=barkTex(),barkW=barkTex(true);
   const grassT=bladeTex(92,[24,44],28,.95),dryT=bladeTex(48,[48,66],24,.9),reedT=bladeTex(80,[26,40],14,1,'#5a3a22'),wheatT=bladeTex(46,[52,64],26,1,'#d2b060'),flowerT=flowerTex(),cornT=cornPlantTex(),rowT=cornRowTex(),yuccaT=yuccaTex();
   for(const t of [bark,barkW])t.wrapS=t.wrapT=T.RepeatWrapping;rowT.wrapS=T.RepeatWrapping;
-  const trunkM=foliageMat({map:bark,alphaTest:0,side:T.FrontSide,bend:.35,push:.4,burn:2,hScale:1}),trunkW=foliageMat({map:barkW,alphaTest:0,side:T.FrontSide,bend:.35,push:.4,burn:2,hScale:1});
-  const leafM=foliageMat({map:leaf,bend:1,push:.8,burn:1,hScale:1}),needleM=foliageMat({map:needles,bend:.8,push:.7,burn:1,hScale:1}),birchM=foliageMat({map:birchLeaf,bend:1.2,push:.9,burn:1,hScale:1});
-  const shrubM=foliageMat({map:shrubLeaf,bend:1,push:1,burn:1,hScale:1.2}),sageM=foliageMat({map:sageLeaf,bend:.8,push:1,burn:1,hScale:1});
-  const grassM=foliageMat({map:grassT,bend:1.4,push:1.2,burn:1,hScale:.7}),dryM=foliageMat({map:dryT,bend:1.4,push:1.2,burn:1,hScale:.7}),reedM=foliageMat({map:reedT,bend:1.6,push:1.2,burn:1,hScale:1.6}),wheatM=foliageMat({map:wheatT,bend:1.3,push:1.3,burn:1,hScale:.9}),flowerM=foliageMat({map:flowerT,bend:1.3,push:1.2,burn:1,hScale:.7});
-  const cornM=foliageMat({map:cornT,bend:.9,push:1.4,burn:1,hScale:2.3}),rowM=foliageMat({map:rowT,bend:.5,push:0,burn:1,hScale:2.3}),yuccaM=foliageMat({map:yuccaT,bend:.4,push:.6,burn:1,hScale:1});
+  const trunkM=foliageMat({map:bark,alphaTest:0,side:T.FrontSide,bend:.35,push:.4,burn:2,hScale:1,fade:FADE.near}),trunkW=foliageMat({map:barkW,alphaTest:0,side:T.FrontSide,bend:.35,push:.4,burn:2,hScale:1,fade:FADE.near});
+  const leafM=foliageMat({map:leaf,bend:1,push:.8,burn:1,hScale:1,fade:FADE.near}),needleM=foliageMat({map:needles,bend:.8,push:.7,burn:1,hScale:1,fade:FADE.near}),birchM=foliageMat({map:birchLeaf,bend:1.2,push:.9,burn:1,hScale:1,fade:FADE.near});
+  const shrubM=foliageMat({map:shrubLeaf,bend:1,push:1,burn:1,hScale:1.2,fade:FADE.shrub}),sageM=foliageMat({map:sageLeaf,bend:.8,push:1,burn:1,hScale:1,fade:FADE.shrub});
+  const gf={fade:FADE.ground};const grassM=foliageMat({map:grassT,bend:1.4,push:1.2,burn:1,hScale:.7,...gf}),dryM=foliageMat({map:dryT,bend:1.4,push:1.2,burn:1,hScale:.7,...gf}),reedM=foliageMat({map:reedT,bend:1.6,push:1.2,burn:1,hScale:1.6,...gf}),wheatM=foliageMat({map:wheatT,bend:1.3,push:1.3,burn:1,hScale:.9,...gf}),flowerM=foliageMat({map:flowerT,bend:1.3,push:1.2,burn:1,hScale:.7,...gf});
+  const cornM=foliageMat({map:cornT,bend:.9,push:1.4,burn:1,hScale:2.3,fade:FADE.corn}),rowM=foliageMat({map:rowT,bend:.5,push:0,burn:1,hScale:2.3,fade:FADE.cornfar}),yuccaM=foliageMat({map:yuccaT,bend:.4,push:.6,burn:1,hScale:1,fade:FADE.ground});
   const rockM=new T.MeshStandardMaterial({color:0x8a857c,roughness:.92,flatShading:true});const logM=foliageMat({map:bark,alphaTest:0,side:T.FrontSide,bend:0,push:0,burn:2,hScale:1});
   this.mats={leafM,needleM};
   // tree parts (normalised to height 1)
@@ -132,16 +139,16 @@ export class Vegetation{
   {const g=cardsGeo([[0,1.15,0,0,.9,.3,6,2.3,0,0]]);g.attributes.uv.array.forEach((v,i,a)=>{if(i%2===0)a[i]=v*3;});this.defs[SP.cornfar]=D('cornfar',[[g,rowM]]);}
   // instanced meshes: near LOD for every species, impostor LOD for trees
   this.inst=[];
-  const cap=sp=>({[SP.grass]:26000,[SP.drygrass]:20000,[SP.flowers]:4000,[SP.wheat]:30000,[SP.reeds]:8000,[SP.corn]:14000,[SP.cornfar]:14000,[SP.shrub]:12000,[SP.sage]:10000,[SP.boulder]:8000,[SP.log]:2000,[SP.yucca]:2000,[SP.sapling]:3000})[sp]||7000;
+  const cap=sp=>({[SP.grass]:70000,[SP.drygrass]:50000,[SP.flowers]:9000,[SP.wheat]:70000,[SP.reeds]:14000,[SP.corn]:34000,[SP.cornfar]:30000,[SP.shrub]:18000,[SP.sage]:14000,[SP.boulder]:9000,[SP.log]:2500,[SP.yucca]:2500,[SP.sapling]:4000})[sp]||9000;
   this.defs.forEach((d,sp)=>{if(!d)return;const meshes=d.parts.map(([g,m])=>{const im=new T.InstancedMesh(g,m,cap(sp));im.instanceColor=new T.InstancedBufferAttribute(new Float32Array(cap(sp)*3).fill(1),3);im.instanceColor.setUsage(T.DynamicDrawUsage);im.count=0;im.frustumCulled=false;im.castShadow=SPECIES[sp].tree||sp===SP.boulder||sp===SP.shrub;im.receiveShadow=true;im.instanceMatrix.setUsage(T.DynamicDrawUsage);this.scene.add(im);return im;});
    this.inst[sp]={meshes,cap:cap(sp)};});
   // impostors rendered from the 3D models
-  this.imp=[];for(const sp of [SP.conifer,SP.broadleaf,SP.birch,SP.snag]){const tex=this.renderImpostor(this.defs[sp]);const m=foliageMat({map:tex,bend:.3,push:0,burn:1,hScale:1,alphaTest:.4});const g=crossGeo(sp===SP.conifer?.62:.8,1,2,0);
+  this.imp=[];for(const sp of [SP.conifer,SP.broadleaf,SP.birch,SP.snag]){const tex=this.renderImpostor(this.defs[sp]);const m=foliageMat({map:tex,bend:.3,push:0,burn:1,hScale:1,alphaTest:.4,fade:FADE.imp});const g=crossGeo(sp===SP.conifer?.62:.8,1,3,0);
    const im=new T.InstancedMesh(g,m,16000);im.instanceColor=new T.InstancedBufferAttribute(new Float32Array(16000*3).fill(1),3);im.instanceColor.setUsage(T.DynamicDrawUsage);im.count=0;im.frustumCulled=false;im.castShadow=false;im.receiveShadow=false;im.instanceMatrix.setUsage(T.DynamicDrawUsage);this.scene.add(im);this.imp[sp]={mesh:im,cap:16000};}
  }
  renderImpostor(def){
   const size=256,rt=new T.WebGLRenderTarget(size,size,{samples:4});rt.texture.colorSpace=T.SRGBColorSpace;
-  const sc=new T.Scene();sc.add(new T.HemisphereLight(0xdfe8ff,0x4a4030,2.4));const dl=new T.DirectionalLight(0xfff0dd,2.2);dl.position.set(.5,1,.8);sc.add(dl);
+  const sc=new T.Scene();sc.add(new T.AmbientLight(0xffffff,3.1));
   const g=new T.Group();for(const [geo,mat] of def.parts){const m2=mat.clone();m2.onBeforeCompile=()=>{};m2.customProgramCacheKey=()=>'imp'+mat.uuid;g.add(new T.Mesh(geo,m2));}sc.add(g);
   const w=def.name==='conifer'?.62:.8;const cam=new T.OrthographicCamera(-w/2,w/2,1.02,-.02,-5,5);cam.position.set(0,.5,2);cam.lookAt(0,.5,0);
   const r=this.renderer,prev=r.getRenderTarget(),pc=new T.Color();r.getClearColor(pc);const pa=r.getClearAlpha();r.setRenderTarget(rt);r.setClearColor(0x000000,0);r.clear();r.render(sc,cam);r.setRenderTarget(prev);r.setClearColor(pc,pa);
@@ -151,16 +158,19 @@ export class Vegetation{
  update(cam,vehiclePos,dt){
   // wind
   windU.value.w=0;
-  const cx=Math.floor(cam.x/CHUNK),cz=Math.floor(cam.z/CHUNK),rT=Math.ceil(this.Rt/CHUNK),rN=Math.ceil(Math.max(this.Rg,this.Rc)/CHUNK)+1;
+  // chunk requests are centred ahead of the vehicle (3 s of travel) so cover is in place before it is reached
+  const vp=vehiclePos||[cam.x,0,cam.z];if(this._vp){const vx=(vp[0]-this._vp[0])/Math.max(dt,1/120),vz=(vp[2]-this._vp[2])/Math.max(dt,1/120);const k=Math.min(1,dt*4);this._vel=[(this._vel?.[0]||0)+(vx-(this._vel?.[0]||0))*k,(this._vel?.[1]||0)+(vz-(this._vel?.[1]||0))*k];}this._vp=[vp[0],vp[2]];
+  const ax=cam.x+(this._vel?this._vel[0]*3:0),az=cam.z+(this._vel?this._vel[1]*3:0);
+  const cx=Math.floor(ax/CHUNK),cz=Math.floor(az/CHUNK),rT=Math.ceil(this.Rt/CHUNK),rN=Math.ceil(Math.max(this.Rg,this.Rc)/CHUNK)+2;
   // request chunks, nearest first, limited in flight
   const req=[];for(let j=-rT;j<=rT;j++)for(let i=-rT;i<=rT;i++){const d=Math.hypot(i,j)*CHUNK;if(d>this.Rt+CHUNK)continue;const k=this.key(cx+i,cz+j);if(!this.chunks.has(k)&&!this.pendingF.has(k))req.push([d,cx+i,cz+j,k,false]);}
   for(let j=-rN;j<=rN;j++)for(let i=-rN;i<=rN;i++){const k=this.key(cx+i,cz+j);if(!this.near.has(k)&&!this.pendingN.has(k))req.push([Math.hypot(i,j)*CHUNK-40,cx+i,cz+j,k,true]);}
   req.sort((a,b)=>a[0]-b[0]);
   let inflight=this.pendingF.size+this.pendingN.size;
-  for(const [d,x,z,k,near] of req){if(inflight>=10)break;inflight++;(near?this.pendingN:this.pendingF).add(k);this.workers[this.rr++%this.workers.length].postMessage({type:'veg',key:k,cx:x,cz:z,nearOnly:near,far:!near});}
+  for(const [d,x,z,k,near] of req){if(inflight>=14)break;inflight++;(near?this.pendingN:this.pendingF).add(k);this.workers[this.rr++%this.workers.length].postMessage({type:'veg',key:k,cx:x,cz:z,nearOnly:near,far:!near});}
   // evict far chunks
   if(this.chunks.size>1400)for(const [k] of this.chunks){const x=Math.floor(k/10007+.5),z=k-x*10007;if(Math.hypot(x-cx,z-cz)*CHUNK>this.Rt*1.4)this.chunks.delete(k);}
-  if(this.near.size>220)for(const [k] of this.near){const x=Math.floor(k/10007+.5),z=k-x*10007;if(Math.hypot(x-cx,z-cz)*CHUNK>this.Rnear*1.6)this.near.delete(k);}
+  if(this.near.size>420)for(const [k] of this.near){const x=Math.floor(k/10007+.5),z=k-x*10007;if(Math.hypot(x-cx,z-cz)*CHUNK>Math.max(this.Rg,this.Rc)*1.6+CHUNK)this.near.delete(k);}
   // rebuild instance buffers when moved or new data arrived
   const moved=Math.hypot(cam.x-this.last.x,cam.z-this.last.z);
   if(moved>10||(this.dirty&&(performance.now()-(this._lastBuild||0))>250)){this.rebuild(cam);this.last.copy(cam);this.dirty=false;this._lastBuild=performance.now();}

@@ -232,7 +232,7 @@ float n3(vec3 x){vec3 i=floor(x),f=fract(x);f=f*f*(3.0-2.0*f);return mix(mix(mix
    for(const e of [-1,1])for(const zz of [-1,1])this.mesh(new T.TorusGeometry(.25,.045,10,28),M.dark,[e*1.25,.1,zz*.21],g,[0,Math.PI/2,0]);
    for(const s of [-1,1]){
     // fixed outer sleeve of the arm, then the sliding tube that carries the leg
-    this.mesh(new T.CylinderGeometry(.22,.22,.95,28),M.paint,[s*1.65,.1,s*.21],g,[0,0,Math.PI/2]);this.mesh(new T.TorusGeometry(.22,.05,10,28),M.frame,[s*2.12,.1,s*.21],g,[0,Math.PI/2,0]);
+    {const kin=kneeX(GEOM.roadHalfTrack)-.45,x0=Math.max(.95,kin-.8);this.mesh(new T.CylinderGeometry(.22,.22,kin-x0,28),M.paint,[s*(x0+kin)/2,.1,s*.21],g,[0,0,Math.PI/2]);this.mesh(new T.TorusGeometry(.22,.05,10,28),M.frame,[s*(kin+.02),.1,s*.21],g,[0,Math.PI/2,0]);}// fixed outer sleeve: ends inboard of the knee even at road track
     // leg: knee knuckle, splayed strut (barrel with accumulator, sleeves, chrome rod), hub motor, axle, wheel
     const leg=new T.Group();leg.position.set(s*kneeX(GEOM.halfTrack),0,0);g.add(leg);
     this.mesh(new T.CylinderGeometry(.15,.15,2.5,24),M.chrome,[s*-1.25,.1,s*.21],leg,[0,0,Math.PI/2]);// sliding arm tube (runs into the sleeve)

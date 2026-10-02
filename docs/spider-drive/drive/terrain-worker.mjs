@@ -14,8 +14,11 @@ self.onmessage=e=>{
 };
 function buildNode(x0,z0,size,N){
  const st=size/N,V=N+1,B=V+2,H=new Float32Array(B*B),infoG=new Array(V*V);
+ // coarse nodes: a vertex within half a cell of a creek sinks to the creek bed, so the water surface shows
+ // through at every LOD (otherwise a 3 m creek falls between the samples and the mesh covers it)
+ const sink=(x,z,h)=>{if(st<=1)return h;const near=t.channelsNear(x,z,t._bn2||(t._bn2=[]));for(const c of near){if(c.c.cls<1)continue;const hw=c.w*.5;if(c.d<hw+st*.6){const bed=c.level-c.dep*.7;if(bed<h)h=bed;}}return h;};
  for(let j=0;j<B;j++)for(let i=0;i<B;i++){const x=x0+(i-1)*st,z=z0+(j-1)*st;
-  if(i>0&&j>0&&i<=V&&j<=V){const info={};H[j*B+i]=t.height(x,z,info);infoG[(j-1)*V+i-1]=info;}else H[j*B+i]=t.height(x,z);}
+  if(i>0&&j>0&&i<=V&&j<=V){const info={};H[j*B+i]=sink(x,z,t.height(x,z,info));infoG[(j-1)*V+i-1]=info;}else H[j*B+i]=sink(x,z,t.height(x,z));}
  const skirt=4*V,nv=V*V+skirt;
  const pos=new Float32Array(nv*3),nrm=new Int8Array(nv*3),col=new Uint8Array(nv*4),spl=new Uint8Array(nv*4),ext=new Uint8Array(nv*4);
  const wt={},wtr={};
@@ -29,7 +32,7 @@ function buildNode(x0,z0,size,N){
   let dirt=wt.forest*.3,sand=wt.desert*.85+wt.dry*.25,snow=wt.snow*(1-smoothstep(.7,1.1,Math.sqrt(hx*hx+hz*hz)));
   // water margins
   let wet=wt.marsh*.7;const near=t.channelsNear(x,z,t._bn||(t._bn=[]));
-  for(const c of near){const e=c.d-c.w*.5;if(c.c.cls>=1){wet=Math.max(wet,1-smoothstep(-.5,3+c.w*.25,e));if(e<2&&c.c.cls>=2)sand=Math.max(sand,1-smoothstep(0,2.5,e)*1);if(e<0)dirt=Math.max(dirt,.4);}else if(c.d<c.w*.5){dirt=Math.max(dirt,.8*(1-c.d/(c.w*.5)));rock=Math.max(rock,.25);}}
+  for(const c of near){const e=c.d-c.w*.5;if(c.c.cls>=1){wet=Math.max(wet,1-smoothstep(-.5,3+c.w*.25,e));if(e<2.5)sand=Math.max(sand,1-smoothstep(c.c.cls>=2?0:-.4,c.c.cls>=2?2.5:1.4,e));if(e<0)dirt=Math.max(dirt,.5);}else if(c.d<c.w*.5){dirt=Math.max(dirt,.8*(1-c.d/(c.w*.5)));rock=Math.max(rock,.25);}}
   if(t.inside(x,z)){const k=Math.floor((z+t.half)/t.cell)*t.N+Math.floor((x+t.half)/t.cell),lk=t.w.lakeId[k];if(lk>=0){const L=t.w.lakes[lk].level;wet=Math.max(wet,1-smoothstep(L-.2,L+1.5,h));if(h<L+.6)sand=Math.max(sand,.6);}}
   // roads
   // roads are their own meshes; the terrain shows the graded gravel shoulders (verge)

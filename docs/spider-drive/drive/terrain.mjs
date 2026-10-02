@@ -120,7 +120,7 @@ export class Terrain{
    const ex=x-x0-dx*t,ez=z-z0-dz*t,hw=r.width*.5,lim=hw+ROAD.pad;const e2=ex*ex+ez*ez;if(e2>=lim*lim)continue;const d=Math.sqrt(e2)-hw;let j=-1;for(let i=0;i<out.length;i++)if(out[i].r===r){j=i;break;}if(j>=0&&out[j].d<=d)continue;
    const rec={r,k,t,d,y:r.y[k]+(r.y[k+1]-r.y[k])*t};if(j>=0)out[j]=rec;else out.push(rec);}
   out.sort((p,q)=>q.d-p.d);return out;}
- bridgeAt(road,k){const bi=road.onBridge[k];if(bi<0)return null;if(this.bridgeRemoved.has(road.id+':'+bi))return null;return road.bridges[bi];}
+ bridgeAt(road,k){const bi=road.onBridge[k];if(bi<0)return null;const b=road.bridges[bi];const key=b.shared?b.shared.road+':'+b.shared.index:road.id+':'+bi;if(this.bridgeRemoved.has(key))return null;return b;}
  // ---------------------------------------------------------------- height
  terraceParams(x,z){
   const dry=this.grid('dry',x,z),hard=this.grid('hard',x,z),sl=this.grid('slope',x,z);

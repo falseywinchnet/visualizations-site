@@ -92,7 +92,7 @@ export function placeChunk(t,cx,cz,opts={}){
    const r=t.roadNear(x,z);if(r&&r.d<(r.r.kind==='main'?.8:.25))continue;
    let sp=-1,p=0;
    const near=t.channelsNear(x,z,t._vn);let edge=99,inW=false;for(const c of near){if(c.c.cls>=1){const e=c.d-c.w*.5;if(e<0){inW=true;}edge=Math.min(edge,Math.abs(e));}}
-   if(inW&&edge>1.2)continue;
+   if(inW||edge<.7)continue;/* nothing grows in the channel or on its lip */
    if(edge<4.5&&wt.moisture>.3||wt.marsh>.4){sp=SP.reeds;p=.55;}
    else if(wt.farm>.45){const f=t.field(x,z);if(f.edge<1.4){sp=SP.grass;p=.6;}else if(f.crop===1){sp=SP.wheat;p=.95;}else if(f.crop===2){sp=SP.grass;p=.55;}else if(f.crop===3){sp=SP.drygrass;p=.12;}else continue;}
    else{const dryish=wt.moisture<.3||wt.desert>.3;sp=dryish?SP.drygrass:SP.grass;p=(1-wt.forest*.6)*(dryish?.45:.8)*(1-wt.rock);if(!dryish&&r3>.93&&wt.forest<.4){sp=SP.flowers;p=1;}}

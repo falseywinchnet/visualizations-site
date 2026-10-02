@@ -4,7 +4,7 @@
 // grids -> towns, graded roads, bridges and special sites. Deterministic from a seed.
 import {Noise,rng,hash2,clamp,mix,smooth,smoothstep} from './noise.mjs';
 
-export const GENERATOR_VERSION=10;
+export const GENERATOR_VERSION=11;
 export const WORLD=Object.freeze({size:6144,half:3072,N:512,cell:12,N0:256,cell0:24});
 
 // ---------------------------------------------------------------- binary heap
@@ -301,7 +301,7 @@ export function generateWorld(seed=711,onProgress=()=>{}){
   const P=new Float32Array(out.length*8);// x,z,level,width,depth,q,speed,bedGrad
   let level=Infinity;
   for(let k=0;k<out.length;k++){
-   const [x,z,hh,q,g]=out[k],w=cls===0?4+8*smoothstep(TH_GULLY,TH_CREEK,q):Math.max(2.2,2.8*Math.sqrt(q/KM2)),dep=cls===0?1.5+2.5*smoothstep(TH_GULLY,TH_CREEK,q):Math.max(.45,.35*Math.pow(q/KM2,.35)+.25);
+   const [x,z,hh,q,g]=out[k],w=cls===0?4+8*smoothstep(TH_GULLY,TH_CREEK,q):Math.max(3.4,2.8*Math.sqrt(q/KM2)),dep=cls===0?1.5+2.5*smoothstep(TH_GULLY,TH_CREEK,q):Math.max(.7,.35*Math.pow(q/KM2,.35)+.35);
    level=Math.min(level,hh-(cls===0?0:.25));
    const o=k*8;P[o]=x;P[o+1]=z;P[o+2]=level;P[o+3]=w;P[o+4]=dep;P[o+5]=q/KM2;P[o+6]=cls===0?0:clamp((q/KM2)*.12/(w*dep)+.25+g*25,.2,3.2);P[o+7]=g;
   }
@@ -393,7 +393,7 @@ export function generateWorld(seed=711,onProgress=()=>{}){
   while(hp.n){const c=hp.pop();if(c===t)break;if(closed[c])continue;closed[c]=1;const X=c%G,Z=(c/G)|0;
    for(let d=0;d<8;d++){const x=X+DX[d],z=Z+DZ[d];if(x<0||z<0||x>=G||z>=G)continue;const n=z*G+x;if(closed[n]||gLake[n])continue;
     const dist=DD[d]*gc,sl=Math.abs(gH[n]-gH[c])/dist;if(sl>.32)continue;
-    let cost=dist*(1+40*sl*sl);if(gRiver[n]>5)cost+=gRiver[n]>30?900:300;
+    let cost=dist*(1+40*sl*sl);if(gRiver[n]>5&&!bridged[n])cost+=gRiver[n]>30?3200:1300;/* a new bridge is dear: roads converge on the ones that exist */
     // prefer existing roads (reuse)
     if(forbidFn)cost*=forbidFn(n);
     const g=gs[c]+cost;if(g<gs[n]){gs[n]=g;from[n]=c;const hx=Math.hypot(x-TX,z-TZ)*gc;hp.push(n,g+hx);}}
@@ -401,7 +401,7 @@ export function generateWorld(seed=711,onProgress=()=>{}){
   if(from[t]<0&&s!==t)return null;const path=[];for(let c=t;c>=0;c=from[c]){path.push(c);if(c===s)break;}path.reverse();
   return path.map(c=>[-half+(c%G+.5)*gc,-half+((c/G|0)+.5)*gc]);
  };
- const roadUse=new Float32Array(G*G).fill(1);
+ const roadUse=new Float32Array(G*G).fill(1),bridged=new Uint8Array(G*G);
  const roads=[];
  const hAt=(x,z)=>bilinear(h,N,(x+half)/cell-.5,(z+half)/cell-.5);
  const slopeLine=(a,b)=>{const L=Math.hypot(b[0]-a[0],b[1]-a[1]),n=Math.max(2,Math.ceil(L/12));let prev=hAt(a[0],a[1]),mx=0;for(let k=1;k<=n;k++){const t=k/n,x=a[0]+(b[0]-a[0])*t,z=a[1]+(b[1]-a[1])*t,hh=hAt(x,z);mx=Math.max(mx,Math.abs(hh-prev)/(L/n));prev=hh;const i=clamp(Math.floor((z+half)/cell),0,N-1)*N+clamp(Math.floor((x+half)/cell),0,N-1);if(lakeId[i]>=0)return 9;}return mx;};
@@ -419,17 +419,23 @@ export function generateWorld(seed=711,onProgress=()=>{}){
   const sm=new Float32Array(n);for(let k=0;k<n;k++){let s=0,c=0;for(let j=-7;j<=7;j++){const q=clamp(k+j,0,n-1);s+=prof[q];c++;}sm[k]=s/c;}
   const g=kind==='track'?.18:.12;
   // bridges
-  const bridges=[];let k=0;
+  const bridges=[],fixed=new Uint8Array(n);let k=0;
   while(k<n){const [x,z]=rs[k];const i=clamp(Math.floor((z+half)/cell),0,N-1)*N+clamp(Math.floor((x+half)/cell),0,N-1);const c=chRaster[i];
    if(c>=0&&chan[c].cls>=1&&chWidth[i]>(kind==='track'?9999:5)){let e=k;while(e<n-1){const [x2,z2]=rs[e+1];const i2=clamp(Math.floor((z2+half)/cell),0,N-1)*N+clamp(Math.floor((x2+half)/cell),0,N-1);if(chRaster[i2]>=0&&chan[chRaster[i2]].cls>=1)e++;else break;}
     const s0=Math.max(0,k-3),s1=Math.min(n-1,e+3);let wl=-1e9;for(let q=k;q<=e;q++){const [xq,zq]=rs[q];const iq=clamp(Math.floor((zq+half)/cell),0,N-1)*N+clamp(Math.floor((xq+half)/cell),0,N-1);wl=Math.max(wl,chLevel[iq]);}
-    let deck=Math.max(wl+3.2,sm[s0],sm[s1]);
-    // a road crossing beside an existing bridge on the same channel shares its deck level (the two decks meet)
-    {const cx=(rs[s0][0]+rs[s1][0])/2,cz=(rs[s0][1]+rs[s1][1])/2;for(const o of roads)for(const ob of o.bridges)if(ob.channel===c&&Math.hypot((ob.x0+ob.x1)/2-cx,(ob.z0+ob.z1)/2-cz)<90)deck=ob.deck;}
+    let deck=Math.max(wl+3.2,sm[s0],sm[s1]),shared=null;
+    // a road crossing beside an existing bridge on the same channel uses that bridge: its samples across the
+    // span (and a run-in either side) snap onto the earlier road, so there is one deck, drawn once
+    {const cx=(rs[s0][0]+rs[s1][0])/2,cz=(rs[s0][1]+rs[s1][1])/2;for(const o of roads)o.bridges.forEach((ob,obi)=>{if(ob.shared||ob.channel!==c||Math.hypot((ob.x0+ob.x1)/2-cx,(ob.z0+ob.z1)/2-cz)>110)return;shared={road:o.id,index:obi,o,ob};});}
+    if(shared){const o=shared.o;const proj=(x,z)=>{let best=null;for(let j=0;j<o.n-1;j++){const x0=o.xz[j*2],z0=o.xz[j*2+1],ex=o.xz[j*2+2]-x0,ez=o.xz[j*2+3]-z0,L2=ex*ex+ez*ez||1;let t=((x-x0)*ex+(z-z0)*ez)/L2;t=t<0?0:t>1?1:t;const px=x0+ex*t,pz=z0+ez*t,d=Math.hypot(x-px,z-pz);if(!best||d<best.d)best={d,px,pz,y:o.y[j]+(o.y[j+1]-o.y[j])*t};}return best;};
+     const run=8;for(let q=Math.max(0,s0-run);q<=Math.min(n-1,s1+run);q++){const pr=proj(rs[q][0],rs[q][1]);if(!pr)continue;const wgt=q<s0?1-(s0-q)/(run+1):q>s1?1-(q-s1)/(run+1):1;rs[q]=[mix(rs[q][0],pr.px,wgt),mix(rs[q][1],pr.pz,wgt)];sm[q]=mix(sm[q],pr.y,wgt);if(wgt>=1)fixed[q]=1;}
+     deck=shared.ob.deck;}
     for(let q=s0;q<=s1;q++)sm[q]=deck;
-    bridges.push({s0,s1,deck,x0:rs[s0][0],z0:rs[s0][1],x1:rs[s1][0],z1:rs[s1][1],water:wl,channel:c,name:chan[c].name});k=s1+1;continue;}
+    bridges.push({s0,s1,deck,x0:rs[s0][0],z0:rs[s0][1],x1:rs[s1][0],z1:rs[s1][1],water:wl,channel:c,name:chan[c].name,shared:shared?{road:shared.road,index:shared.index}:null});
+    for(let q=s0;q<=s1;q++){const X=clamp(Math.floor((rs[q][0]+half)/gc),0,G-1),Z=clamp(Math.floor((rs[q][1]+half)/gc),0,G-1);for(let dz=-1;dz<=1;dz++)for(let dx=-1;dx<=1;dx++){const XX=clamp(X+dx,0,G-1),ZZ=clamp(Z+dz,0,G-1);bridged[ZZ*G+XX]=1;}}
+    k=s1+1;continue;}
    k++;}
-  const fixed=new Uint8Array(n);for(const b of bridges)for(let q=b.s0;q<=b.s1;q++)fixed[q]=1;
+  for(const b of bridges)for(let q=b.s0;q<=b.s1;q++)fixed[q]=1;
   // where this road runs on or beside an earlier one it takes that road's level, so junctions and shared
   // stretches are one surface (two profiles crossing would bury one carriageway under the other)
   for(let q=0;q<n;q++){if(fixed[q])continue;let best=null;for(const o of roads){const lim=(o.width+(kind==='main'?7.2:kind==='minor'?5.2:3.6))*.5+1.5;

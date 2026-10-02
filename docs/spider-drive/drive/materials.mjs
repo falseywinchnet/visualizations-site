@@ -142,7 +142,7 @@ diffuseColor.rgb=col;vHeightDetail=hgt;vRoughT=rough;
 // ------------------------------------------------------------ water material
 export function waterMaterial(normals){
  const m=new T.ShaderMaterial({
-  transparent:true,depthWrite:false,fog:true,
+  transparent:true,depthWrite:false,fog:true,side:T.DoubleSide,/* seen from below too: the pod drives submerged */
   uniforms:T.UniformsUtils.merge([T.UniformsLib.fog,{tN:{value:normals},uTime:shared.uTime,uSunDir:shared.uSunDir,uSunColor:shared.uSunColor,uSkyTop:shared.uSkyTop,uSkyHorizon:shared.uSkyHorizon,uFlood:shared.uFloodTint}]),
   vertexShader:`#include <common>
 attribute vec2 flow;attribute float depth;varying vec3 vW;varying vec2 vFlow;varying float vDepth;
