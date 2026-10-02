@@ -175,6 +175,7 @@ addEventListener('keydown',e=>{
   case 'KeyI':spider.setEngine(spider.engine.off);break;
   case 'KeyU':{G.units=G.units==='imperial'?'metric':'imperial';store('units',G.units);hud.toast(G.units==='imperial'?'Miles per hour':'Kilometres per hour',1.5);break;}
   case 'KeyX':recover();break;
+  case 'KeyQ':spider.requestSelfRight();break;
   case 'KeyO':G.mission?.debugSkip?.();break;
  }
 });
@@ -183,7 +184,7 @@ addEventListener('blur',()=>{keys.clear();if(G.state==='drive'&&!G.paused)toggle
 document.addEventListener('visibilitychange',()=>{if(document.hidden&&G.state==='drive'&&!G.paused)togglePause(true);});
 for(const b of $$('[data-act]')){const act=b.dataset.act;
  if(b.hasAttribute('data-hold')){b.addEventListener('pointerdown',e=>{e.preventDefault();keys.add(act==='action'?'action':act);b.classList.add('held');b.setPointerCapture(e.pointerId);});const up=()=>{keys.delete(act==='action'?'action':act);b.classList.remove('held');};b.addEventListener('pointerup',up);b.addEventListener('pointercancel',up);continue;}
- b.addEventListener('click',()=>{switch(act){case 'view':cycleView();break;case 'view-exit':setView('chase');break;case 'map':toggleMap();break;case 'engine':spider.setEngine(spider.engine.off);break;case 'panel':body.classList.toggle('panel-open');break;case 'help':toggleHelp();break;case 'resume':togglePause(false);break;case 'recover':recover();togglePause(false);break;case 'restart':startMission(G.missionDef);break;case 'menu':toMenu();break;case 'free':$('#end').hidden=true;G.mission.finished=true;G.paused=false;break;
+ b.addEventListener('click',()=>{switch(act){case 'view':cycleView();break;case 'view-exit':setView('chase');break;case 'map':toggleMap();break;case 'engine':spider.setEngine(spider.engine.off);break;case 'panel':body.classList.toggle('panel-open');break;case 'help':toggleHelp();break;case 'resume':togglePause(false);break;case 'recover':recover();togglePause(false);break;case 'selfright':spider.requestSelfRight();if(G.paused)togglePause(false);break;case 'restart':startMission(G.missionDef);break;case 'menu':toMenu();break;case 'free':$('#end').hidden=true;G.mission.finished=true;G.paused=false;break;
   case 'raise':spider.ctl.retraction=clamp(spider.ctl.retraction-.1,0,1);break;case 'lower':spider.ctl.retraction=clamp(spider.ctl.retraction+.1,0,1);break;case 'faster':spider.ctl.limit=clamp(spider.ctl.limit+5/3.6,5/3.6,140/3.6);break;case 'slower':spider.ctl.limit=clamp(spider.ctl.limit-5/3.6,5/3.6,140/3.6);break;}canvas.focus();});}
 $('#pause-btn').onclick=()=>togglePause();
 $('#obj-title').onclick=()=>$('#objectives').classList.toggle('collapsed');
@@ -205,7 +206,7 @@ function readInput(){
  if(pad){const ax=pad.axes,bt=pad.buttons;const lx=Math.abs(ax[0])>.12?ax[0]:0,ly=Math.abs(ax[1])>.15?ax[1]:0;const rt=bt[7]?.value||0,lt=bt[6]?.value||0;
   if(lx)st=-lx;if(rt>.05||lt>.05)thr=rt-lt;else if(ly)thr=-ly;if(bt[1]?.pressed)br=true;
   const edge=(i,f)=>{const p=!!bt[i]?.pressed;if(p&&!G['_b'+i])f();G['_b'+i]=p;};
-  edge(4,()=>spider.ctl.retraction=clamp(spider.ctl.retraction-.1,0,1));edge(5,()=>spider.ctl.retraction=clamp(spider.ctl.retraction+.1,0,1));edge(3,cycleView);edge(8,toggleMap);edge(9,()=>togglePause());edge(12,()=>spider.ctl.limit=clamp(spider.ctl.limit+5/3.6,5/3.6,140/3.6));edge(13,()=>spider.ctl.limit=clamp(spider.ctl.limit-5/3.6,5/3.6,140/3.6));
+  edge(4,()=>spider.ctl.retraction=clamp(spider.ctl.retraction-.1,0,1));edge(5,()=>spider.ctl.retraction=clamp(spider.ctl.retraction+.1,0,1));edge(3,cycleView);edge(2,()=>spider.requestSelfRight());edge(8,toggleMap);edge(9,()=>togglePause());edge(12,()=>spider.ctl.limit=clamp(spider.ctl.limit+5/3.6,5/3.6,140/3.6));edge(13,()=>spider.ctl.limit=clamp(spider.ctl.limit-5/3.6,5/3.6,140/3.6));
   if(bt[0]?.pressed)keys.add('action');else if(G._b0held)keys.delete('action');G._b0held=bt[0]?.pressed;}
  return {throttle:clamp(thr,-1,1),steer:clamp(st,-1,1),brake:br};
 }
@@ -279,6 +280,7 @@ function drawHud(){
  $('#status').textContent=G.paused?'Paused':(sp.message||(sp.climbState?`Climbing: ${['front','middle','rear'][sp.climbState.pair]} pair ${sp.climbState.phase}`:sp.hold?'Holding':''));
  $('#coords').textContent=`${Math.round(sp.pos[0])} E · ${Math.round(-sp.pos[2])} N · ${Math.round(terrain.height(sp.pos[0],sp.pos[2]))} m`;
  $('#att').textContent=`Roll ${sp.roll?.toFixed(1)}° · Pitch ${sp.pitch?.toFixed(1)}°`;
+ {const b=$('#b-right');b.classList.toggle('urgent',!!sp.overturned&&!sp.sr);b.textContent=sp.sr?'Stop arms':'Self-right';}
  $('#b-engine').textContent=sp.engine.off?(sp.engine.crank>0?'Starting':'Start'):'Engine off';$('#m-ride').textContent=`${Math.round(sp.ctl.retraction*100)}% retr`;$('#m-assist').textContent=(sp.ctl.assist?'On':'Off')+(sp.ctl.climb?' +climb':'');$('#m-track').textContent=spider.trackFrac>.99?'Wide':spider.trackFrac<.01?'Road':spider.trackSeq?`${spider.trackSeq.tgt?'Widening':'Narrowing'} ${Math.round(spider.trackFrac*100)}%`:`Mixed ${Math.round(spider.trackFrac*100)}% (G)`;$('#m-susp').textContent=`${sp.ctl.suspension}${sp.ctl.suspension==='auto'?' ('+sp.suspMode+')':''}`;
  $('#m-tyre').textContent=`Kevlar ${sp.wheels[0].pressure.toFixed(1)} bar`;$('#m-carr').textContent=`${sp.carriage>=0?'aft ':'fwd '}${Math.abs(sp.carriage).toFixed(1)} m`;
  const L=sp.wheels.map(w=>w.load),m=L.reduce((a,b)=>a+b,0)/6||1,dev=Math.max(...L.map(l=>Math.abs(l-m)))/m;$('#m-bal').textContent=`${Math.round(clamp(1-dev*.5,0,1)*100)}%`;
@@ -334,7 +336,7 @@ function step(dt){
  while(acc>=DT&&n<16){if((subK++&3)===0)spider.control(1/60);spider.step(DT);acc-=DT;n++;}
  if(n>=16)acc=0;
  // events from physics
- for(const e of spider.events){if(e.type==='impact'){sound.thump(Math.min(1,e.strength/6));G.shake=Math.min(1,(G.shake||0)+e.strength*.08);}else if(e.type==='overturn'){sound.thump(1);G.shake=1;}else if(e.type==='starter')sound.starter();else if(e.type==='engineCatch')sound.catchUp();else if(e.type==='engineStop')sound.engineStop();}spider.events.length=0;
+ for(const e of spider.events){if(e.type==='impact'){sound.thump(Math.min(1,e.strength/6));G.shake=Math.min(1,(G.shake||0)+e.strength*.08);}else if(e.type==='overturn'){sound.thump(1);G.shake=1;}else if(e.type==='starter')sound.starter();else if(e.type==='engineCatch')sound.catchUp();else if(e.type==='engineStop')sound.engineStop();else if(e.type==='arm')sound.arm(e.k);else if(e.type==='righted'){sound.thump(.8);hud.toast('Back on its wheels',2.5);}}spider.events.length=0;
  missionT+=dt;if(G.mission&&missionT>=.1){G.mission.update(missionT);missionT=0;}
  G.stats&&(G.stats.t+=dt);
 }

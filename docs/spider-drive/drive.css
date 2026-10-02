@@ -49,7 +49,7 @@ body[data-state=menu] #hud-head,body[data-state=loading] #hud-head,body[data-sta
 #turbo i{display:inline-block;width:54px;height:6px;vertical-align:middle;border:1px solid var(--line);border-radius:3px;margin-right:4px;overflow:hidden}#turbo i b{display:block;height:100%;background:var(--amber);font-size:0}#turbo.cut i b{background:var(--red)}
 #speedo{width:96px;height:96px}.dash-read p{margin:0;font-size:12px;color:var(--mute);font-variant-numeric:tabular-nums}.dash-read b{font-size:24px;color:var(--ink);font-weight:500}
 #status{margin:0;font-size:13px;max-width:280px;color:#e9e3c8;min-width:120px}
-.dash-btns{display:flex;gap:5px}.dash-btns button{padding:5px 9px;font-size:12px}
+.dash-btns{display:flex;gap:5px}.dash-btns button.urgent{background:#f0b95a;color:#1a1408;border-color:#f0b95a;animation:urg 1.2s ease-in-out infinite}@keyframes urg{50%{box-shadow:0 0 0 4px #f0b95a55}}@media (prefers-reduced-motion:reduce){.dash-btns button.urgent{animation:none}}.dash-btns button{padding:5px 9px;font-size:12px}
 #touch{display:none}
 #fullmap{position:absolute;inset:0;background:#081012f2;z-index:12;display:grid;place-items:center}#fullmap[hidden]{display:none}#bigmap{width:min(96vw,96vh);height:min(96vw,96vh)}
 #fullmap .close{position:absolute;top:14px;right:14px}.legend{position:absolute;bottom:10px;left:16px;margin:0;font-size:12px;color:var(--mute)}.k-fire{color:#ff7a3a}.k-obj{color:var(--amber)}

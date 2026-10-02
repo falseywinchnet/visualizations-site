@@ -74,7 +74,7 @@
  <div class="dash-read"><p><b id="speed">0</b> <span id="speed-unit">km/h</span></p><p>limit <b id="limit">25</b></p><p id="rpm">750 rpm</p><p id="turbo" hidden><i><b></b></i> turbo</p><p id="terrain-surf">Grass</p></div>
  <p id="status" role="status"></p>
  <div class="dash-btns">
-  <button data-act="engine" id="b-engine" title="I">Engine</button><button data-act="view" title="C">View</button><button data-act="map" title="M">Map</button><button data-act="panel" class="narrow-only" title="Vehicle panel">Panel</button><button data-act="help" title="H">Keys</button>
+  <button data-act="engine" id="b-engine" title="I">Engine</button><button data-act="selfright" id="b-right" title="Q">Self-right</button><button data-act="view" title="C">View</button><button data-act="map" title="M">Map</button><button data-act="panel" class="narrow-only" title="Vehicle panel">Panel</button><button data-act="help" title="H">Keys</button>
  </div>
 </section>
 
@@ -108,7 +108,8 @@
   <div><dt>L</dt><dd>Lights</dd></div>
   <div><dt>N</dt><dd>Music on / off (it follows speed and danger)</dd></div>
   <div><dt>F / R / E</dt><dd>Mission action: spray · draft water · load or unload</dd></div>
-  <div><dt>X</dt><dd>Recover (crane upright on clear ground)</dd></div>
+  <div><dt>Q</dt><dd>Self-right: on its side or roof, a curved arm reaches over from the roof and rolls the machine back onto its wheels (again to stop). Standing still, Q runs a test cycle of both arms</dd></div>
+  <div><dt>X</dt><dd>Crane recovery: lifted upright onto clear ground (the fallback when the arms cannot do it)</dd></div>
   <div><dt>P / Esc</dt><dd>Pause</dd></div>
  </dl>
  <p>In the driver's seat, drag to look around; double-click to look ahead. A gamepad works too: left stick steers and drives, triggers drive and brake, bumpers raise and lower, face buttons act, change view and open the map.</p>
@@ -117,7 +118,7 @@
 
 <section id="pause" hidden>
  <h2>Paused</h2>
- <div class="pause-btns"><button data-act="resume">Resume</button><button data-act="recover">Recover (X)</button><button data-act="restart">Restart scenario</button><button data-act="menu">Choose another scenario</button><button data-act="help">Keys</button></div>
+ <div class="pause-btns"><button data-act="resume">Resume</button><button data-act="selfright">Self-right (Q)</button><button data-act="recover">Crane recover (X)</button><button data-act="restart">Restart scenario</button><button data-act="menu">Choose another scenario</button><button data-act="help">Keys</button></div>
  <label>Quality <select id="p-quality"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></label>
  <label>Sound <input id="p-volume" type="range" min="0" max="1" step=".05" value=".7"></label>
  <label>Music <input id="p-music" type="range" min="0" max="1" step=".05" value=".55"></label>

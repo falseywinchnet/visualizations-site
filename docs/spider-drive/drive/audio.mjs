@@ -61,7 +61,7 @@ export class Sound{
   this.creak=loop(this.white,'bandpass',2400,4,this.int);this.vibAcc=0;
   this.hissL=loop(this.white,'highpass',3500,.7);
   this.tyre=loop(this.brown,'bandpass',220,.8);this.gravel=loop(this.white,'bandpass',2600,1.2);this.hum=loop(this.white,'bandpass',420,6);
-  this.skid=loop(this.white,'bandpass',1400,3);this.rustle=loop(this.white,'bandpass',4800,.8);this.waterL=loop(this.brown,'lowpass',900,.7);this.splashL=loop(this.white,'bandpass',1800,.6);
+  this.skid=loop(this.white,'bandpass',1400,3);this.armL=loop(this.brown,'bandpass',380,.9);this.rustle=loop(this.white,'bandpass',4800,.8);this.waterL=loop(this.brown,'lowpass',900,.7);this.splashL=loop(this.white,'bandpass',1800,.6);
   this.rain=loop(this.white,'highpass',5000,.5,master);this.wind=loop(this.brown,'lowpass',500,.5,master);this.fireL=loop(this.brown,'lowpass',260,.6,this.ext);this.river=loop(this.brown,'bandpass',600,.5,this.ext);
   this.crickets={o:C.createOscillator(),am:C.createGain(),g:C.createGain(),lfo:C.createOscillator()};const cr=this.crickets;cr.o.frequency.value=4600;cr.lfo.frequency.value=28;const lg=C.createGain();lg.gain.value=.5;cr.lfo.connect(lg).connect(cr.am.gain);cr.am.gain.value=.5;cr.g.gain.value=0;cr.o.connect(cr.am).connect(cr.g).connect(this.ext);cr.o.start();cr.lfo.start();
   this.t=0;this.nextBird=2;this.prevValve=[false,false,false,false,false,false];this.prevEv=[0,0,0,0,0,0];
@@ -84,6 +84,11 @@ export class Sound{
  crack(k=1){this.burst(.12,2200,.7,.9*k,'bandpass');this.burst(.5,500,.8,.5*k,'lowpass',this.ext,this.brown);}
  thump(k=1){this.tone(90,40,.35,.9*k);this.burst(.25,300,.7,.5*k,'lowpass',this.ext,this.brown);}
  hiss(k=1){this.burst(1.6,4200,.5,.25*k,'highpass');}
+ // self-righting arms: the hydraulic drive's whine comes from the pump (its flow already includes the arms); these are the
+ // mechanical events, a valve thunk as the drive engages, a hard clunk as each segment reaches its stop, a seat-in thud on stowing
+ arm(k){if(!this.ctx)return;if(k==='start'){this.burst(.08,700,2,.12,'bandpass',this.ext,this.brown);this.tone(140,90,.25,.18,'triangle');}
+  else if(k==='clunk'){this.tone(220,120,.12,.3,'square');this.burst(.1,1600,2.5,.18,'bandpass');this.tone(70,45,.3,.35);}
+  else if(k==='stow'){this.tone(110,60,.35,.32);this.burst(.2,500,1.2,.14,'bandpass',this.ext,this.brown);}}
  squelch(){if(!this.ctx)return;this.music.duckFor(3.5);this.burst(.18,1800,1.5,.25,'bandpass',this.master);this.tone(1200,1200,.08,.08,'square',this.master);}
  boom(dist=300){const k=clamp(1-dist/2500,.05,1);this.burst(1.8,120+300*k,.6,1.2*k,'lowpass',this.master,this.brown);this.tone(60,28,1.2,.8*k,'sine',this.master);}
  whistle(){this.tone(2400,500,1.6,.15,'sine',this.master);}
@@ -109,6 +114,8 @@ export class Sound{
   this.set(this.gravel.g,contact&&(s.name==='Gravel'||s.name==='Rock'||s.name==='Riverbed')?clamp(speed/10,0,1)*(.12+.05*Math.sin(this.t*7.3)*Math.sin(this.t*2.9)):0,.15);
   this.set(this.hum.g,contact&&s.name==='Asphalt'?clamp(speed/15,0,1)*.08:0);this.hum.f.frequency.setTargetAtTime(200+speed*25,C.currentTime,.1);
   const slip=Math.max(...sp.wheels.map(w=>w.contact?Math.abs(w.slip)+Math.abs(w.slipAngle)*.5:0));this.set(this.skid.g,slip>.2&&speed>1?clamp((slip-.2)*.6,0,.25):0);
+  // an arm's rubber shoe dragging and grinding on the ground as it levers or rolls the machine
+  this.set(this.armL.g,clamp(sp.armScrape||0,0,1)*.3,.08);
   this.set(this.rustle.g,clamp(sp.brush*.25,0,.35)+(G.brushCrop||0)*.05,.05);
   this.set(this.waterL.g,clamp((sp.wading||0)*.25,0,.5));this.set(this.splashL.g,(sp.wading||0)>.2?clamp(speed/5,0,1)*.3:0);
   const w=G.atmo?.weather,wk=this.windK??1;this.set(this.rain.g,w==='rain'?.14*(1-.5*this.seatK):0,.5);this.set(this.wind.g,(.03+clamp(speed/20,0,1)*.08+(G.view==='seat'?0:.03))*wk,.3);this.wind.f.frequency.setTargetAtTime(500*(this.pitchK??1),C.currentTime,.3);

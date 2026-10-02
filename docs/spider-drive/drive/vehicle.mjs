@@ -1,7 +1,7 @@
 // The Spider: detailed three.js model driven by the physics state.
 // Body frame matches physics.mjs: x right, y up, z back; origin at the ground reference.
 import * as T from 'three';
-import {GEOM} from './physics.mjs';
+import {GEOM,ARM,armOffsets} from './physics.mjs';
 import {mergeNonIndexed} from './scenery.mjs';
 
 const AXLE=.78,PLATE=GEOM.plateY,RIM_R=GEOM.R*.58;
@@ -57,7 +57,7 @@ float n3(vec3 x){vec3 i=floor(x),f=fract(x);f=f*f*(3.0-2.0*f);return mix(mix(mix
   };
   if(envMap)for(const k in M)M[k].envMap=envMap;
   this.pairs=[];this.legs=[];this.wheels=[];this.lights={};
-  this.buildTop();this.buildCabin();this.buildPairs();this.buildVariant();
+  this.buildTop();this.buildCabin();this.buildPairs();this.buildVariant();this.buildArms();
   // merge static parts per material to keep draw calls low
   const keep=new Set([this.hatch,this.gauge,this.searchlight,...this.legs.map(l=>l.rod),...this.legs.map(l=>l.stage),...this.legs.map(l=>l.stage2),...this.wheels.map(w=>w.tire),...this.lights.head,...this.lights.nose,...this.lights.tail,...this.lights.beacons,...(this.lights.bar||[])]);
   const groups=[this.top,this.cabin,...this.seats,...this.pairs,...this.legs.map(l=>l.leg),...this.legs.map(l=>l.st),...this.legs.map(l=>l.hub),...this.wheels.map(w=>w.spin)];
@@ -382,6 +382,55 @@ float n3(vec3 x){vec3 i=floor(x),f=fract(x);f=f*f*(3.0-2.0*f);return mix(mix(mix
   if(this.monitorBarrel&&opts.monitorAim){this.monitor.rotation.y=opts.monitorAim[0];this.monitorBarrel.rotation.x=opts.monitorAim[1];}
   this.groundY.value=opts.groundY??o[1];
   this.dirt.value=opts.dirt??this.dirt.value;this.wet.value=opts.wet??0;
+  this.updateArms(sp);
+ }
+ // ------------------------------------------------------------ self-righting arms
+ // Two curved telescoping fingers on one circle station behind the middle legs (physics ARM). Each is a painted sleeve
+ // rooted on a roof shoulder, five polished segments that slide out of it in turn (each a group rotating about the
+ // circle's axis), collars at the segment ends, and a broad ribbed rubber shoe on the last segment. The right finger
+ // rides the outer circle; its sleeve stands on a yoke that bridges the left finger's path.
+ buildArms(){
+  const M=this.mats,g0=this.armsGroup=new T.Group();g0.name='Self-righting arms';g0.position.set(0,ARM.cy,ARM.z);this.root.add(g0);
+  const steel=new T.MeshStandardMaterial({color:0xc9cfd1,roughness:.18,metalness:.95}),rubber=new T.MeshStandardMaterial({color:0x1d1e1c,roughness:.92}),warn=new T.MeshStandardMaterial({color:0xe0b028,roughness:.5,metalness:.2});
+  const arc=(R,a0,a1,r,mat,parent,radial=20)=>{const n=Math.max(8,Math.ceil(Math.abs(a1-a0)/(2*Math.PI/180)));const pts=[];for(let k=0;k<=n;k++){const a=a0+(a1-a0)*k/n;pts.push(new T.Vector3(R*Math.cos(a),R*Math.sin(a),0));}
+   const m=new T.Mesh(new T.TubeGeometry(new T.CatmullRomCurve3(pts),n*2,r,radial,false),mat);m.castShadow=true;m.receiveShadow=true;parent.add(m);return m;};
+  const ring=(R,a,r,tube,mat,parent)=>{const m=new T.Mesh(new T.TorusGeometry(r,tube,8,24),mat);m.position.set(R*Math.cos(a),R*Math.sin(a),0);m.rotation.set(Math.PI/2,0,0);m.rotateOnWorldAxis?0:0;
+   // the ring's plane is normal to the tangent of the circle at a
+   m.quaternion.setFromUnitVectors(new T.Vector3(0,0,1),new T.Vector3(-Math.sin(a),Math.cos(a),0));m.castShadow=true;parent.add(m);return m;};
+  const sector=(Ri,Ro,a0,a1,z0,z1,mat,parent)=>{const sh=new T.Shape();const n=10;for(let k=0;k<=n;k++){const a=a0+(a1-a0)*k/n;const p=[Ro*Math.cos(a),Ro*Math.sin(a)];k?sh.lineTo(...p):sh.moveTo(...p);}for(let k=n;k>=0;k--){const a=a0+(a1-a0)*k/n;sh.lineTo(Ri*Math.cos(a),Ri*Math.sin(a));}
+   const g=new T.ExtrudeGeometry(sh,{depth:z1-z0,bevelEnabled:true,bevelThickness:.02,bevelSize:.02,bevelSegments:1,curveSegments:4});g.translate(0,0,z0);const m=new T.Mesh(g,mat);m.castShadow=true;m.receiveShadow=true;parent.add(m);return m;};
+  this.arms=[];
+  for(let i=0;i<2;i++){const R=ARM.R[i],d=ARM.dir[i],tip=ARM.tip[i],A={segs:[],R,d};
+   // sleeve, painted in the livery, with a gearbox at its mouth and hydraulic lines along its back
+   const s0=tip-d*ARM.sleeve;arc(R,s0,tip,ARM.rTube[0],M.paint,g0);
+   arc(R+ARM.rTube[0]+.02,s0+d*.06,tip-d*.08,.035,M.hose,g0,8);
+   {const box=new T.Mesh(new T.BoxGeometry(.62,.5,.62),M.frame);box.position.set((R)*Math.cos(tip-d*.04),(R)*Math.sin(tip-d*.04),0);box.rotation.z=tip-d*.04;box.castShadow=true;g0.add(box);
+    const pin=new T.Mesh(new T.CylinderGeometry(.14,.14,.7,14),M.dark);pin.rotation.x=Math.PI/2;pin.position.copy(box.position).multiplyScalar(1-.34/R);g0.add(pin);
+    ring(R,tip,ARM.rTube[0]+.03,.04,M.dark,g0);ring(R,s0,ARM.rTube[0]+.02,.035,M.dark,g0);}
+   // segments: each its own group pivoting on the circle's axis, built stowed (ending at the sleeve's mouth)
+   for(let k=1;k<=ARM.n;k++){const sg=new T.Group();g0.add(sg);const r=ARM.rTube[k];
+    arc(R,tip-d*ARM.L,tip,r,steel,sg,16);ring(R,tip-d*.005,r+.022,.03,M.dark,sg);
+    // a yellow-black band at each segment's end so the stages read as they come out
+    const band=new T.Mesh(new T.CylinderGeometry(r+.006,r+.006,.12,16,1,true),warn);band.position.set(R*Math.cos(tip-d*.04),R*Math.sin(tip-d*.04),0);band.quaternion.setFromUnitVectors(new T.Vector3(0,1,0),new T.Vector3(-Math.sin(tip),Math.cos(tip),0));sg.add(band);
+    A.segs.push(sg);}
+   // the fingertip shoe on the last segment: a steel backing plate and a ribbed rubber tread, wide across the machine
+   {const sg=A.segs[ARM.n-1],P=ARM.pad,a0=tip-P.half,a1=tip+P.half,w=P.w;
+    sector(R+P.rin,R+P.rin+.08,a0-.004,a1+.004,-w/2,w/2,steel,sg);
+    const ribs=7;for(let q=0;q<ribs;q++){const z0=-w/2+q*w/ribs+.04,z1=z0+w/ribs-.08;sector(R+P.rin+.08,R+P.rout,a0,a1,z0,z1,rubber,sg);}
+    // gussets from the tube to the plate
+    for(const z of [-w*.3,0,w*.3]){const gs=new T.Mesh(new T.BoxGeometry(.05,P.rin+.02,.5),steel);const a=tip;gs.position.set((R+P.rin/2)*Math.cos(a),(R+P.rin/2)*Math.sin(a),z);gs.rotation.z=a-Math.PI/2;sg.add(gs);}}
+   this.arms.push(A);}
+  // mounts. Left (inner) sleeve: two struts straight down to the left roof edge, inside every path that sweeps past.
+  {const R=ARM.R[1];for(const a of [105,122].map(v=>v*Math.PI/180)){const p=[R*Math.cos(a),R*Math.sin(a)-.15,0];this.rod([p[0],p[1]+ARM.cy,ARM.z],[-1.25,GEOM.topPlate+.08,ARM.z+(a>1.95?.35:-.35)],.09,M.frame);}}
+  // Right (outer) sleeve: a yoke whose cross-beams sit at the sleeve's radius, bridging over the left finger and its
+  // shoe, with legs down to the right roof edge either side of that path.
+  {const R=ARM.R[0],zs=[ARM.z-ARM.pad.w/2-.32,ARM.z+ARM.pad.w/2+.32];for(const a of [58,74].map(v=>v*Math.PI/180)){const x=R*Math.cos(a),y=R*Math.sin(a)+ARM.cy;
+    this.rod([x,y,zs[0]],[x,y,zs[1]],.07,M.frame);for(const z of zs){this.rod([x,y,z],[1.25,GEOM.topPlate+.08,z],.08,M.frame);this.mesh(new T.SphereGeometry(.11,10,8),M.dark,[x,y,z]);}
+    this.box([.34,.34,.34],[x,y,ARM.z],M.frame).rotation.z=a;}}
+ }
+ updateArms(sp){
+  if(!this.arms||!sp.arms)return;const off=this._aoff||(this._aoff=[0,0,0,0,0,0]);
+  for(let i=0;i<2;i++){const A=this.arms[i];armOffsets(sp.arms[i].ext,off);for(let k=1;k<=ARM.n;k++)A.segs[k-1].rotation.z=A.d*off[k];}
  }
  worldPoint(local,parent=this.root){return parent.localToWorld(new T.Vector3(...local));}
 }

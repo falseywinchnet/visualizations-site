@@ -102,16 +102,18 @@ class Mission{
 class Free extends Mission{
  start(){const s=this.w.sites.find(s=>s.type==='staging')||this.w.towns[0];const p=this.findSpot(s.x+30,s.z+20);
   this.found=new Set();this.body=this.w.body||'earth';
-  if(this.body==='earth')this.list=[{id:'ford',text:'Ford the main river'},{id:'lookout',text:'Stand on the lookout ridge'},{id:'corn',text:'Run through a cornfield at speed'},{id:'ledge',text:'Walk up a rock step with climb assist'},{id:'gully',text:'Cross a dry gully'},{id:'lake',text:'Wade into a lake'},{id:'high',text:'Reach 600 m of elevation'},{id:'town',text:'Visit every town'}];
+  if(this.body==='earth')this.list=[{id:'ford',text:'Ford the main river'},{id:'lookout',text:'Stand on the lookout ridge'},{id:'corn',text:'Run through a cornfield at speed'},{id:'ledge',text:'Walk up a rock step with climb assist'},{id:'gully',text:'Cross a dry gully'},{id:'lake',text:'Wade into a lake'},{id:'high',text:'Reach 600 m of elevation'},{id:'town',text:'Visit every town'},{id:'arms',text:'Right the Spider with its own arms after a rollover'}];
   else{this.list=this.w.sites.filter(s=>s.type!=='staging').map(s=>({id:'site:'+s.name,text:({landing:'Drive onto the landing pad',rim:'Stand on the ',fresh:'Walk the ejecta of the ',relay:'Reach the relay mast',lander:'Find the old descent stage',scarp:'Reach the overlook under the scarp',rover:'Find the abandoned rover',drill:'Visit the ice drill',shore:'Reach the shore of the lake',crest:'Climb the dune crest',probe:'Find the Huygens-class probe',channel:'Follow a methane channel to its bend'})[s.type]+(s.type==='rim'||s.type==='fresh'?s.name:'')}));
    if(this.body==='moon')this.list.push({id:'air',text:'Leave the ground with all six wheels for two seconds'},{id:'fast',text:'Reach 60 km/h on the mare'});
    if(this.body==='mars')this.list.push({id:'dune',text:'Cross a basaltic dune field'},{id:'fast',text:'Reach 90 km/h on the plain'});
-   if(this.body==='titan')this.list.push({id:'lake',text:'Wade into the methane'},{id:'sub',text:'Drive along the lake bed fully submerged'});}
+   if(this.body==='titan')this.list.push({id:'lake',text:'Wade into the methane'},{id:'sub',text:'Drive along the lake bed fully submerged'});
+   this.list.push({id:'arms',text:'Right the Spider with its own arms after a rollover'});}
   this.towns=new Set();this.cornT=0;this.airT=0;this.duneT=0;this.title=this.body==='earth'?'Open country':{moon:'Mare crater floor',mars:'Below the Olympus scarp',titan:'Shoreline on Titan'}[this.body];
   this.radio('Base',this.body==='earth'?'Spider, you are free to roam. Country is yours.':{moon:'Spider, Harlan Base. You are clear to range. Watch your stopping distances out there.',mars:'Spider, Tharsis. Dust is light today, winds from the scarp. Range is yours.',titan:'Spider, Shoreline. Visibility two kilometres in the haze. The lake is yours if you want it.'}[this.body],1);
   return {x:p.x,z:p.z,yaw:0};}
  tick(dt){const sp=this.sp,t=this.t,f=t.feature(sp.pos[0],sp.pos[2]);const w=t.water(sp.pos[0],sp.pos[2],{});
   const hit=id=>{if(!this.found.has(id)){this.found.add(id);this.G.hud.toast(this.list.find(l=>l.id===id).text,2.5);this.G.sound.squelch();}};
+  if((sp.righted||0)>0)hit('arms');
   if(this.body!=='earth'){
    if(f.type==='site'&&this.list.some(l=>l.id==='site:'+f.label))hit('site:'+f.label);
    const kmh=sp.speed()*3.6;if(this.body==='moon'){if(sp.wheels.every(w=>!w.contact))this.airT+=dt;else this.airT=0;if(this.airT>2)hit('air');if(kmh>60)hit('fast');}
