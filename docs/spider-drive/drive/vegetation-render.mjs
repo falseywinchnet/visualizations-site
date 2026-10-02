@@ -80,7 +80,7 @@ vFW=wp.xyz;vFH=hf;
 vec4 mvPosition=viewMatrix*wp;gl_Position=projectionMatrix*mvPosition;`);
   sh.fragmentShader=sh.fragmentShader.replace('#include <common>',`#include <common>
 uniform sampler2D uBurn;uniform vec4 uBurnRect;uniform float uBurnOn;varying vec3 vFW;varying float vFH;${fade?'uniform vec4 uFade;':''}`).replace('#include <map_fragment>',`#include <map_fragment>
-${fade?'{float dc=length(vFW-cameraPosition);float fa=smoothstep(uFade.x,uFade.y,dc)*(1.0-smoothstep(uFade.z,uFade.w,dc));float dth=fract(52.9829189*fract(dot(gl_FragCoord.xy,vec2(.06711056,.00583715))));if(fa<=dth)discard;}':''}
+${fade?'{float dc=length(vFW-cameraPosition);/* explicit ramps: smoothstep with equal edges (the "no fade-in" case) is undefined in GLSL and returns 0 on some GPUs, which discarded every near plant */float fi=uFade.y>uFade.x+1e-3?clamp((dc-uFade.x)/(uFade.y-uFade.x),0.0,1.0):1.0;float fo=uFade.w>uFade.z+1e-3?clamp((uFade.w-dc)/(uFade.w-uFade.z),0.0,1.0):step(dc,uFade.w);float fa=fi*fi*(3.0-2.0*fi)*fo*fo*(3.0-2.0*fo);float dth=fract(52.9829189*fract(dot(gl_FragCoord.xy,vec2(.06711056,.00583715))));if(fa<=dth*.999)discard;}':''}
 diffuseColor.rgb*=mix(.62,1.08,clamp(vFH,0.0,1.0));
 if(uBurnOn>.5){vec2 bu=(vFW.xz-uBurnRect.xy)/uBurnRect.zw;if(bu.x>0.0&&bu.y>0.0&&bu.x<1.0&&bu.y<1.0){vec4 b=texture2D(uBurn,bu);
  ${burnMode===1?'if(b.g>.45)discard;diffuseColor.rgb=mix(diffuseColor.rgb,vec3(.5,.18,.03),b.r);':'diffuseColor.rgb=mix(diffuseColor.rgb,vec3(.04),b.g*.95);'}}}`);
@@ -161,8 +161,12 @@ export class Vegetation{
   // wind
   windU.value.w=0;
   // chunk requests are centred ahead of the vehicle (3 s of travel) so cover is in place before it is reached
-  const vp=vehiclePos||[cam.x,0,cam.z];if(this._vp){const vx=(vp[0]-this._vp[0])/Math.max(dt,1/120),vz=(vp[2]-this._vp[2])/Math.max(dt,1/120);const k=Math.min(1,dt*4);this._vel=[(this._vel?.[0]||0)+(vx-(this._vel?.[0]||0))*k,(this._vel?.[1]||0)+(vz-(this._vel?.[1]||0))*k];}this._vp=[vp[0],vp[2]];
-  const ax=cam.x+(this._vel?this._vel[0]*3:0),az=cam.z+(this._vel?this._vel[1]*3:0);
+  // (_vp is [x,z]; a jump of more than 40 m in a frame is a teleport or a crane recovery, not motion)
+  const vp=vehiclePos||[cam.x,0,cam.z];if(!this._vel)this._vel=[0,0];
+  if(this._vp&&dt>0){const dx=vp[0]-this._vp[0],dz=vp[2]-this._vp[1];if(Math.hypot(dx,dz)>40){this._vel[0]=this._vel[1]=0;}else{const k=Math.min(1,dt*4);this._vel[0]+=(dx/dt-this._vel[0])*k;this._vel[1]+=(dz/dt-this._vel[1])*k;}}
+  this._vp=[vp[0],vp[2]];
+  const la=Math.min(1,150/Math.max(1e-6,Math.hypot(this._vel[0],this._vel[1])*3));/* at most 150 m ahead */
+  const ax=cam.x+this._vel[0]*3*la,az=cam.z+this._vel[1]*3*la;
   const cx=Math.floor(ax/CHUNK),cz=Math.floor(az/CHUNK),rT=Math.ceil(this.Rt/CHUNK),rN=Math.ceil(Math.max(this.Rg,this.Rc)/CHUNK)+2;
   // request chunks, nearest first, limited in flight
   const req=[];for(let j=-rT;j<=rT;j++)for(let i=-rT;i<=rT;i++){const d=Math.hypot(i,j)*CHUNK;if(d>this.Rt+CHUNK)continue;const k=this.key(cx+i,cz+j);if(!this.chunks.has(k)&&!this.pendingF.has(k))req.push([d,cx+i,cz+j,k,false]);}
@@ -203,8 +207,9 @@ export class Vegetation{
     if(sp===SP.cornfar){if(dc+half<this.Rc-6||dc-half>this.Rcf)return;for(let i=0;i<n;i++){const d=Math.hypot(L[i*STRIDE]-cam.x,L[i*STRIDE+2]-cam.z);if(d>=this.Rc-6&&d<=this.Rcf)put(sp,L,i,false);}return;}
     if(tree){if(dc-half>this.Rt)return;
      // whole chunk inside the near ring: one bulk copy
-     if(dc+half<=nearR&&!br){putAll(sp,L,null);return;}
-     for(let i=0;i<n;i++){if(br&&br.has(i))continue;const d=Math.hypot(L[i*STRIDE]-cam.x,L[i*STRIDE+2]-cam.z);if(d>this.Rt)continue;put(sp,L,i,d>nearR);}return;}
+     if(dc+half<=nearR-35&&!br){putAll(sp,L,null);return;}
+     // in the crossfade band both LODs are drawn, each dithered by its own fade, so a tree never thins out
+     for(let i=0;i<n;i++){if(br&&br.has(i))continue;const d=Math.hypot(L[i*STRIDE]-cam.x,L[i*STRIDE+2]-cam.z);if(d>this.Rt)continue;if(d<=nearR)put(sp,L,i,false);if(d>nearR-35)put(sp,L,i,true);}return;}
     const lim=sp===SP.boulder?this.Rt*.6:sp===SP.log?nearR*1.3:sp===SP.sapling?nearR*1.2:nearR*1.4;if(dc-half>lim)return;
     if(dc+half<=lim){putAll(sp,L,br);return;}
     for(let i=0;i<n;i++){if(br&&br.has(i))continue;if(Math.hypot(L[i*STRIDE]-cam.x,L[i*STRIDE+2]-cam.z)<lim)put(sp,L,i,false);}});}
