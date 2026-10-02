@@ -216,8 +216,12 @@ export class Vegetation{
   for(const [key,lists] of this.near){const x=Math.floor(key/10007+.5),z=key-x*10007,dc=Math.hypot((x+.5)*CHUNK-cam.x,(z+.5)*CHUNK-cam.z);
    lists.forEach((L,sp)=>{if(!L||!L.length)return;this._cache(L,sp);const lim=sp===SP.corn?this.Rc:this.Rg;if(dc-half>lim)return;if(dc+half<=lim){putAll(sp,L,null);return;}
     const n=L.length/STRIDE;for(let i=0;i<n;i++)if(Math.hypot(L[i*STRIDE]-cam.x,L[i*STRIDE+2]-cam.z)<lim)put(sp,L,i,false);});}
-  this.inst.forEach((I,sp)=>{if(!I)return;for(const m of I.meshes){m.count=counts[sp];m.instanceMatrix.needsUpdate=true;if(m.instanceColor)m.instanceColor.needsUpdate=true;}});
-  for(const sp of [0,1,2,3]){const I=this.imp[sp];I.mesh.count=impC[sp];I.mesh.instanceMatrix.needsUpdate=true;if(I.mesh.instanceColor)I.mesh.instanceColor.needsUpdate=true;}
+  // upload only the instances in use: the buffers are sized for the worst case (tens of MB in all), and sending
+  // them whole on every rebuild stalled the GPU a few times a second at speed
+  const up=(a,n)=>{if(!a)return;a.clearUpdateRanges();if(n>0){a.addUpdateRange(0,n*a.itemSize);a.needsUpdate=true;}};
+  const set=(m,n)=>{const was=m.count;m.count=n;if(n===0&&was===0)return;up(m.instanceMatrix,n);up(m.instanceColor,n);};
+  this.inst.forEach((I,sp)=>{if(!I)return;for(const m of I.meshes)set(m,counts[sp]);});
+  for(const sp of [0,1,2,3])set(this.imp[sp].mesh,impC[sp]);
   this.stats={instances:counts.reduce((a,b)=>a+(b||0),0),impostors:impC.reduce((a,b)=>a+(b||0),0),chunks:this.chunks.size,near:this.near.size};
  }
  // ------------------------------------------------------------ physics colliders (main thread, same placement)

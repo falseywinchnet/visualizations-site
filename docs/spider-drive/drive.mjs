@@ -318,18 +318,21 @@ function syncModel(dt){
  const speed=spider.speed();
  // mud and dust build up on soft ground; fording washes it off
  {const surf=spider.wheels[2].surface||{};const soil=(surf.soft||0)*(surf.name==='Mud'?3:1)+(surf.dust||0)*.3;model.dirt.value=clamp(model.dirt.value+dt*(soil*speed*.0025)-dt*(spider.wading||0)*.06-dt*(atmo?.weather==='rain'?.004:0),.05,1);}
- model.update(spider,dt,{headlights:G.lights,worklights:G.lights,beacons:G.mission?.beacons??false,braking:spider.ctl.brake,night:atmo?.night||0,ladder:!!G.ladder,groundY:gy,dirt:model.dirt.value,wet:spider.wading>.1?1:0,monitorAim:G.mission?.monitorAim});
+ model.update(spider,dt,{lead:G.state==='drive'&&!G.paused?acc:0,headlights:G.lights,worklights:G.lights,beacons:G.mission?.beacons??false,braking:spider.ctl.brake,night:atmo?.night||0,ladder:!!G.ladder,groundY:gy,dirt:model.dirt.value,wet:spider.wading>.1?1:0,monitorAim:G.mission?.monitorAim});
  for(const h of heads)h.intensity=G.lights?420*h.userData.power:0;for(const b of beams)b.visible=G.lights&&(atmo?.night||0)>.3&&G.view!=='seat';
 }
-let last=performance.now(),acc=0,hudT=0,missionT=0,fpsT=0,frames=0,fps=60,lowFps=0;
+let last=performance.now(),acc=0,subK=0,hudT=0,missionT=0,fpsT=0,frames=0,fps=60,lowFps=0;
 function step(dt){
  const inp=readInput();const c=spider.ctl;
  c.throttle=inp.throttle;c.steer=inp.steer;c.brake=inp.brake;c.boost=keys.has('boost');
  if(keys.has('carFwd'))c.carriageManual=clamp((c.carriageManual??spider.carriage)-.8*dt,-GEOM.carriageMax,GEOM.carriageMax);if(keys.has('carAft'))c.carriageManual=clamp((c.carriageManual??spider.carriage)+.8*dt,-GEOM.carriageMax,GEOM.carriageMax);
  G.input={action:keys.has('action'),draft:keys.has('draft'),load:keys.has('load')};
+ // physics advances in its own 1/240 s steps as the wall clock allows (the 60 Hz controller runs every fourth),
+ // so a frame never waits a whole 1/60 s for the next state; the model is then led by the leftover fraction of a
+ // step. Stepping in 1/60 s blocks beat against the display rate and showed as a slow periodic stutter at speed.
  acc+=dt;let n=0;
- while(acc>=1/60&&n<4){spider.control(1/60);for(let k=0;k<4;k++)spider.step(DT);acc-=1/60;n++;}
- if(n>=4)acc=0;
+ while(acc>=DT&&n<16){if((subK++&3)===0)spider.control(1/60);spider.step(DT);acc-=DT;n++;}
+ if(n>=16)acc=0;
  // events from physics
  for(const e of spider.events){if(e.type==='impact'){sound.thump(Math.min(1,e.strength/6));G.shake=Math.min(1,(G.shake||0)+e.strength*.08);}else if(e.type==='overturn'){sound.thump(1);G.shake=1;}else if(e.type==='starter')sound.starter();else if(e.type==='engineCatch')sound.catchUp();else if(e.type==='engineStop')sound.engineStop();}spider.events.length=0;
  missionT+=dt;if(G.mission&&missionT>=.1){G.mission.update(missionT);missionT=0;}

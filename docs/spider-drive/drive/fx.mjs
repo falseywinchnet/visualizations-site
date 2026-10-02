@@ -113,7 +113,8 @@ export class FX{
   }
   this.soft.update(dt,w);this.add.update(dt,w);
   const fog=G.scene?.fog;for(const p of [this.soft,this.add]){p.mesh.material.uniforms.uFogColor.value.copy(fog?fog.color:new T.Color());p.mesh.material.uniforms.uFogDensity.value=fog?fog.density:0;}
-  if(this.trackDirty>0){this.trackT.needsUpdate=true;this.trackDirty=0;}
+  // the track canvas goes to the GPU ten times a second at most (a canvas upload can cost milliseconds)
+  this.trackAge=(this.trackAge||0)+dt;if(this.trackDirty>0&&this.trackAge>.1){this.trackT.needsUpdate=true;this.trackDirty=0;this.trackAge=0;}
   if(sp){const dx=sp.pos[0]-this.tc.x,dz=sp.pos[2]-this.tc.z;if(Math.abs(dx)>64||Math.abs(dz)>64){const sx=Math.round(dx/64)*64,sz=Math.round(dz/64)*64;this.tg.globalCompositeOperation='copy';this.tg.drawImage(this.trackC,-sx*2,-sz*2);this.tg.globalCompositeOperation='source-over';this.tg.fillStyle='#000';if(sx>0)this.tg.fillRect(512-sx*2,0,sx*2,512);if(sx<0)this.tg.fillRect(0,0,-sx*2,512);if(sz>0)this.tg.fillRect(0,512-sz*2,512,sz*2);if(sz<0)this.tg.fillRect(0,0,512,-sz*2);this.tc.x+=sx;this.tc.z+=sz;this.trackDirty=1;}
    shared.uTrackRect.value.set(this.tc.x-128,this.tc.z-128,256,256);}
  }

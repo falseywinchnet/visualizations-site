@@ -348,7 +348,8 @@ float n3(vec3 x){vec3 i=floor(x),f=fract(x);f=f*f*(3.0-2.0*f);return mix(mix(mix
  // ------------------------------------------------------------ per-frame update from physics
  update(sp,dt,opts={}){
   const R=sp.R,o=sp.origin(R);
-  this.root.position.set(o[0],o[1],o[2]);this.root.quaternion.set(sp.q[0],sp.q[1],sp.q[2],sp.q[3]);
+  const ld=opts.lead||0;/* the part of a physics step the wall clock is already into */
+  this.root.position.set(o[0]+sp.vel[0]*ld,o[1]+sp.vel[1]*ld,o[2]+sp.vel[2]*ld);this.root.quaternion.set(sp.q[0],sp.q[1],sp.q[2],sp.q[3]);
   this.cabin.position.z=sp.carriage;
   this.pairs[0].rotation.y=sp.steer[0];this.pairs[1].rotation.y=sp.steer[1];this.pairs[2].rotation.y=0;
   const tmpDown=new T.Vector3();
