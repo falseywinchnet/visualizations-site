@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Switchbox</title>
+<meta name="description" content="A girl lives in a pink toy box with six lamped switches and pushes every one you flip back down. Find the hidden order that lights all six.">
+<meta name="theme-color" content="#fbe3e6">
+<style>
+@font-face { font-family: "Comic Neue"; font-weight: 400; src: url("./fonts/comic-neue-latin-400-normal.woff2") format("woff2"); }
+@font-face { font-family: "Comic Neue"; font-weight: 700; src: url("./fonts/comic-neue-latin-700-normal.woff2") format("woff2"); }
+:root { color-scheme: light; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #fbe3e6; }
+body { font-family: "Comic Neue", "Chalkboard SE", "Comic Sans MS", cursive; color: #4a2c40; }
+#stage { position: fixed; inset: 0; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
+#view { position: absolute; left: 0; top: 0; display: block; image-rendering: pixelated; image-rendering: crisp-edges; outline: none; }
+#name { position: fixed; left: 0; bottom: 0; width: 1px; height: 1px; opacity: 0; border: 0; padding: 0; font-size: 16px; pointer-events: none; }
+#status { position: fixed; inset: 0; display: grid; place-items: center; font-weight: 700; font-size: 18px; color: #b0507a; pointer-events: none; transition: opacity .4s; }
+#status.gone { opacity: 0; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="view" tabindex="0" role="application" aria-label="Switchbox. A girl lives in a box of six switches and flips them back down. Find the order that lights all six lamps. Click a switch or press 1 to 6. F1 or H help, T top scores, M music, N sound."></canvas>
+</div>
+<input id="name" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="Your name for the top scores" maxlength="40">
+<div id="status">Opening the box…</div>
+<script src="./sbx.js"></script>
+<script src="./app.js"></script>
+</body>
+</html>

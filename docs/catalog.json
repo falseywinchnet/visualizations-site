@@ -10,5 +10,11 @@
     "title": "Spider \u2014 drive the open country",
     "description": "Drive the Spider, a raised six-wheeled scout carrier with hydropneumatic legs, across a generated watershed of rivers, gullies, cliffs, forests and cornfields. Free roam or fly wildfire, swiftwater rescue, forward pursuit and hostile crossing missions.",
     "path": "spider-drive/"
+  },
+  {
+    "slug": "switchbox",
+    "title": "Switchbox",
+    "description": "A girl lives in a pink toy box with six lamped switches and pushes every one you flip back down. Find the hidden order that lights all six.",
+    "path": "switchbox/"
   }
 ]
