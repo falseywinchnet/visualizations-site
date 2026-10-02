@@ -6,8 +6,8 @@ import {hash2,clamp,mix,rng} from './noise.mjs';
 
 const ROOT=32768,MAXL=9,NODE_N=64;// 64 m leaves at 1 m spacing (64x64 quads per node: a quarter of the draw calls of 32x32 nodes)
 export class Scenery{
- constructor(scene,terrain,{texArray,waterNormals,workers,quality='medium'}){
-  this.scene=scene;this.t=terrain;this.w=terrain.w;this.workers=workers;this.quality=quality;
+ constructor(scene,terrain,{texArray,waterNormals,workers,quality='medium',body=null}){
+  this.scene=scene;this.t=terrain;this.w=terrain.w;this.workers=workers;this.quality=quality;this.body=body;this.off=!!(body&&body.id!=='earth');
   this.mat=terrainMaterial(texArray,this.w.seed);this.nodes=new Map();this.pending=new Map();this.visible=new Set();
   this.group=new T.Group();this.group.name='terrain';scene.add(this.group);
   this.K=quality==='low'?.65:quality==='high'?.95:.8;this.inflight=0;this.maxInflight=16;this.frame=0;
@@ -108,7 +108,7 @@ export class Scenery{
   const C=S.length;for(let k=0;k<k1-k0;k++)for(let q=0;q<C-1;q++){const a=k*C+q,b=a+1,c=a+C,d=c+1;I.push(a,b,c,b,d,c);}
   const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(P,3));g.setAttribute('uv',new T.Float32BufferAttribute(U,2));g.setIndex(I);g.computeVertexNormals();g.computeBoundingSphere();return g;}
  buildRoads(){
-  this.roadMats={main:roadMaterial(this.texArray,0),minor:roadMaterial(this.texArray,1),track:roadMaterial(this.texArray,2)};
+  this.roadMats={main:roadMaterial(this.texArray,0),minor:roadMaterial(this.texArray,1),track:roadMaterial(this.texArray,2,this.body)};
   this.roadGroup=new T.Group();this.roadGroup.name='roads';this.scene.add(this.roadGroup);
   for(const r of this.w.roads){
    // runs of samples off the bridges, and off stretches another (earlier) road already covers: roads
@@ -184,6 +184,23 @@ export class Scenery{
     case 'firestation':{box(b.w,b.h,b.d,0,b.h/2,0,walls,new T.Color(0xb24a3a));box(b.w+.6,.4,b.d+.6,0,b.h+.2,0,roofs,new T.Color(0x3c3c3c));for(const x of [-4,0,4])box(3.2,3.8,.1,x,1.9,b.d/2+.03,glass,new T.Color(0xcfd5d8));break;}
     case 'clinic':{box(b.w,b.h,b.d,0,b.h/2,0,walls,new T.Color(0xeeeeea));box(b.w+.6,.4,b.d+.6,0,b.h+.2,0,roofs,new T.Color(0x555a5e));box(2.6,.8,.1,0,b.h-1,b.d/2+.03,trims,new T.Color(0xc0302a));box(.8,2.6,.1,0,b.h-1,b.d/2+.04,trims,new T.Color(0xc0302a));break;}
     case 'shed':{box(b.w,b.h,b.d,0,b.h/2,0,walls,new T.Color(0x7d6a55));add(roofs,gable(b.w,b.d,1.2),place(b,0,b.h,0),rc);break;}
+    // ---- off-world base modules
+    case 'hab':{// horizontal pressurised cylinder on cradles, end caps, a row of small ports
+     add(walls,new T.CylinderGeometry(b.w/2,b.w/2,b.d-1,20).rotateX(Math.PI/2),place(b,0,b.w/2+.6,0),new T.Color(0xdedad2));for(const s of [-1,1])add(walls,new T.SphereGeometry(b.w/2,20,10,0,Math.PI*2,0,Math.PI/2).rotateX(s>0?Math.PI/2:-Math.PI/2),place(b,0,b.w/2+.6,s*(b.d-1)/2),new T.Color(0xd4d0c8));
+     for(const z of [-b.d*.3,0,b.d*.3])box(.6,.6,.1,0,b.w/2+.6,z,trims,new T.Color(0x2a3440));for(const z of [-b.d*.3,b.d*.3])box(b.w*.9,.6,1.2,0,.3,z,trims,new T.Color(0x6a6f70));
+     for(const z of [-b.d*.25,b.d*.25])for(const s of [-1,1])box(.1,.7,.9,s*(b.w/2+.01),b.w/2+1.1,z,glass,new T.Color(0x9ab0bb));break;}
+    case 'node':{add(walls,new T.CylinderGeometry(b.w/2,b.w/2,b.h*.75,16),place(b,0,b.h*.375,0),new T.Color(0xcfd3d6));add(roofs,new T.SphereGeometry(b.w/2,16,8,0,Math.PI*2,0,Math.PI/2),place(b,0,b.h*.75,0),new T.Color(0xb8bcbc));box(.8,1.6,.1,0,b.h*.5,b.w/2+.02,glass,new T.Color(0x9ab0bb));break;}
+    case 'tank':{add(walls,new T.CylinderGeometry(b.w/2,b.w/2,b.h-b.w/2,16),place(b,0,(b.h-b.w/2)/2+.3,0),new T.Color(0xb0b6b8));add(roofs,new T.SphereGeometry(b.w/2,16,8,0,Math.PI*2,0,Math.PI/2),place(b,0,b.h-b.w/2+.3,0),new T.Color(0xa0a6a8));for(const [x,z] of [[-1,-1],[1,-1],[-1,1],[1,1]])box(.25,.4,.25,x*b.w*.35,.2,z*b.w*.35,trims,new T.Color(0x5a5e60));break;}
+    case 'airlock':{box(b.w,b.h,b.d,0,b.h/2,0,walls,new T.Color(0x8a8f94));box(1.4,2.2,.12,0,1.3,b.d/2+.04,trims,new T.Color(0xc0302a));box(b.w*.6,.3,.3,0,b.h+.15,0,trims,new T.Color(0x5a5e60));break;}
+    case 'array':{// solar array: dark panel tilted to the sun on a pair of legs
+     for(const s of [-1,1])add(trims,new T.CylinderGeometry(.08,.1,1.6,6),place(b,s*b.w*.4,.8,0),new T.Color(0x777b7e));const pm=place(b,0,1.9,0);pm.multiply(new T.Matrix4().makeRotationX(-.55));add(glass,new T.BoxGeometry(b.w,.08,b.d),pm,new T.Color(0x18264a));break;}
+    case 'antenna':{add(trims,new T.CylinderGeometry(.14,.22,b.h,8),place(b,0,b.h/2,0),new T.Color(0x9a9ea0));for(let k=1;k<4;k++)add(trims,new T.CylinderGeometry(.03,.03,2.2,4).rotateZ(Math.PI/2),place(b,0,b.h*k/4,0,k*.7),new T.Color(0x8a8e90));
+     const dm=place(b,0,b.h+.6,0);dm.multiply(new T.Matrix4().makeRotationX(-.9));add(walls,new T.SphereGeometry(1.6,16,8,0,Math.PI*2,0,Math.PI*.3),dm,new T.Color(0xe8e8e4));break;}
+    case 'pad':{add(roofs,new T.CylinderGeometry(b.w/2,b.w/2,.25,24),place(b,0,.12,0),new T.Color(0x5c5a56));for(let k=0;k<8;k++){const a=k/8*6.283;box(.5,.5,.5,Math.cos(a)*(b.w/2-.6),.45,Math.sin(a)*(b.w/2-.6),trims,new T.Color(0xf0b040));}break;}
+    case 'dome':{// greenhouse dome, lit from inside
+     add(glass,new T.SphereGeometry(b.w/2,24,12,0,Math.PI*2,0,Math.PI/2),place(b,0,.4,0),new T.Color(0xc8d8c0));add(roofs,new T.CylinderGeometry(b.w/2+.3,b.w/2+.3,.5,24),place(b,0,.2,0),new T.Color(0x6a6f70));break;}
+    case 'berm':{// radiation berm of piled regolith along the habitat
+     const bm=new T.CylinderGeometry(b.h,b.h*1.6,b.w,12,1,false,0,Math.PI).rotateZ(Math.PI/2).rotateX(Math.PI/2);add(walls,bm,place(b,0,0,0),new T.Color(this.body?new T.Color(...this.body.tint).multiplyScalar(.9):0x888888));break;}
     default:{// house, store, hall
      const h=b.h;box(b.w,h,b.d,0,h/2,0,walls,wc);
      if(b.type==='store'||b.type==='hall'){box(b.w+.4,.5,b.d+.4,0,h+.25,0,roofs,rc);}else add(roofs,gable(b.w,b.d,Math.min(4,b.w*.45)),place(b,0,h,0),rc);
@@ -219,12 +236,30 @@ export class Scenery{
   this.siteGroup=new T.Group();this.scene.add(this.siteGroup);
   const tent=new T.MeshStandardMaterial({color:0x5d6348,roughness:.95}),metal=new T.MeshStandardMaterial({color:0x7a7f80,roughness:.6,metalness:.4}),paint=new T.MeshStandardMaterial({color:0xe8e4d8,roughness:.8}),wood=new T.MeshStandardMaterial({color:0x7a5a3c,roughness:.9});
   for(const s of this.w.sites){const y=this.t.height(s.x,s.z),g=new T.Group();g.position.set(s.x,y,s.z);
+   if(this.off){this.bodySite(s,g,{metal,paint});this.siteGroup.add(g);continue;}
    if(s.type==='staging'){for(let k=0;k<5;k++){const tn=new T.Mesh(new T.CylinderGeometry(0,4,3,4,1),tent);tn.position.set((k-2)*9,1.5,(k%2)*8-4);tn.rotation.y=Math.PI/4;tn.castShadow=true;g.add(tn);}
     for(let k=0;k<3;k++){const tr=new T.Mesh(new T.BoxGeometry(2.6,2.6,6.5),tent);tr.position.set(-14+k*7,1.5,14);tr.castShadow=true;g.add(tr);}const pole=new T.Mesh(new T.CylinderGeometry(.06,.06,9),metal);pole.position.set(18,4.5,0);g.add(pole);}
    else if(s.type==='lookout'){for(const [x,z] of [[-2,-2],[2,-2],[-2,2],[2,2]]){const l=new T.Mesh(new T.CylinderGeometry(.15,.2,12,6),wood);l.position.set(x,6,z);g.add(l);}const cab=new T.Mesh(new T.BoxGeometry(5.5,3,5.5),wood);cab.position.y=13.5;cab.castShadow=true;g.add(cab);const rf=new T.Mesh(new T.ConeGeometry(4.5,2,4),metal);rf.position.y=16;rf.rotation.y=Math.PI/4;g.add(rf);}
    else if(s.type==='trailhead'){const b=new T.Mesh(new T.BoxGeometry(2.4,1.4,.15),wood);b.position.set(0,1.6,0);g.add(b);for(const x of [-1,1]){const p=new T.Mesh(new T.CylinderGeometry(.08,.08,2.4),wood);p.position.set(x,1.2,0);g.add(p);}}
    else if(s.type==='hospital'&&s.helipad){const pad=new T.Mesh(new T.CylinderGeometry(9,9,.2,32),paint);pad.position.set(28,.15,0);pad.receiveShadow=true;g.add(pad);const H=new T.Mesh(new T.BoxGeometry(1,.05,5),new T.MeshStandardMaterial({color:0xc03028}));H.position.set(28,.27,0);g.add(H);for(const x of [-1.6,1.6]){const s2=new T.Mesh(new T.BoxGeometry(1,.05,5),H.material);s2.position.set(28+x,.27,0);s2.rotation.y=Math.PI/2*0;g.add(s2);}s.pad=[s.x+28,s.z];}
    this.siteGroup.add(g);}
+ }
+ // props at the off-world sites: survey tripods, a relay mast, an old descent stage, a dead rover, a drill
+ // derrick, the probe, lit landing pad
+ bodySite(s,g,{metal,paint}){
+  const mk=(geo,m,x,y,z,rot=0)=>{const o=new T.Mesh(geo,m);o.position.set(x,y,z);o.rotation.y=rot;o.castShadow=true;g.add(o);return o;};
+  const gold=new T.MeshStandardMaterial({color:0xc9a44a,roughness:.35,metalness:.8}),white=new T.MeshStandardMaterial({color:0xe6e6e0,roughness:.6}),dark=new T.MeshStandardMaterial({color:0x2a2e33,roughness:.7});
+  const tripod=()=>{for(let k=0;k<3;k++){const a=k/3*6.283;const l=mk(new T.CylinderGeometry(.04,.05,2.4,5),metal,Math.cos(a)*.6,1.1,Math.sin(a)*.6);l.rotation.z=Math.cos(a)*.45;l.rotation.x=-Math.sin(a)*.45;}mk(new T.BoxGeometry(.4,.3,.4),dark,0,2.35,0);mk(new T.BoxGeometry(.9,.5,.05),paint,0,1.6,.35);};
+  switch(s.type){
+   case 'staging':{mk(new T.CylinderGeometry(.08,.1,14,6),metal,24,7,-6);const lamp=mk(new T.BoxGeometry(1.2,.4,.6),dark,24,14.2,-6);lamp.material=new T.MeshStandardMaterial({color:0x333,emissive:0xfff3d0,emissiveIntensity:1.2});for(const x of [-30,30])mk(new T.CylinderGeometry(.05,.05,3,5),metal,x,1.5,20);break;}
+   case 'landing':{mk(new T.CylinderGeometry(16,16,.3,8),new T.MeshStandardMaterial({color:0x4a4846,roughness:.9}),0,.15,0);for(let k=0;k<8;k++){const a=k/8*6.283;mk(new T.BoxGeometry(.6,.6,.6),new T.MeshStandardMaterial({color:0x222,emissive:0xff9030,emissiveIntensity:1.5}),Math.cos(a)*15,.6,Math.sin(a)*15);}mk(new T.BoxGeometry(1.2,.05,8),paint,0,.32,0);mk(new T.BoxGeometry(1.2,.05,8),paint,0,.32,0,Math.PI/2);break;}
+   case 'relay':{mk(new T.CylinderGeometry(.12,.25,22,8),metal,0,11,0);const d=mk(new T.SphereGeometry(1.8,16,8,0,Math.PI*2,0,Math.PI*.3),white,0,22.8,0);d.rotation.x=-.7;for(let k=0;k<3;k++){const a=k/3*6.283;const w=mk(new T.CylinderGeometry(.015,.015,24,3),dark,Math.cos(a)*4,11,Math.sin(a)*4);w.rotation.z=Math.cos(a)*.35;w.rotation.x=-Math.sin(a)*.35;}mk(new T.BoxGeometry(2,1.2,1.4),dark,2.5,.6,0);break;}
+   case 'lander':{mk(new T.BoxGeometry(4.2,2.2,4.2),gold,0,2.6,0);mk(new T.CylinderGeometry(.9,1.4,1.6,12),dark,0,.8,0);for(const [x,z] of [[-1,-1],[1,-1],[-1,1],[1,1]]){const l=mk(new T.CylinderGeometry(.09,.11,3.4,6),metal,x*2.8,1.4,z*2.8);l.rotation.z=x*.5;l.rotation.x=-z*.5;mk(new T.CylinderGeometry(.6,.6,.12,10),metal,x*3.6,.06,z*3.6);}mk(new T.BoxGeometry(.6,.6,.6),white,1.6,4,1.6);break;}
+   case 'rover':{mk(new T.BoxGeometry(2.6,.8,3.4),white,0,1.3,0);mk(new T.BoxGeometry(2.8,.08,2.6),dark,0,2.2,-.2);mk(new T.CylinderGeometry(.08,.08,1.8,6),metal,-.8,2.9,-1.2);mk(new T.BoxGeometry(.6,.3,.3),dark,-.8,3.8,-1.2);for(const z of [-1.2,0,1.2])for(const s of [-1,1])mk(new T.CylinderGeometry(.5,.5,.3,12).rotateZ(Math.PI/2),dark,s*1.5,.5,z);break;}
+   case 'drill':{for(const [x,z] of [[-1,-1],[1,-1],[-1,1],[1,1]]){const l=mk(new T.CylinderGeometry(.08,.1,9,6),metal,x*1.6,4.5,z*1.6);l.rotation.z=x*.17;l.rotation.x=-z*.17;}mk(new T.BoxGeometry(2.2,.6,2.2),dark,0,9.2,0);mk(new T.CylinderGeometry(.12,.12,8,8),metal,0,4,0);mk(new T.BoxGeometry(3,1.6,2),white,4,.8,0);for(let k=0;k<3;k++)mk(new T.CylinderGeometry(.5,.5,1.2,10),white,-4+k*1.2,.6,2.5);break;}
+   case 'probe':{mk(new T.CylinderGeometry(1.3,1.1,.9,20),gold,0,.5,0);mk(new T.CylinderGeometry(.9,1.3,.4,20),white,0,1.15,0);mk(new T.CylinderGeometry(.03,.03,1.2,4),metal,.5,1.9,.3);break;}
+   case 'shore':case 'channel':case 'crest':case 'rim':case 'fresh':case 'scarp':{tripod();break;}
+  }
  }
  buildBoundary(){
   const pts=[];const h=this.w.half-72;const m=new T.MeshStandardMaterial({color:0xd0402c,emissive:0x401008,roughness:.6});const geo=new T.CylinderGeometry(.18,.18,3.2,6);geo.translate(0,1.6,0);

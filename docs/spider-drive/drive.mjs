@@ -5,8 +5,9 @@ import {GENERATOR_VERSION} from './drive/worldgen.mjs';
 import {loadWorld,saveWorld} from './drive/world-cache.mjs';
 import {Birds} from './drive/birds.mjs';
 import {Terrain} from './drive/terrain.mjs';
-import {Spider,DT,GEOM,PRESSURES} from './drive/physics.mjs';
-import {terrainTextures,waterNormals,shared} from './drive/materials.mjs';
+import {Spider,DT,GEOM,PRESSURES,setBody as setPhysicsBody} from './drive/physics.mjs';
+import {terrainTextures,waterNormals,shared,setBodyLayers} from './drive/materials.mjs';
+import {BODIES,bodyOf} from './drive/bodies.mjs';
 import {Scenery} from './drive/scenery.mjs';
 import {Vegetation,pushers} from './drive/vegetation-render.mjs';
 import {SpiderModel} from './drive/vehicle.mjs';
@@ -15,7 +16,7 @@ import {Post} from './drive/post.mjs';
 import {WorldMap} from './drive/map.mjs';
 import {FX} from './drive/fx.mjs';
 import {Sound} from './drive/audio.mjs';
-import {MISSIONS,createMission} from './drive/missions.mjs';
+import {MISSIONS,missionsFor,createMission} from './drive/missions.mjs';
 import {clamp,mix,smoothstep} from './drive/noise.mjs';
 
 const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
@@ -24,7 +25,8 @@ const params=new URLSearchParams(location.search);
 // per-viewer convenience only; storage can be unavailable
 function store(k,v){try{localStorage.setItem('spider-'+k,String(v));}catch{}}
 function recall(k){try{return localStorage.getItem('spider-'+k);}catch{return null;}}
-const G={state:'loading',paused:false,view:'chase',quality:'medium',mission:null,missionDef:MISSIONS[0],seed:+(params.get('seed')||711),time:16.5,weather:'clear',volume:.7,music:.55,lights:false,frame:0,debug:params.has('debug')};
+const G={state:'loading',paused:false,view:'chase',quality:'medium',mission:null,missionDef:null,seed:+(params.get('seed')||711),body:BODIES[params.get('world')]?params.get('world'):'earth',time:16.5,weather:'clear',volume:.7,music:.55,lights:false,frame:0,debug:params.has('debug')};
+G.B=bodyOf(G.body);G.missions=missionsFor(G.B);G.missionDef=G.missions[0];
 {const m=recall('music');if(m!==null&&isFinite(+m))G.music=+m;}
 // ------------------------------------------------------------------ renderer
 let renderer;
@@ -40,13 +42,14 @@ const camera=new T.PerspectiveCamera(52,1,.2,60000);
 const orbit=new OrbitControls(camera,canvas);orbit.enabled=false;orbit.enableDamping=true;orbit.minDistance=8;orbit.maxDistance=160;orbit.maxPolarAngle=Math.PI*.49;
 // ------------------------------------------------------------------ loading: generate or restore the world
 const genCanvas=$('#gen'),genCtx=genCanvas.getContext('2d');
-$('#gen-seed').textContent=G.seed;$('#seed-label').textContent=G.seed;
+$('#gen-seed').textContent=G.seed;$('#seed-label').textContent=G.seed;$('#body-label').textContent=G.B.name;
+if(G.body!=='earth'){$('#gen-note').innerHTML={moon:'Crater field <span id="gen-seed"></span> is being laid down on the mare.',mars:'Lava plain <span id="gen-seed"></span> is being laid down under the scarp.',titan:'Sand sea <span id="gen-seed"></span> is being blown into dunes.'}[G.body]+' This happens once; the result is kept in your browser.';$('#gen-seed').textContent=G.seed;$('#gen-stage').textContent='Setting down on '+G.B.name;}
 function drawPreview(d){const img=new ImageData(new Uint8ClampedArray(d.data),d.w,d.h);if(genCanvas.width!==d.w){genCanvas.width=d.w;genCanvas.height=d.h;}genCtx.putImageData(img,0,0);}
 async function getWorld(seed){
- const cached=await loadWorld(seed);if(cached&&cached.version===GENERATOR_VERSION){$('#gen-stage').textContent='Country restored';$('#gen-bar').style.width='100%';return cached;}
+ const cached=await loadWorld(seed,G.body);if(cached&&cached.version===GENERATOR_VERSION&&(cached.body||'earth')===G.body){$('#gen-stage').textContent='Country restored';$('#gen-bar').style.width='100%';return cached;}
  return new Promise((res,rej)=>{const w=new Worker(new URL('./drive/worldgen-worker.mjs',import.meta.url),{type:'module'});
   w.onmessage=e=>{const m=e.data;if(m.type==='preview')drawPreview(m);else if(m.type==='progress'){$('#gen-stage').textContent=m.stage;$('#gen-bar').style.width=(m.p*100).toFixed(0)+'%';}else if(m.type==='done'){w.terminate();saveWorld(m.world);res(m.world);}else if(m.type==='error'){rej(new Error(m.message));}};
-  w.onerror=e=>rej(e);w.postMessage({seed});});
+  w.onerror=e=>rej(e);w.postMessage({seed,body:G.body});});
 }
 // ------------------------------------------------------------------ world-dependent systems (created after generation)
 let world,terrain,scenery,veg,model,spider,atmo,post,wmap,fx,sound,workers,texArr,wNormals,birds;
@@ -64,15 +67,16 @@ async function boot(){
  world=await getWorld(G.seed);
  $('#gen-stage').textContent='Laying out the country';await frameWait();
  terrain=new Terrain(world);
+ setPhysicsBody(G.B);setBodyLayers(G.B);
  texArr=terrainTextures(256);wNormals=waterNormals(256);
  const nW=Math.max(1,Math.min(3,(navigator.hardwareConcurrency||4)-2));
  workers=await Promise.all(Array.from({length:nW},()=>new Promise(res=>{const w=new Worker(new URL('./drive/terrain-worker.mjs',import.meta.url),{type:'module'});w.addEventListener('message',function f(e){if(e.data.type==='ready'){w.removeEventListener('message',f);res(w);}});w.postMessage({type:'init',world});})));
  for(const w of workers)w.addEventListener('message',e=>{if(e.data.type==='tile'){tileWant.delete(e.data.tx*100003+e.data.tz);terrain.putTile(e.data.tx,e.data.tz,e.data.a);}});
- atmo=new Atmosphere(scene,renderer,{quality:G.quality});
- scenery=new Scenery(scene,terrain,{texArray:texArr,waterNormals:wNormals,workers,quality:G.quality});
- veg=new Vegetation(scene,terrain,renderer,{workers,quality:G.quality});
- buildingBoxes=world.buildings.map(b=>({type:'box',x:b.x,z:b.z,w:b.w,d:b.d,h:b.h+4,y:terrain.height(b.x,b.z)-1,rot:b.rot}));
- wmap=new WorldMap(world,terrain);fx=new FX(scene,terrain);sound=new Sound();birds=new Birds(scene,terrain,env);G.birds=birds;
+ atmo=new Atmosphere(scene,renderer,{quality:G.quality});atmo.setBody(G.B);
+ scenery=new Scenery(scene,terrain,{texArray:texArr,waterNormals:wNormals,workers,quality:G.quality,body:G.B});
+ veg=new Vegetation(scene,terrain,renderer,{workers,quality:G.quality});veg.setBody(G.B);
+ buildingBoxes=world.buildings.filter(b=>b.type!=='pad'&&b.type!=='array').map(b=>({type:'box',x:b.x,z:b.z,w:b.w,d:b.d,h:b.h+4,y:terrain.height(b.x,b.z)-1,rot:b.rot}));
+ wmap=new WorldMap(world,terrain);fx=new FX(scene,terrain);fx.setBody(G.B);sound=new Sound();sound.setBody(G.B);birds=new Birds(scene,terrain,env);birds.enabled=G.B.birds;G.birds=birds;
  post=new Post(renderer,scene,camera,{quality:G.quality});G.post=post;
  G.world=world;G.terrain=terrain;G.findClear=findClear;G.scene=scene;G.fx=fx;G.sound=sound;G.scenery=scenery;G.veg=veg;G.atmo=atmo;G.camera=camera;G.hud=hud;G.env=env;
  setupVehicle('scout');
@@ -105,9 +109,11 @@ function headlights(){for(const h of heads)h.parent?.remove(h);heads=[];for(cons
 // ------------------------------------------------------------------ menu
 function buildMenu(){
  const box=$('#missions');box.innerHTML='';
- for(const m of MISSIONS){const b=document.createElement('button');b.className='mission';b.setAttribute('role','radio');b.setAttribute('aria-checked',String(m===G.missionDef));b.innerHTML=`<b>${m.name}</b><span>${m.tag}</span>`;b.onclick=()=>{G.missionDef=m;$$('.mission').forEach(x=>x.setAttribute('aria-checked','false'));b.setAttribute('aria-checked','true');brief();};box.appendChild(b);}
+ for(const m of G.missions){const b=document.createElement('button');b.className='mission';b.setAttribute('role','radio');b.setAttribute('aria-checked',String(m===G.missionDef));b.innerHTML=`<b>${m.name}</b><span>${m.tag}</span>`;b.onclick=()=>{G.missionDef=m;$$('.mission').forEach(x=>x.setAttribute('aria-checked','false'));b.setAttribute('aria-checked','true');brief();};box.appendChild(b);}
  brief();
- $('#opt-seed').value=G.seed;$('#opt-music').value=$('#p-music').value=G.music;$('#opt-quality').value=params.get('quality')||'auto';
+ $('#opt-seed').value=G.seed;$('#opt-world').value=G.body;$('#opt-music').value=$('#p-music').value=G.music;$('#opt-quality').value=params.get('quality')||'auto';
+ // the sun does not move on a lunar afternoon and there is no weather to pick off Earth
+ const off=G.body!=='earth';$('#opt-time').closest('label').hidden=off;$('#opt-weather').closest('label').hidden=off;
 }
 function brief(){const m=G.missionDef;$('#brief').innerHTML=`<h3>${m.name}</h3><p>${m.brief}</p><p class="kit">${m.kit}</p>`;}
 $('#opt-time').oninput=e=>{const h=+e.target.value;$('#opt-time-out').textContent=`${Math.floor(h)}:${String(Math.round(h%1*60)).padStart(2,'0')}`;G.time=h;if(atmo&&G.state==='menu')atmo.setTime(h);};
@@ -115,7 +121,7 @@ $('#opt-weather').onchange=e=>{G.weather=e.target.value;if(atmo&&G.state==='menu
 $('#opt-volume').oninput=$('#p-volume').oninput=e=>{G.volume=+e.target.value;sound?.setVolume(G.volume);$('#opt-volume').value=$('#p-volume').value=G.volume;};
 $('#opt-music').oninput=$('#p-music').oninput=e=>{G.music=+e.target.value;sound?.music.setVolume(G.music);sound?.music.setOn(G.music>0);$('#opt-music').value=$('#p-music').value=G.music;store('music',G.music);};
 $('#opt-quality').onchange=$('#p-quality').onchange=e=>{const v=e.target.value==='auto'?autoQ():e.target.value;setQuality(v);};
-$('#go').onclick=()=>{const seed=+$('#opt-seed').value||711;if(seed!==G.seed){const u=new URL(location.href);u.searchParams.set('seed',seed);location.href=u.href;return;}startMission(G.missionDef);};
+$('#go').onclick=()=>{const seed=+$('#opt-seed').value||711,world=$('#opt-world').value;if(seed!==G.seed||world!==G.body){const u=new URL(location.href);u.searchParams.set('seed',seed);if(world==='earth')u.searchParams.delete('world');else u.searchParams.set('world',world);location.href=u.href;return;}startMission(G.missionDef);};
 function setQuality(q){G.quality=q;scenery.setQuality(q);veg.cfg(q);veg.dirty=true;renderer.setPixelRatio(Math.min(devicePixelRatio,q==='high'?1.75:q==='low'?1:1.4));post.bloom.enabled=q!=='low';post.enabled=q!=='low';resize();
  /* resizing clears the canvas: draw a frame in the same task so no black frame is ever presented */if(world&&post){try{post.frame(0,scene,camera);}catch{}}$('#p-quality').value=q;}
 // ------------------------------------------------------------------ missions
@@ -285,7 +291,7 @@ function drawHud(){
 function drawFeet(){const c=feetCtx,W=176,H=200;c.clearRect(0,0,W,H);const sp=spider;
  c.strokeStyle='#7fa9a0';c.lineWidth=1;c.fillStyle='#1b2d2d';c.beginPath();c.roundRect(W/2-18,30+sp.carriage*10,36,140,16);c.fill();c.stroke();
  c.strokeStyle='#4d6a66';c.beginPath();c.moveTo(W/2,20);c.lineTo(W/2,180);c.stroke();
- const Fn=sp.totalMass*9.81/6;
+ const Fn=sp.totalMass*sp.g/6;
  sp.wheels.forEach((w,i)=>{const pair=w.pair,s=w.side,d=sp.steer[pair];const cx=W/2+s*62*Math.cos(d),cy=100+GEOM.stations[pair]*17-s*62*Math.sin(d)*.9;
   c.save();c.translate(cx,cy);c.rotate(-d);
   const load=clamp(w.load/Fn/2,0,1);c.fillStyle=w.disabled?'#552222':w.lifted?'#33414a':w.contact?`hsl(${150-load*150},60%,${35+load*15}%)`:'#26343a';c.fillRect(-8,-20,16,40);
@@ -373,7 +379,7 @@ function resize(){const w=canvas.clientWidth,h=canvas.clientHeight;renderer.setS
 addEventListener('resize',resize);
 // ------------------------------------------------------------------ debug hook (headless tests drive the page through this)
 window.spiderDrive={G,get spider(){return spider;},get scenery(){return scenery;},get veg(){return veg;},get birds(){return birds;},get model(){return model;},get terrain(){return terrain;},get world(){return world;},scene,camera,renderer,
- start:(id='free')=>startMission(MISSIONS.find(m=>m.id===id)||MISSIONS[0]),setView,
+ start:(id='free')=>startMission(G.missions.find(m=>m.id===id)||G.missions[0]),setView,
  advance:(seconds,ctl={})=>{const k0=new Set(keys);for(let t=0;t<seconds;t+=1/60){Object.assign(spider.ctl,ctl);spider.control(1/60);for(let k=0;k<4;k++)spider.step(DT);missionT+=1/60;if(G.mission&&missionT>=.1){G.mission.update(missionT);missionT=0;}}ready=false;return spider.telemetry();},
  teleport:(x,z,yaw=0)=>{spider.recover(x,z,yaw);ready=false;},
  settle:async(ms=4000)=>{await prime(ms);},

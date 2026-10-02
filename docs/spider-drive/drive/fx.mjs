@@ -36,7 +36,7 @@ void main(){
  #include <colorspace_fragment>
 }`});
   this.mesh=new T.Mesh(g,m);this.mesh.frustumCulled=false;this.mesh.renderOrder=5;scene.add(this.mesh);this.g=g;
-  this.v=new Float32Array(n*3);this.life=new Float32Array(n);this.age=new Float32Array(n);this.type=new Uint8Array(n);this.size0=new Float32Array(n);this.size1=new Float32Array(n);this.col=new Float32Array(n*4);this.spin=new Float32Array(n);this.count=0;this.cursor=0;
+  this.v=new Float32Array(n*3);this.life=new Float32Array(n);this.age=new Float32Array(n);this.type=new Uint8Array(n);this.size0=new Float32Array(n);this.size1=new Float32Array(n);this.col=new Float32Array(n*4);this.spin=new Float32Array(n);this.count=0;this.cursor=0;this.grav=9.8;
  }
  spawn(x,y,z,vx,vy,vz,life,s0,s1,r,g,b,a,type,frame=0,spin=0){
   let i;if(this.count<this.n)i=this.count++;else{i=this.cursor;this.cursor=(this.cursor+1)%this.n;}
@@ -48,7 +48,8 @@ void main(){
    this.age[i]+=dt;if(this.age[i]>=this.life[i]){// swap-remove
     n--;if(i!==n){for(const [arr,k] of [[this.p,3],[this.v,3],[this.col,4],[this.s,3]])for(let j=0;j<k;j++)arr[i*k+j]=arr[n*k+j];this.life[i]=this.life[n];this.age[i]=this.age[n];this.type[i]=this.type[n];this.size0[i]=this.size0[n];this.size1[i]=this.size1[n];this.spin[i]=this.spin[n];i--;}continue;}
    const t=this.age[i]/this.life[i],ty=this.type[i];
-   const drag=ty===1?1.6:ty===2?.4:ty===3?.9:ty===5?.3:ty===6?2.2:.8,grav=ty===2?-9.8:ty===3?-9.8:ty===5?2.6:ty===6?.6:ty===4?-.4:ty===7?-1.2:ty===8?-22:0;
+   // 9 ballistic regolith (vacuum: no drag, falls at the body's g), 10 thin-air dust (Mars: hangs and drifts), 11 dense-air sand (Titan: slow billows)
+   const drag=ty===1?1.6:ty===2?.4:ty===3?.9:ty===5?.3:ty===6?2.2:ty===9?0:ty===10?.3:ty===11?2.6:.8,grav=ty===2?-this.grav:ty===3?-this.grav:ty===5?2.6:ty===6?.6:ty===4?-.4:ty===7?-1.2:ty===8?-22:ty===9?-this.grav:ty===10?-.5:ty===11?-.12:0;
    const k=Math.exp(-drag*dt);this.v[i*3]=this.v[i*3]*k+wind[0]*(1-k)*.6;this.v[i*3+1]=this.v[i*3+1]*k+grav*dt;this.v[i*3+2]=this.v[i*3+2]*k+wind[1]*(1-k)*.6;
    if(ty===7){this.v[i*3]+=Math.sin(this.age[i]*9+i)*dt*3;this.v[i*3+2]+=Math.cos(this.age[i]*7+i)*dt*3;}
    this.p[i*3]+=this.v[i*3]*dt;this.p[i*3+1]+=this.v[i*3+1]*dt;this.p[i*3+2]+=this.v[i*3+2]*dt;
@@ -71,10 +72,17 @@ export class FX{
   this.trackC=document.createElement('canvas');this.trackC.width=this.trackC.height=512;this.tg=this.trackC.getContext('2d');this.tg.fillStyle='#000';this.tg.fillRect(0,0,512,512);
   this.trackT=new T.CanvasTexture(this.trackC);this.trackT.colorSpace=T.NoColorSpace;this.trackT.magFilter=T.LinearFilter;shared.uTrack.value=this.trackT;shared.uTrackOn.value=1;this.tc={x:0,z:0};this.trackDirty=0;
  }
+ // the body sets how kicked-up ground behaves (bodies.mjs dust.mode) and switches the exhaust off
+ setBody(B){this.body=B;this.soft.grav=this.add.grav=B.g;this.mode=B.dust.mode;this.dustCol=B.dust.color;}
  // ---- emitters
- dust(x,y,z,amount,col=[.55,.48,.38]){const n=Math.ceil(amount*3);for(let k=0;k<n;k++)this.soft.spawn(x+(Math.random()-.5),y+.2,z+(Math.random()-.5),(Math.random()-.5)*2,.6+Math.random()*1.2,(Math.random()-.5)*2,2.5+Math.random()*2.5,1.2,5+Math.random()*4,col[0],col[1],col[2],.22*Math.min(1,amount),1);}
+ dust(x,y,z,amount,col=[.55,.48,.38],vx=0,vz=0){const n=Math.ceil(amount*3);
+  if(this.mode==='ballistic'){// rooster tails: grains leave the tyre fast, fly in clean arcs and stop dead where they land
+   for(let k=0;k<n*2;k++){const sp=2+Math.random()*7;const a=Math.random()*6.283;this.soft.spawn(x+(Math.random()-.5)*.6,y+.15,z+(Math.random()-.5)*.6,Math.cos(a)*sp*.6-vx*.35,1.5+Math.random()*sp*.9,Math.sin(a)*sp*.6-vz*.35,1.2+Math.random()*1.4,.28,.42,col[0],col[1],col[2],.5*Math.min(1,amount),9);}return;}
+  if(this.mode==='thin'){for(let k=0;k<n;k++)this.soft.spawn(x+(Math.random()-.5),y+.2,z+(Math.random()-.5),(Math.random()-.5)*2.5,.8+Math.random()*1.6,(Math.random()-.5)*2.5,5+Math.random()*5,1.1,7+Math.random()*5,col[0],col[1],col[2],.2*Math.min(1,amount),10);return;}
+  if(this.mode==='dense'){for(let k=0;k<n;k++)this.soft.spawn(x+(Math.random()-.5),y+.2,z+(Math.random()-.5),(Math.random()-.5)*1.2,.4+Math.random()*.8,(Math.random()-.5)*1.2,3.5+Math.random()*3,1,4+Math.random()*3,col[0],col[1],col[2],.3*Math.min(1,amount),11);return;}
+  for(let k=0;k<n;k++)this.soft.spawn(x+(Math.random()-.5),y+.2,z+(Math.random()-.5),(Math.random()-.5)*2,.6+Math.random()*1.2,(Math.random()-.5)*2,2.5+Math.random()*2.5,1.2,5+Math.random()*4,col[0],col[1],col[2],.22*Math.min(1,amount),1);}
  mud(x,y,z,vx,vz,amount){for(let k=0;k<amount;k++)this.soft.spawn(x,y+.3,z,vx*.3+(Math.random()-.5)*3,2+Math.random()*3,vz*.3+(Math.random()-.5)*3,1+Math.random(),.12,.2,.2,.15,.1,.95,2);}
- splash(x,y,z,vx,vz,amount){for(let k=0;k<amount;k++)this.soft.spawn(x+(Math.random()-.5)*.6,y,z+(Math.random()-.5)*.6,vx*.4+(Math.random()-.5)*2.5,2+Math.random()*3.5,vz*.4+(Math.random()-.5)*2.5,.8+Math.random()*.7,.3,1.4,.85,.9,.92,.55,3);}
+ splash(x,y,z,vx,vz,amount){const m=this.mode==='dense';/* methane on Titan: dark, heavy, slow */for(let k=0;k<amount;k++)this.soft.spawn(x+(Math.random()-.5)*.6,y,z+(Math.random()-.5)*.6,vx*.4+(Math.random()-.5)*2.5,(2+Math.random()*3.5)*(m?.45:1),vz*.4+(Math.random()-.5)*2.5,(.8+Math.random()*.7)*(m?2.2:1),.3,1.4,m?.25:.85,m?.18:.9,m?.1:.92,.55,m?11:3);}
  spray(x,y,z,dx,dy,dz,speed){for(let k=0;k<5;k++){const j=.06;this.soft.spawn(x,y,z,(dx+(Math.random()-.5)*j)*speed,(dy+(Math.random()-.5)*j)*speed,(dz+(Math.random()-.5)*j)*speed,1.8+Math.random()*.6,.25,2.2,.86,.92,.96,.5,3);}}
  exhaust(x,y,z,load){if(Math.random()>.35+load*.6)return;this.soft.spawn(x,y,z,(Math.random()-.5)*.4,1.8+load*2,(Math.random()-.5)*.4,1.2+load,.3,1.6+load*2,.18,.17,.16,.14+load*.2,4);}
  smoke(x,y,z,s=1,dark=.3){this.soft.spawn(x+(Math.random()-.5)*4*s,y,z+(Math.random()-.5)*4*s,(Math.random()-.5),3+Math.random()*3,(Math.random()-.5),9+Math.random()*7,3*s,24*s,mix(.5,.18,dark),mix(.46,.16,dark),mix(.42,.15,dark),.34,6);}
@@ -93,14 +101,15 @@ export class FX{
    const speed=sp.speed();
    // wheels: dust, mud, splash, tracks
    for(const wh of sp.wheels){if(!wh.contact&&!wh.water)continue;const s=wh.surface||{};const slipV=Math.abs(wh.slip)*speed+speed*.25;
-    if(wh.water>.2){if(speed>.8&&Math.random()<.6)this.splash(wh.cp[0],wh.hub[1]-1.35+wh.water,wh.cp[2],sp.vel[0],sp.vel[2],Math.ceil(speed*.8));}
-    else if(s.dust>0&&speed>1.5&&Math.random()<s.dust*.35*(1-(G.atmo?.weather==='rain'?.8:0)))this.dust(wh.cp[0],wh.cp[1],wh.cp[2],Math.min(1.2,slipV*.1*s.dust),s.color?[s.color[0]*1.1+.1,s.color[1]*1.1+.08,s.color[2]*1.1+.06]:undefined);
-    if(s.soft>.7&&speed>1&&Math.random()<.25)this.mud(wh.cp[0],wh.cp[1],wh.cp[2],sp.vel[0],sp.vel[2],2);
+    const off=this.body&&this.body.id!=='earth';
+    if(wh.water>.2){if(speed>.8&&Math.random()<(this.mode==='dense'?.35:.6))this.splash(wh.cp[0],wh.hub[1]-1.35+wh.water,wh.cp[2],sp.vel[0],sp.vel[2],Math.ceil(speed*.8));}
+    else if(s.dust>0&&speed>1.5&&Math.random()<s.dust*.35*(1-(G.atmo?.weather==='rain'?.8:0)))this.dust(wh.cp[0],wh.cp[1],wh.cp[2],Math.min(1.2,slipV*.1*s.dust),s.color?[s.color[0]*1.1+.1,s.color[1]*1.1+.08,s.color[2]*1.1+.06]:undefined,sp.vel[0],sp.vel[2]);
+    if(!off&&s.soft>.7&&speed>1&&Math.random()<.25)this.mud(wh.cp[0],wh.cp[1],wh.cp[2],sp.vel[0],sp.vel[2],2);
     if(wh.contact&&(s.soft>.2||s.name==='Cropland')&&speed>.3)this.track(wh.cp[0],wh.cp[2],s.soft);}
    // brushing through canopies sheds leaves over the cabin
    if(sp.brush>.12&&speed>.8&&Math.random()<Math.min(1,sp.brush)){const R=G.model.cabin;const p=R.localToWorld(new T.Vector3((Math.random()-.5)*3,5.4,(Math.random()-.5)*9));this.leaves(p.x,p.y,p.z,3);}
    // exhaust
-   if(G.model&&!sp.engine.stalled&&sp.engine.rpm>250){const R=G.model.root;for(const e of G.model.exhausts){const p=R.localToWorld(e.clone());this.exhaust(p.x,p.y,p.z,sp.engine.load);}}
+   if(G.model&&!sp.engine.stalled&&sp.engine.rpm>250&&!(this.body&&this.body.id!=='earth')){const R=G.model.root;for(const e of G.model.exhausts){const p=R.localToWorld(e.clone());this.exhaust(p.x,p.y,p.z,sp.engine.load);}}
   }
   this.soft.update(dt,w);this.add.update(dt,w);
   const fog=G.scene?.fog;for(const p of [this.soft,this.add]){p.mesh.material.uniforms.uFogColor.value.copy(fog?fog.color:new T.Color());p.mesh.material.uniforms.uFogDensity.value=fog?fog.density:0;}

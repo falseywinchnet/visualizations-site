@@ -8,7 +8,7 @@ export class Sound{
   let C;try{C=new (window.AudioContext||window.webkitAudioContext)();}catch{return;}this.ctx=C;
   const master=this.master=C.createGain();master.gain.value=this.vol;master.connect(C.destination);
   // exterior bus goes through a low-pass that closes in the cabin view
-  this.ext=C.createBiquadFilter();this.ext.type='lowpass';this.ext.frequency.value=18000;this.ext.connect(master);
+  this.ext=C.createBiquadFilter();this.ext.type='lowpass';this.ext.frequency.value=18000;this.extG=C.createGain();this.ext.connect(this.extG).connect(master);
   const noiseBuf=(sec,kind='white')=>{const n=C.sampleRate*sec,b=C.createBuffer(1,n,C.sampleRate),d=b.getChannelData(0);let last=0;for(let i=0;i<n;i++){const w=Math.random()*2-1;if(kind==='brown'){last=(last+.02*w)/1.02;d[i]=last*3.5;}else d[i]=w;}return b;};
   this.white=noiseBuf(2);this.brown=noiseBuf(3,'brown');
   const loop=(buf,filterType,freq,q=1,dest=this.ext)=>{const s=C.createBufferSource();s.buffer=buf;s.loop=true;const f=C.createBiquadFilter();f.type=filterType;f.frequency.value=freq;f.Q.value=q;const g=C.createGain();g.gain.value=0;s.connect(f).connect(g).connect(dest);s.start();return {s,f,g};};
@@ -54,8 +54,13 @@ export class Sound{
   this.rain=loop(this.white,'highpass',5000,.5,master);this.wind=loop(this.brown,'lowpass',500,.5,master);this.fireL=loop(this.brown,'lowpass',260,.6,this.ext);this.river=loop(this.brown,'bandpass',600,.5,this.ext);
   this.crickets={o:C.createOscillator(),am:C.createGain(),g:C.createGain(),lfo:C.createOscillator()};const cr=this.crickets;cr.o.frequency.value=4600;cr.lfo.frequency.value=28;const lg=C.createGain();lg.gain.value=.5;cr.lfo.connect(lg).connect(cr.am.gain);cr.am.gain.value=.5;cr.g.gain.value=0;cr.o.connect(cr.am).connect(cr.g).connect(this.ext);cr.o.start();cr.lfo.start();
   this.t=0;this.nextBird=2;this.prevValve=[false,false,false,false,false,false];this.prevEv=[0,0,0,0,0,0];
-  this.music.init();
+  this.music.init();this.applyBody();
  }
+ // what the world outside sounds like. Vacuum: nothing carries; what reaches the cabin is structure-borne,
+ // dull and quiet. Mars: thin, highs eaten by CO2. Titan: dense air, loud and low, pitch down with the slower
+ // sound speed. No birds or crickets off Earth; no injector knock from a closed-cycle pack.
+ setBody(B){this.bodyCfg=B.id==='moon'?{cut:260,gain:.35,wind:0,wild:false,knock:0,pitch:1}:B.id==='mars'?{cut:2500,gain:.6,wind:.5,wild:false,knock:0,pitch:.9}:B.id==='titan'?{cut:6000,gain:1.15,wind:1.4,wild:false,knock:0,pitch:.72}:{cut:18000,gain:1,wind:1,wild:true,knock:1,pitch:1};this.applyBody();}
+ applyBody(){const c=this.bodyCfg||{cut:18000,gain:1,wind:1,wild:true,knock:1,pitch:1};this.extBase=c.cut;this.windK=c.wind;this.wild=c.wild;this.knockK=c.knock;this.pitchK=c.pitch;if(this.extG)this.extG.gain.setTargetAtTime(c.gain,this.ctx.currentTime,.3);}
  setVolume(v){this.vol=v;if(this.master)this.master.gain.setTargetAtTime(this.paused?0:v,this.ctx.currentTime,.05);}
  pause(p){this.paused=p;if(this.master)this.master.gain.setTargetAtTime(p?0:this.vol,this.ctx.currentTime,.05);}
  set(g,v,tc=.08){g.gain.setTargetAtTime(v,this.ctx.currentTime,tc);}
@@ -80,7 +85,7 @@ export class Sound{
   e.boost+=(load*clamp((rpm-800)/800,0,1)-e.boost)*Math.min(1,dt*1.5);// turbo spools behind the throttle
   e.drive.gain.setTargetAtTime(1+load*1.4,now,.08);e.lp.frequency.setTargetAtTime(150+load*110+rpm*.05,now,.08);e.lp2.frequency.setTargetAtTime(340+load*220,now,.1);
   this.set(e.g,on?(.26+load*.04)*run:0);this.set(e.subG,on?(.14+load*.08)*run:0);
-  this.set(e.knockG,on?.45*(1-load*.45)*(1.1-rpm/2400)*run:0);
+  this.set(e.knockG,on?.45*(1-load*.45)*(1.1-rpm/2400)*run*(this.knockK??1):0);
   const ob=sp.engine.boost||0;e.turbo.frequency.setTargetAtTime(700+e.boost*1300+ob*900,now,.15);this.set(e.turboG,on?e.boost*.004+ob*.012:0,.2);e.intake.f.frequency.setTargetAtTime(600+e.boost*700,now,.2);this.set(e.intake.g,on?e.boost*.04:0,.2);
   this.set(e.rumble.g,on?(.28+load*.2)*run:0);this.set(e.roar.g,on?load*.35:0,.15);
   const flow=sp.engine.pumpFlow||0;this.pump.o.frequency.setTargetAtTime(70+rpm*.05,C.currentTime,.05);this.pump.o2.frequency.setTargetAtTime(140+rpm*.1,C.currentTime,.05);this.set(this.pump.g,clamp(flow/.006,0,1)*.07);
@@ -95,12 +100,12 @@ export class Sound{
   const slip=Math.max(...sp.wheels.map(w=>w.contact?Math.abs(w.slip)+Math.abs(w.slipAngle)*.5:0));this.set(this.skid.g,slip>.2&&speed>1?clamp((slip-.2)*.6,0,.25):0);
   this.set(this.rustle.g,clamp(sp.brush*.25,0,.35)+(G.brushCrop||0)*.05,.05);
   this.set(this.waterL.g,clamp((sp.wading||0)*.25,0,.5));this.set(this.splashL.g,(sp.wading||0)>.2?clamp(speed/5,0,1)*.3:0);
-  const w=G.atmo?.weather;this.set(this.rain.g,w==='rain'?.14:0,.5);this.set(this.wind.g,.03+clamp(speed/20,0,1)*.08+(G.view==='seat'?0:.03),.3);
-  const night=G.atmo?.night||0;this.set(this.crickets.g,night>.4&&w!=='rain'?.012:0,1);
-  if(night<.5&&w!=='rain'&&w!=='smoke'){this.nextBird-=dt;if(this.nextBird<0){this.chirp();this.nextBird=1.5+Math.random()*6;}}
+  const w=G.atmo?.weather,wk=this.windK??1;this.set(this.rain.g,w==='rain'?.14:0,.5);this.set(this.wind.g,(.03+clamp(speed/20,0,1)*.08+(G.view==='seat'?0:.03))*wk,.3);this.wind.f.frequency.setTargetAtTime(500*(this.pitchK??1),C.currentTime,.3);
+  const night=G.atmo?.night||0,wild=this.wild!==false;this.set(this.crickets.g,wild&&night>.4&&w!=='rain'?.012:0,1);
+  if(wild&&night<.5&&w!=='rain'&&w!=='smoke'){this.nextBird-=dt;if(this.nextBird<0){this.chirp();this.nextBird=1.5+Math.random()*6;}}
   this.set(this.fireL.g,clamp(G.fireNear||0,0,1)*.4,.3);if((G.fireNear||0)>.2&&Math.random()<G.fireNear*.3)this.burst(.05,1800+Math.random()*2000,2,.1*G.fireNear);
   this.set(this.river.g,clamp(G.riverNear||0,0,1)*.08,.5);
-  this.ext.frequency.setTargetAtTime(G.view==='seat'?2400:18000,C.currentTime,.2);
+  const base=this.extBase||18000;this.ext.frequency.setTargetAtTime(G.view==='seat'?Math.min(2400,base):base,C.currentTime,.2);
  }
 }
 

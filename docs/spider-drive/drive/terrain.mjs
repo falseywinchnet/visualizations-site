@@ -2,6 +2,8 @@
 // surfaces, water, biome weights, fields and feature labels. Pure JS (Node-testable).
 import {Noise,hash2,clamp,mix,smooth,smoothstep} from './noise.mjs';
 import {bicubic,bilinear} from './worldgen.mjs';
+import {BODY_SURFACES} from './bodies.mjs';
+import {craterRelief} from './worldgen-bodies.mjs';
 
 export const SURFACES={
  asphalt:{name:'Asphalt',mu:.95,slide:.8,roll:.012,soft:0,dust:.05,color:[.25,.25,.24]},
@@ -28,6 +30,7 @@ export const deckWidth=r=>Math.max(r.width+1.4,11.6);
 export class Terrain{
  constructor(world){
   this.w=world;const {N,cell,half}=world;this.N=N;this.cell=cell;this.half=half;
+  this.body=world.body||'earth';this.earth=this.body==='earth';this.S=this.earth?SURFACES:BODY_SURFACES[this.body];
   this.noise=new Noise(world.seed+303);this.n2=new Noise(world.seed+404);
   this.overlay=null;// optional function(x,z)->{burn:0..1,wet:0..1} set by missions
   this.floodBoost=0;// swiftwater flood level offset for rivers
@@ -78,11 +81,24 @@ export class Terrain{
   const h=bicubic(this.w.height,this.N,this.gx(x),this.gx(z));
   const ox=Math.max(0,Math.abs(x)-this.half+30),oz=Math.max(0,Math.abs(z)-this.half+30),out=Math.hypot(ox,oz);
   if(out<=0)return h;
+  if(!this.earth)return this.outerBody(x,z,h,out);
   // keep the trunk river valley open where it enters and leaves
   let open=1;for(const p of this._riverGates()){const dx=x-p[0],dz=z-p[1],t=dx*p[2]+dz*p[3];if(t>0){const lat=Math.abs(-dx*p[3]+dz*p[2]);open=Math.min(open,smoothstep(120+t*.18,520+t*.4,lat));}}
   // the ranges beyond the map: broad massifs with softened ridgelines rather than a wall of spikes
   const ridge=this.noise.ridged(x/2600,z/2600,4)*.55+(this.noise.fbm(x/1900,z/1900,4)*.5+.5)*.45;const rise=smoothstep(0,3200,out)*(220+820*ridge*ridge)*open+out*.025*open;
   return h+rise;
+ }
+ // beyond the map on the other bodies: the terraced wall of the host crater, the Olympus scarp rising to the
+ // sky on one side, or dune country rolling on unchanged
+ outerBody(x,z,h,out){
+  const ro=this.w.rangeOut||{};
+  if(ro.type==='craterWall'){// the host crater's wall: 1.1 km of rise over 3 km in three slumped terraces, wandering in plan, starting 1.6 km beyond the map
+   const wob=this.noise.fbm(Math.atan2(z,x)*3.1,.7,2)*260;const r=Math.hypot(x,z)+wob,r0=(ro.r0||this.half+900)+700;if(r<r0)return h+out*.006;const u=Math.min(1.6,(r-r0)/3000),H=(ro.h||1800)*.6;
+   const terr=Math.floor(u*3)/3+smooth(clamp((u*3-Math.floor(u*3)-.35)/.65,0,1))/3;return h+terr*H+this.noise.ridged(x/900,z/900,3)*90*smoothstep(0,.3,u)+this.noise.fbm(x/300,z/300,2)*12*smoothstep(0,.1,u);}
+  if(ro.type==='scarp'){const d=ro.dir||[1,0],u=(x*d[0]+z*d[1])/this.half;if(u>.9){const s=smoothstep(.9,1.9,u+this.noise.fbm(x/1400,z/1400,2)*.08);return h+s*s*(ro.h||6500)*.9+s*this.noise.ridged(x/600,z/600,3)*300;}return h+out*.006+this.noise.fbm(x/2200,z/2200,3)*18;}
+  // dunes: continue the longitudinal pattern
+  if(ro.type==='dunes'){const d=ro.dir||[1,0],along=x*d[0]+z*d[1],across=-x*d[1]+z*d[0]+this.noise.fbm(along/2600,.3,2)*420;const amp=70+40*this.n2.fbm(along/2400,across/5000,2);return 12+amp*Math.pow(Math.max(0,Math.cos(across/1900*6.283)),1.6)*(.75+.25*this.noise.fbm(along/900,across/900,3))+this.noise.fbm(x/3200,z/3200,3)*30;}
+  return h+out*.01;
  }
  _riverGates(){
   if(this._gates)return this._gates;const g=[];
@@ -123,6 +139,7 @@ export class Terrain{
  bridgeAt(road,k){const bi=road.onBridge[k];if(bi<0)return null;const b=road.bridges[bi];const key=b.shared?b.shared.road+':'+b.shared.index:road.id+':'+bi;if(this.bridgeRemoved.has(key))return null;return b;}
  // ---------------------------------------------------------------- height
  terraceParams(x,z){
+  if(!this.earth)return {w:0,H:1};
   const dry=this.grid('dry',x,z),hard=this.grid('hard',x,z),sl=this.grid('slope',x,z);
   const w=smoothstep(.25,.55,dry)*smoothstep(.08,.22,sl)+smoothstep(.62,.8,hard)*smoothstep(.35,.7,sl)*.8;
   const cliffy=smoothstep(.45,.75,this.n2.fbm(x/520,z/520,2)*.5+.5+hard*.3);
@@ -133,6 +150,7 @@ export class Terrain{
  height(x,z,info){
   let h=this.base(x,z);
   const inside=this.inside(x,z);
+  if(!this.earth)return this.heightBody(x,z,h,inside,info);
   const rock=inside?this.grid('rock',x,z):.6,farm=inside?this.grid('farm',x,z):0;
   const rough=mix(.45,1.25,rock)*(1-farm*.75);
   const n=this.noise;
@@ -170,6 +188,46 @@ export class Terrain{
    if(info&&(!info.road||r.d<info.road.d)){info.road=r;info.bridge=br?this.bridgeAt(r.r,r.k):null;}}
   return h;
  }
+ // small craters below the world grid: a hash lattice at three scales, each cell holding one crater of a
+ // size drawn from the population. Degraded ones dominate; now and then a crisp one.
+ smallCraters(x,z,k){
+  let d=0;const sd=this.w.seed;
+  for(const [S,D0,D1,p] of k){const gx=Math.floor(x/S),gz=Math.floor(z/S);
+   for(let j=-1;j<=1;j++)for(let i=-1;i<=1;i++){const cx=gx+i,cz=gz+j;const r0=hash2(cx,cz,sd+61);if(r0>p)continue;
+    const cxp=(cx+.1+hash2(cx,cz,sd+62)*.8)*S,czp=(cz+.1+hash2(cx,cz,sd+63)*.8)*S;const D=D0+(D1-D0)*Math.pow(hash2(cx,cz,sd+64),2.2);const dd=Math.hypot(x-cxp,z-czp);if(dd>D*1.3)continue;
+    d+=craterRelief(dd,D,hash2(cx,cz,sd+65)<.15?.8:.3);}}
+  return d;}
+ heightBody(x,z,h,inside,info){
+  const n=this.noise,b=this.body;
+  if(b==='moon'){const rock=inside?this.grid('rock',x,z):.3;h+=n.fbm(x/70,z/70,2)*1.1+n.simplex(x/14,z/14)*.22*(1+rock)+n.simplex(x/3.6,z/3.6)*.05;
+   h+=this.smallCraters(x,z,[[48,6,30,.55],[14,1.6,7,.5],[4.5,.5,1.8,.35]]);}
+  else if(b==='mars'){const rock=inside?this.grid('rock',x,z):.4,des=inside?this.grid('desert',x,z):0;
+   h+=n.fbm(x/80,z/80,2)*1.3*(1+rock*.6)+n.simplex(x/12,z/12)*.25*(1+rock)+n.simplex(x/3.2,z/3.2)*.05;
+   // transverse ripples on the dark sand patches
+   if(des>.1)h+=des*.45*Math.pow(.5+.5*Math.sin((x*.37+z*.9)+n.fbm(x/60,z/60,2)*3),1.5);
+   h+=this.smallCraters(x,z,[[70,8,40,.3],[20,2,9,.25]])*.7;}
+  else{// titan: sand ripples on the dunes, cobble texture on the flats, no craters
+   const des=inside?this.grid('desert',x,z):.5,flat=1-des;
+   h+=n.fbm(x/90,z/90,2)*.9+n.simplex(x/9,z/9)*.14*flat+n.simplex(x/2.2,z/2.2)*.04*flat;
+   h+=des*.35*Math.pow(.5+.5*Math.sin((x*.6-z*.3)+n.fbm(x/80,z/80,2)*3),1.4);}
+  // channels (Titan methane runs) and tracks use the Earth code paths
+  let nearC=null;
+  if(this.w.channels.length&&(inside||Math.abs(x)<this.half+600&&Math.abs(z)<this.half+600)){
+   const near=nearC=this.channelsNear(x,z,this._cn||(this._cn=[]));
+   for(const c of near){const hw=c.w*.5,cls=c.c.cls;let prof;
+    if(cls===0){const dep=c.dep*.8,bed=c.level-dep,fb=Math.max(1.6,c.w*.3),sw=Math.min(2*dep/c.w*1.1,.55),r0=2.5,dd=Math.max(0,c.d-fb*.5);prof=bed+(dd<r0?dd*dd/(2*r0)*sw:(dd-r0*.5)*sw);}
+    else{const L=c.level;prof=c.d<hw?L-c.dep*(1-(c.d/hw)**2):L+.12+(c.d-hw)*(cls===3?.22:cls===2?.35:.55);}
+    h=smin(h,prof,cls===0?.8:1.4);if(info&&c.d<hw+2&&(!info.channel||c.c.cls>info.channel.c.cls))info.channel=c;}}
+  const rs=this.roadsNear(x,z,this._rn||(this._rn=[]));
+  for(const r of rs){if(r.d>=ROAD.pad-2)continue;const hw=r.r.width*.5,lat=r.d+hw,crown=.03;
+   const top=r.d<0?r.y+crown*(1-(lat/hw)**2):r.y-Math.min(.05,r.d*.02);
+   const bw=Math.min(ROAD.pad-ROAD.shoulder-2,Math.max(2.5,Math.abs(h-r.y)*ROAD.batter));
+   const wgt=r.d<=ROAD.shoulder?1:1-smoothstep(ROAD.shoulder,ROAD.shoulder+bw,r.d);
+   h=mix(h,top,wgt);if(info&&(!info.road||r.d<info.road.d)){info.road=r;info.bridge=null;}}
+  // the base and landing pad sit on graded ground
+  for(const s of this.w.sites){if(s.type!=='staging'&&s.type!=='landing')continue;const d=Math.hypot(x-s.x,z-s.z),R=s.type==='staging'?70:26;if(d<R+40){s.y??=this.base(s.x,s.z);h=mix(s.y,h,smoothstep(R,R+40,d));}}
+  return h;
+ }
  // physics ground: render height plus bridge decks
  groundHeight(x,z,yHint=1e9){
   const h=this.tileHeight(x,z);
@@ -201,6 +259,7 @@ export class Terrain{
   out.level=-1e9;out.depth=0;out.fx=0;out.fz=0;out.speed=0;out.kind=null;out.name='';
   if(this.inside(x,z)){const i=Math.floor((z+this.half)/this.cell)*this.N+Math.floor((x+this.half)/this.cell),lk=this.w.lakeId[i];
    if(lk>=0){const L=this.w.lakes[lk];out.level=L.level;out.kind='lake';out.name=L.name;}}
+  if(!this.w.channels.length){if(out.kind)out.depth=Math.max(0,out.level-this.tileHeight(x,z));return out;}
   const near=this.channelsNear(x,z,this._wn||(this._wn=[]));
   for(const c of near){if(c.c.cls===0||c.d>c.w*.5+1.5)continue;const L=c.level+this.floodBoost*(c.c.cls>=2?1:.4);if(L>out.level){out.level=L;out.kind=c.c.cls===3?'river':c.c.cls===2?'stream':'creek';out.name=c.c.name;const sp=c.speed*(1+this.floodBoost*.45);out.speed=sp;out.fx=c.fx*sp;out.fz=c.fz*sp;out.w=c.w;}}
   if(out.kind){out.depth=Math.max(0,out.level-this.tileHeight(x,z));}
@@ -221,11 +280,12 @@ export class Terrain{
  }
  // ---------------------------------------------------------------- biome and surface
  weights(x,z,out={}){
-  if(!this.inside(x,z)){out.forest=.2;out.farm=0;out.rock=.7;out.snow=0;out.marsh=0;out.scrub=.2;out.desert=0;out.moisture=.4;out.temperature=.4;out.dry=0;return out;}
+  if(!this.inside(x,z)){out.forest=this.earth?.2:0;out.farm=0;out.rock=this.earth?.7:.4;out.snow=0;out.marsh=0;out.scrub=this.earth?.2:0;out.desert=this.body==='titan'?.5:0;out.moisture=this.earth?.4:0;out.temperature=.4;out.dry=0;return out;}
   for(const k of ['forest','farm','rock','snow','marsh','scrub','desert','moisture','temperature','dry'])out[k]=this.grid(k,x,z);
   return out;
  }
  surface(x,z,wt){
+  if(!this.earth)return this.surfaceBody(x,z,wt);
   const r=this.roadNear(x,z);
   if(r&&r.d<.4){if(this.bridgeAt(r.r,r.k))return SURFACES.asphalt;return r.r.kind==='main'?SURFACES.asphalt:r.r.kind==='minor'?SURFACES.gravel:SURFACES.dirt;}
   const o=this.overlay?this.overlay(x,z):null;if(o&&o.burn>.5)return SURFACES.ash;
@@ -239,10 +299,26 @@ export class Terrain{
   if(o&&o.wet>.6)return SURFACES.mud;
   return SURFACES.grass;
  }
- biomeLabel(x,z){if(!this.inside(x,z))return 'Beyond the operations area';const i=Math.floor((z+this.half)/this.cell)*this.N+Math.floor((x+this.half)/this.cell);return BIOME_LABEL[this.w.biome[i]];}
+ surfaceBody(x,z,wt){
+  const S=this.S,r=this.roadNear(x,z);
+  if(r&&r.d<.4)return S.track||S.packed;
+  const w=wt||this.weights(x,z,this._sw||(this._sw={}));const sl=this.grid('slope',x,z);
+  if(this.body==='moon'){if(w.rock>.55||sl>.7)return S.rock;if(w.dry>.35)return S.ejecta;return this.grid('hard',x,z)>.55?S.packed:S.regolith;}
+  if(this.body==='mars'){if(w.rock>.5||sl>.7)return S.rock;if(w.desert>.5)return S.sand;return this.grid('hard',x,z)>.55&&this.noise.fbm(x/40,z/40,2)>.1?S.duricrust:S.dust;}
+  // titan
+  if(this.inside(x,z)){const i=Math.floor((z+this.half)/this.cell)*this.N+Math.floor((x+this.half)/this.cell);if(this.w.lakeId[i]>=0)return S.bed;}
+  const near=this.channelsNear(x,z,this._sn||(this._sn=[]));for(const c of near){if(c.d<c.w*.5+.5)return S.bed;if(c.d<c.w*.5+5)return S.damp;}
+  if(w.desert>.4)return S.sand;if(w.rock>.3||sl>.6)return S.rock;return S.flats;
+ }
+ biomeLabel(x,z){if(!this.inside(x,z))return 'Beyond the operations area';const i=Math.floor((z+this.half)/this.cell)*this.N+Math.floor((x+this.half)/this.cell);return (this.w.biomeLabels||BIOME_LABEL)[this.w.biome[i]];}
  feature(x,z){
   for(const t of this.w.towns)if(Math.hypot(x-t.x,z-t.z)<t.r)return {type:'town',label:t.name};
   for(const s of this.w.sites)if(Math.hypot(x-s.x,z-s.z)<60)return {type:'site',label:s.name};
+  if(!this.earth){const r=this.roadNear(x,z);if(r&&r.d<1.5)return {type:'road',label:r.r.name};
+   const wtr=this.water(x,z,this._fw||(this._fw={}));if(wtr.kind&&wtr.depth>.05)return {type:'water',label:wtr.kind==='lake'?wtr.name:`${wtr.name} channel`};
+   for(const c of this.w.craters||[]){const d=Math.hypot(x-c.x,z-c.z)/(c.D*.5);if(d<.9)return {type:'crater',label:c.name?`${c.name} crater floor`:'Crater floor',crater:c};if(d<1.25&&c.D>120)return {type:'rim',label:c.name?`${c.name} rim`:'Crater rim',crater:c};}
+   if(!this.inside(x,z,0))return {type:'edge',label:'Edge of operations area'};
+   return {type:'biome',label:this.biomeLabel(x,z)};}
   const r=this.roadNear(x,z);
   if(r&&r.d<1.5){const br=this.bridgeAt(r.r,r.k);if(br)return {type:'bridge',label:`${br.name} bridge`};if(r.r.bridges.some((b,bi)=>this.bridgeRemoved.has(r.r.id+':'+bi)&&r.k>=b.s0-2&&r.k<=b.s1+2))return {type:'washout',label:'Washed-out bridge'};return {type:'road',label:r.r.name};}
   const wtr=this.water(x,z,this._fw||(this._fw={}));

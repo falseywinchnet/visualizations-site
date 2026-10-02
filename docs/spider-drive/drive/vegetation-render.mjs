@@ -97,6 +97,8 @@ export class Vegetation{
   for(const w of workers)w.addEventListener('message',e=>{const d=e.data;if(d.type!=='veg')return;if(d.nearOnly){this.pendingN.delete(d.key);this.near.set(d.key,d.lists);}else{this.pendingF.delete(d.key);this.chunks.set(d.key,d.lists);}this.dirty=true;});
   this.makeSpecies();this.last=new T.Vector3(1e9,0,1e9);this.dirty=true;this.rr=0;
  }
+ // boulder colour per body: mare basalt, dust-coated Mars rock, water-ice cobbles under orange light
+ setBody(B){this.rockM.color.set(B.id==='moon'?0x6a6966:B.id==='mars'?0x7c6454:B.id==='titan'?0xbfa585:0x8a857c);}
  cfg(q){this.q=q;this.Rt=q==='low'?650:q==='high'?1300:950;this.Rnear=q==='low'?130:q==='high'?240:180;this.Rg=q==='low'?95:q==='high'?200:150;this.Rc=q==='low'?85:q==='high'?170:125;this.Rcf=q==='low'?300:q==='high'?520:400;
   // staged LOD: full trees to Rnear (crossfading to impostors over the last 35 m), impostors to Rt; ground cover fades out over its last 30 m
   FADE.near.value.set(0,0,this.Rnear-35,this.Rnear);FADE.imp.value.set(this.Rnear-35,this.Rnear,this.Rt-120,this.Rt);
@@ -111,7 +113,7 @@ export class Vegetation{
   const shrubM=foliageMat({map:shrubLeaf,bend:1,push:1,burn:1,hScale:1.2,fade:FADE.shrub}),sageM=foliageMat({map:sageLeaf,bend:.8,push:1,burn:1,hScale:1,fade:FADE.shrub});
   const gf={fade:FADE.ground};const grassM=foliageMat({map:grassT,bend:1.4,push:1.2,burn:1,hScale:.7,...gf}),dryM=foliageMat({map:dryT,bend:1.4,push:1.2,burn:1,hScale:.7,...gf}),reedM=foliageMat({map:reedT,bend:1.6,push:1.2,burn:1,hScale:1.6,...gf}),wheatM=foliageMat({map:wheatT,bend:1.3,push:1.3,burn:1,hScale:.9,...gf}),flowerM=foliageMat({map:flowerT,bend:1.3,push:1.2,burn:1,hScale:.7,...gf});
   const cornM=foliageMat({map:cornT,bend:.9,push:1.4,burn:1,hScale:2.3,fade:FADE.corn}),rowM=foliageMat({map:rowT,bend:.5,push:0,burn:1,hScale:2.3,fade:FADE.cornfar}),yuccaM=foliageMat({map:yuccaT,bend:.4,push:.6,burn:1,hScale:1,fade:FADE.ground});
-  const rockM=new T.MeshStandardMaterial({color:0x8a857c,roughness:.92,flatShading:true});const logM=foliageMat({map:bark,alphaTest:0,side:T.FrontSide,bend:0,push:0,burn:2,hScale:1});
+  const rockM=this.rockM=new T.MeshStandardMaterial({color:0x8a857c,roughness:.92,flatShading:true});const logM=foliageMat({map:bark,alphaTest:0,side:T.FrontSide,bend:0,push:0,burn:2,hScale:1});
   this.mats={leafM,needleM};
   // tree parts (normalised to height 1)
   const broadTrunk=trunkGeo(.028,.016,.62,7,[{r:.012,len:.26,tilt:.7,yaw:0,y:.45},{r:.011,len:.24,tilt:.8,yaw:2.2,y:.5},{r:.01,len:.22,tilt:.75,yaw:4.3,y:.55}]);

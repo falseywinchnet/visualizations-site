@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="description" content="Drive the Spider, a raised six-wheeled scout carrier with hydropneumatic legs, across a generated watershed of rivers, gullies, cliffs, forests and cornfields. Free roam or fly wildfire, swiftwater rescue, forward pursuit and hostile crossing missions.">
+<meta name="description" content="Drive the Spider, a raised six-wheeled scout carrier with hydropneumatic legs, across a generated watershed of rivers, gullies, cliffs, forests and cornfields, or set it down at a lunar crater base, on the lava plains under the Olympus Mons scarp, or on Titan's dune shoreline by a methane lake. Free roam or fly wildfire, swiftwater rescue, forward pursuit and hostile crossing missions.">
 <title>Spider — drive the open country</title>
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="drive.css">
@@ -28,6 +28,7 @@
   <div class="brief" id="brief"></div>
   <details class="opts"><summary>Options</summary>
    <div class="opt-grid">
+    <label>World <select id="opt-world"><option value="earth">Earth: river country</option><option value="moon">The Moon: mare crater floor</option><option value="mars">Mars: below Olympus Mons</option><option value="titan">Titan: dune shoreline</option></select></label>
     <label>Country <input id="opt-seed" type="number" min="1" max="99999" value="711"></label>
     <label>Time of day <input id="opt-time" type="range" min="4" max="21" step=".25" value="16.5"><output id="opt-time-out">16:30</output></label>
     <label>Weather <select id="opt-weather"><option value="clear">Clear</option><option value="haze">Haze</option><option value="rain">Drizzle</option></select></label>
@@ -124,7 +125,7 @@
 
 <section id="end" hidden><h2 id="end-title"></h2><p id="end-text"></p><dl id="end-stats"></dl><div class="pause-btns"><button data-act="restart">Run it again</button><button data-act="menu">Choose another scenario</button><button data-act="free">Keep driving</button></div></section>
 
-<p class="boundary">Speculative concept · simulated hydropneumatic dynamics, not a validated vehicle model · Country <span id="seed-label">711</span></p>
+<p class="boundary">Speculative concept · simulated hydropneumatic dynamics, not a validated vehicle model · <span id="body-label">Earth</span> · Country <span id="seed-label">711</span></p>
 <noscript><p class="noscript">This drive needs JavaScript and WebGL 2. <a href="https://paymenottowork.com/ideas/spider/">Read about the Spider.</a></p></noscript>
 </main>
 <script type="module" src="drive.mjs"></script>

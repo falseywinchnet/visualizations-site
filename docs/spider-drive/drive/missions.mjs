@@ -24,6 +24,20 @@ export const MISSIONS=[
   kit:'Troop carrier variant · armour panels · eight troops · lights off (L)'},
 ];
 
+// off Earth the scenarios that need towns, rivers and fire stay home; the body gets one open-roam run
+export function missionsFor(body){
+ if(!body||body.id==='earth')return MISSIONS;
+ const b=body.id==='moon'?{name:'Mare crater floor',tag:'A lunar base and the country around it, at a sixth of a g',
+   brief:'Harlan Base sits on the floor of a twenty-kilometre crater whose terraced walls stand on the horizon. Graded tracks lead out to a landing pad, a relay mast, an old descent stage and the rims of the larger craters; between them the mare is powdered regolith, a wrinkle ridge, boulder fields and fresh rayed craters. Gravity is 1.62 m/s²: grip is a sixth of what the tyres have at home, stops are long, jumps are long and slow. The pod is pressurised and the power pack is closed-cycle; nothing carries sound outside. The sun stays where it is.',
+   kit:'Scout variant · pressurised cabin · closed-cycle fuel-cell pack · discoveries tracked on the panel'}
+  :body.id==='mars'?{name:'Below the Olympus scarp',tag:'Lava plains under a six-kilometre cliff, 0.38 g, thin air',
+   brief:'Tharsis Station stands on the lava plains at the foot of Olympus Mons. One horizon is the basal scarp, kilometres high; the other is wrinkle ridges, lobate flows with their levees, eroded craters and dark basaltic dune fields in the lee of the ridges. The sky is butterscotch, brightening to a cool halo round a small sun; shadows are soft. Gravity 3.71 m/s², air a hundredth of Earth\'s: dust hangs and drifts downwind, the tyres have a third of their grip. Tracks lead to an overlook under the scarp, a crater rim, an abandoned rover and an ice drill.',
+   kit:'Scout variant · pressurised cabin · closed-cycle fuel-cell pack · discoveries tracked on the panel'}
+  :{name:'Shoreline on Titan',tag:'Dune country and a methane lake in orange twilight, 0.14 g',
+   brief:'Shoreline Station sits between the longitudinal dunes of the equatorial sand sea and a lake of liquid methane. Light is a thousandth of Earth daylight and comes from everywhere through the orange haze: no sharp shadows, a bright smear where the sun is. The air is four times as dense as home at 94 K, so drag is real and sand hangs in slow billows; gravity is 1.35 m/s². Methane is half the density of water: the pod floats less and the ballast tanks fill with it the same way. Tracks lead to the shore, a Huygens-class probe and a channel bend; the dune crest is yours to find.',
+   kit:'Scout variant · pressurised, heated cabin · closed-cycle fuel-cell pack · discoveries tracked on the panel'};
+ return [{id:'free',variant:'scout',time:null,weather:null,...b}];
+}
 // ------------------------------------------------------------------ small props
 function colored(geo,color){const g=geo.index?geo.toNonIndexed():geo;const c=new T.Color(color),a=new Float32Array(g.attributes.position.count*3);for(let i=0;i<a.length;i+=3){a[i]=c.r;a[i+1]=c.g;a[i+2]=c.b;}g.setAttribute('color',new T.BufferAttribute(a,3));return g;}
 const propMat=new T.MeshStandardMaterial({vertexColors:true,roughness:.7});
@@ -87,12 +101,24 @@ class Mission{
 // ------------------------------------------------------------------ open country
 class Free extends Mission{
  start(){const s=this.w.sites.find(s=>s.type==='staging')||this.w.towns[0];const p=this.findSpot(s.x+30,s.z+20);
-  this.found=new Set();this.list=[{id:'ford',text:'Ford the main river'},{id:'lookout',text:'Stand on the lookout ridge'},{id:'corn',text:'Run through a cornfield at speed'},{id:'ledge',text:'Walk up a rock step with climb assist'},{id:'gully',text:'Cross a dry gully'},{id:'lake',text:'Wade into a lake'},{id:'high',text:'Reach 600 m of elevation'},{id:'town',text:'Visit every town'}];
-  this.towns=new Set();this.cornT=0;this.title='Open country';
-  this.radio('Base','Spider, you are free to roam. Country is yours.',1);
+  this.found=new Set();this.body=this.w.body||'earth';
+  if(this.body==='earth')this.list=[{id:'ford',text:'Ford the main river'},{id:'lookout',text:'Stand on the lookout ridge'},{id:'corn',text:'Run through a cornfield at speed'},{id:'ledge',text:'Walk up a rock step with climb assist'},{id:'gully',text:'Cross a dry gully'},{id:'lake',text:'Wade into a lake'},{id:'high',text:'Reach 600 m of elevation'},{id:'town',text:'Visit every town'}];
+  else{this.list=this.w.sites.filter(s=>s.type!=='staging').map(s=>({id:'site:'+s.name,text:({landing:'Drive onto the landing pad',rim:'Stand on the ',fresh:'Walk the ejecta of the ',relay:'Reach the relay mast',lander:'Find the old descent stage',scarp:'Reach the overlook under the scarp',rover:'Find the abandoned rover',drill:'Visit the ice drill',shore:'Reach the shore of the lake',crest:'Climb the dune crest',probe:'Find the Huygens-class probe',channel:'Follow a methane channel to its bend'})[s.type]+(s.type==='rim'||s.type==='fresh'?s.name:'')}));
+   if(this.body==='moon')this.list.push({id:'air',text:'Leave the ground with all six wheels for two seconds'},{id:'fast',text:'Reach 60 km/h on the mare'});
+   if(this.body==='mars')this.list.push({id:'dune',text:'Cross a basaltic dune field'},{id:'fast',text:'Reach 90 km/h on the plain'});
+   if(this.body==='titan')this.list.push({id:'lake',text:'Wade into the methane'},{id:'sub',text:'Drive along the lake bed fully submerged'});}
+  this.towns=new Set();this.cornT=0;this.airT=0;this.duneT=0;this.title=this.body==='earth'?'Open country':{moon:'Mare crater floor',mars:'Below the Olympus scarp',titan:'Shoreline on Titan'}[this.body];
+  this.radio('Base',this.body==='earth'?'Spider, you are free to roam. Country is yours.':{moon:'Spider, Harlan Base. You are clear to range. Watch your stopping distances out there.',mars:'Spider, Tharsis. Dust is light today, winds from the scarp. Range is yours.',titan:'Spider, Shoreline. Visibility two kilometres in the haze. The lake is yours if you want it.'}[this.body],1);
   return {x:p.x,z:p.z,yaw:0};}
  tick(dt){const sp=this.sp,t=this.t,f=t.feature(sp.pos[0],sp.pos[2]);const w=t.water(sp.pos[0],sp.pos[2],{});
   const hit=id=>{if(!this.found.has(id)){this.found.add(id);this.G.hud.toast(this.list.find(l=>l.id===id).text,2.5);this.G.sound.squelch();}};
+  if(this.body!=='earth'){
+   if(f.type==='site'&&this.list.some(l=>l.id==='site:'+f.label))hit('site:'+f.label);
+   const kmh=sp.speed()*3.6;if(this.body==='moon'){if(sp.wheels.every(w=>!w.contact))this.airT+=dt;else this.airT=0;if(this.airT>2)hit('air');if(kmh>60)hit('fast');}
+   if(this.body==='mars'){if(kmh>90)hit('fast');if(sp.wheels[2].surface?.name==='Basaltic sand'&&sp.speed()>3)this.duneT+=dt;else this.duneT=Math.max(0,this.duneT-dt);if(this.duneT>8)hit('dune');}
+   if(this.body==='titan'){if(w.kind==='lake'&&w.depth>.8)hit('lake');if((sp.submerged||0)>.9&&sp.speed()>.5)hit('sub');}
+   this.objs=this.list.map(l=>({text:l.text,state:this.found.has(l.id)?'done':''}));this.meter=`${this.found.size} of ${this.list.length} discoveries`;
+   this.markers=[...this.w.sites.map(s=>({x:s.x,z:s.z,label:s.name,color:'#9fd0ff'}))];return;}
   if(w.kind==='river'&&w.depth>1.2)hit('ford');if(w.kind==='lake'&&w.depth>.8)hit('lake');
   const lk=this.w.sites.find(s=>s.type==='lookout');if(lk&&this.dist([lk.x,lk.z])<70)hit('lookout');
   if(sp.speed()>6&&sp.wheels[2].surface?.name==='Cropland'&&t.field(sp.pos[0],sp.pos[2]).crop===0){this.cornT+=dt;if(this.cornT>6)hit('corn');}else this.cornT=Math.max(0,this.cornT-dt);

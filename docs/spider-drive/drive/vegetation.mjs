@@ -27,6 +27,7 @@ export function placeChunk(t,cx,cz,opts={}){
  const roadClear=(x,z,m)=>{const r=t.roadNear(x,z);return !(r&&r.d<m);};
  const townNear=(x,z)=>{for(const tw of t.w.towns){const d=Math.hypot(x-tw.x,z-tw.z);if(d<tw.r+10)return d/tw.r;}return 9;};
  const buildingNear=(x,z,m)=>{for(const b of t.w.buildings){if(Math.abs(b.x-x)<30&&Math.abs(b.z-z)<30&&Math.hypot(b.x-x,b.z-z)<Math.max(b.w,b.d)*.7+m)return true;}return false;};
+ if(t.body&&t.body!=='earth'){bodyChunk(t,x0,z0,push,wt,opts,roadClear,buildingNear);return pack(out);}
  const burn=t.overlay?t.overlay:null;
  // ---- trees, saplings, logs, snags on a jittered 5.33 m lattice
  const S=16/3;
@@ -105,6 +106,26 @@ export function placeChunk(t,cx,cz,opts={}){
  }
  if(opts.far){cornFar(t,x0,z0,push,wt);}
  return pack(out);
+}
+// Off Earth nothing grows. Boulders only: dense in fresh ejecta and on the Moon's ridge, sparse on the Mars
+// plains with more on the lava lobes, small ice cobbles on Titan's interdune flats and none on the dunes.
+function bodyChunk(t,x0,z0,push,wt,opts,roadClear,buildingNear){
+ if(opts.nearOnly)return;const seed=t.w.seed,b=t.body;
+ const stage=t.w.sites.find(s=>s.type==='staging');
+ for(let j=0;j<16;j++)for(let i=0;i<16;i++){
+  const gx=Math.floor(x0/4)+i,gz=Math.floor(z0/4)+j,r1=hash2(gx,gz,seed+31),r2=hash2(gx,gz,seed+32),r3=hash2(gx,gz,seed+33),r4=hash2(gx,gz,seed+34);
+  const x=gx*4+r1*3.6,z=gz*4+r2*3.6;if(!t.inside(x,z,-600))continue;
+  t.weights(x,z,wt);const sl=t.grid('slope',x,z);
+  let pb,smax;
+  if(b==='moon'){pb=wt.rock*.22+(wt.dry>.4?.06:0)+.006;smax=3.4;}
+  else if(b==='mars'){pb=wt.rock*.14*(1-wt.desert)+.004;smax=2.6;}
+  else{pb=(1-wt.desert)*.09+wt.rock*.05;smax=.9;}
+  if(r3>pb)continue;
+  if(!roadClear(x,z,4)||buildingNear(x,z,3))continue;if(stage&&Math.hypot(x-stage.x,z-stage.z)<80)continue;
+  if(t.inside(x,z)){const k=Math.floor((z+t.half)/t.cell)*t.N+Math.floor((x+t.half)/t.cell);if(t.w.lakeId[k]>=0)continue;}
+  let wet=false;for(const c of t.channelsNear(x,z,t._vn)){if(c.d<c.w*.5+1){wet=true;break;}}if(wet)continue;
+  const sc=.4+Math.pow(r4,2.4)*smax;push(SP.boulder,x,t.height(x,z)-sc*.25,z,r1*6.283,sc,r2,hash2(gx,gz,seed+35));
+ }
 }
 function inCorn(t,x,z,wt){t.weights(x,z,wt);if(wt.farm<.45)return null;const f=t.field(x,z);if(f.crop!==0||f.edge<2.2)return null;return f;}
 function cornRows(t,x0,z0,push,wt){
