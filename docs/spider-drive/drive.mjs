@@ -219,7 +219,7 @@ function findClear(x,z){let best=null;for(let r=0;r<80;r+=6)for(let a=0;a<12;a++
 const VIEWS=['chase','seat','orbit','cinematic','foot'];let ready=false,cine={t:0,shot:-1,pos:new T.Vector3(),look:new T.Vector3()};
 function cycleView(){setView(VIEWS[(VIEWS.indexOf(G.view)+1)%VIEWS.length]);}
 function setView(v){G.view=v;body.dataset.view=v;body.dataset.cine=String(v==='cinematic');orbit.enabled=v==='orbit';ready=false;look.yaw=0;look.pitch=0;spider&&spider.say({chase:'Chase camera',seat:"Driver's seat: drag to look",orbit:'Orbit camera',cinematic:'Cinematic director',foot:'Foot camera'}[v],1.6);
- post.grade.uniforms.uLetter.value=v==='cinematic'?.075:0;}
+ post.grade.uniforms.uLetter.value=v==='cinematic'?.075:0;post.grade.uniforms.uGlass.value=v==='seat'?1:0;}
 const tmpV=new T.Vector3(),tmpV2=new T.Vector3(),tmpQ=new T.Quaternion();
 let headOff=new T.Vector3();
 function cameraUpdate(dt,snap=false){
@@ -348,7 +348,7 @@ function renderFrame(dt){
   for(const w of spider.wheels){const m=w.mount,h=w.hub;P[k++].set((m[0]+h[0])/2,(m[1]+h[1])/2,(m[2]+h[2])/2,.7);}
   const R=model.root;for(const z of [-4,-1.5,1,3.5]){const p=model.cabin.localToWorld(tmpV.set(0,3.2,z));P[k++].set(p.x,p.y,p.z,1.7);}
   for(const z of [-3,3]){const p=R.localToWorld(tmpV.set(0,5.8,z));P[k++].set(p.x,p.y,p.z,2.2);}}
- if(fx)fx.update(dt,camera,G);
+ if(fx)fx.update(dt,camera,G);if(post&&G.view==='seat')post.grade.uniforms.uWet.value=mix(post.grade.uniforms.uWet.value,(atmo?.weather==='rain'?1:0)+(spider?.wading>.4?.6:0),.05);
  if(sound&&spider){sound.update(dt,spider,G,camera);if(G.state==='drive'){const v=Math.hypot(spider.vel[0],spider.vel[2]);sound.music.setIntensity(Math.min(.45,v/30)+(G.mission?.intensity?.()||0)+(G.shake||0)*.3);}}
  if(G.mission?.frame)G.mission.frame(dt);
  post.grade.uniforms.uHurt.value=mix(post.grade.uniforms.uHurt.value,G.hurt||0,.05);

@@ -9,6 +9,8 @@ export class Sound{
   const master=this.master=C.createGain();master.gain.value=this.vol;master.connect(C.destination);
   // exterior bus goes through a low-pass that closes in the cabin view
   this.ext=C.createBiquadFilter();this.ext.type='lowpass';this.ext.frequency.value=18000;this.extG=C.createGain();this.ext.connect(this.extG).connect(master);
+  // interior bus: what the cabin itself carries (structure-borne whines, vibration); opens in the seat view
+  this.int=C.createGain();this.int.gain.value=0;this.int.connect(master);this.seatK=0;
   const noiseBuf=(sec,kind='white')=>{const n=C.sampleRate*sec,b=C.createBuffer(1,n,C.sampleRate),d=b.getChannelData(0);let last=0;for(let i=0;i<n;i++){const w=Math.random()*2-1;if(kind==='brown'){last=(last+.02*w)/1.02;d[i]=last*3.5;}else d[i]=w;}return b;};
   this.white=noiseBuf(2);this.brown=noiseBuf(3,'brown');
   const loop=(buf,filterType,freq,q=1,dest=this.ext)=>{const s=C.createBufferSource();s.buffer=buf;s.loop=true;const f=C.createBiquadFilter();f.type=filterType;f.frequency.value=freq;f.Q.value=q;const g=C.createGain();g.gain.value=0;s.connect(f).connect(g).connect(dest);s.start();return {s,f,g};};
@@ -48,6 +50,15 @@ export class Sound{
   // hydraulic pump whine
   this.pump={o:C.createOscillator(),g:C.createGain()};this.pump.o.type='triangle';this.pump.g.gain.value=0;this.pump.o.connect(this.pump.g).connect(this.ext);this.pump.o.start();
   this.pump.o2=C.createOscillator();this.pump.o2.type='sine';this.pump.o2.connect(this.pump.g);this.pump.o2.start();
+  // inside the cabin: the pump whine comes through the floor, the hub drives sing with road speed, the cooling fans
+  // hum, the road arrives as a low rumble from the pod's measured vertical acceleration, and the engine's firing is
+  // felt as a dull thump through the mounts rather than heard
+  this.pumpInt=C.createGain();this.pumpInt.gain.value=0;this.pump.g.connect(this.pumpInt).connect(this.int);
+  this.drv={o:C.createOscillator(),o2:C.createOscillator(),f:C.createBiquadFilter(),g:C.createGain()};this.drv.o.type='sawtooth';this.drv.o2.type='sawtooth';this.drv.o2.detune.value=9;this.drv.f.type='bandpass';this.drv.f.frequency.value=900;this.drv.f.Q.value=1.6;this.drv.g.gain.value=0;this.drv.o.connect(this.drv.f);this.drv.o2.connect(this.drv.f);this.drv.f.connect(this.drv.g).connect(this.int);this.drv.o.start();this.drv.o2.start();
+  this.fan={o:C.createOscillator(),o2:C.createOscillator(),g:C.createGain()};this.fan.o.type='triangle';this.fan.o.frequency.value=118;this.fan.o2.type='sine';this.fan.o2.frequency.value=237;this.fan.g.gain.value=0;this.fan.o.connect(this.fan.g);this.fan.o2.connect(this.fan.g);this.fan.g.connect(this.int);this.fan.o.start();this.fan.o2.start();
+  this.vib=loop(this.brown,'lowpass',70,1,this.int);this.vib2=loop(this.white,'bandpass',160,2,this.int);
+  this.engInt=C.createBiquadFilter();this.engInt.type='lowpass';this.engInt.frequency.value=130;this.engIntG=C.createGain();this.engIntG.gain.value=0;e.g.connect(this.engInt).connect(this.engIntG).connect(this.int);
+  this.creak=loop(this.white,'bandpass',2400,4,this.int);this.vibAcc=0;
   this.hissL=loop(this.white,'highpass',3500,.7);
   this.tyre=loop(this.brown,'bandpass',220,.8);this.gravel=loop(this.white,'bandpass',2600,1.2);this.hum=loop(this.white,'bandpass',420,6);
   this.skid=loop(this.white,'bandpass',1400,3);this.rustle=loop(this.white,'bandpass',4800,.8);this.waterL=loop(this.brown,'lowpass',900,.7);this.splashL=loop(this.white,'bandpass',1800,.6);
@@ -100,12 +111,25 @@ export class Sound{
   const slip=Math.max(...sp.wheels.map(w=>w.contact?Math.abs(w.slip)+Math.abs(w.slipAngle)*.5:0));this.set(this.skid.g,slip>.2&&speed>1?clamp((slip-.2)*.6,0,.25):0);
   this.set(this.rustle.g,clamp(sp.brush*.25,0,.35)+(G.brushCrop||0)*.05,.05);
   this.set(this.waterL.g,clamp((sp.wading||0)*.25,0,.5));this.set(this.splashL.g,(sp.wading||0)>.2?clamp(speed/5,0,1)*.3:0);
-  const w=G.atmo?.weather,wk=this.windK??1;this.set(this.rain.g,w==='rain'?.14:0,.5);this.set(this.wind.g,(.03+clamp(speed/20,0,1)*.08+(G.view==='seat'?0:.03))*wk,.3);this.wind.f.frequency.setTargetAtTime(500*(this.pitchK??1),C.currentTime,.3);
+  const w=G.atmo?.weather,wk=this.windK??1;this.set(this.rain.g,w==='rain'?.14*(1-.5*this.seatK):0,.5);this.set(this.wind.g,(.03+clamp(speed/20,0,1)*.08+(G.view==='seat'?0:.03))*wk,.3);this.wind.f.frequency.setTargetAtTime(500*(this.pitchK??1),C.currentTime,.3);
   const night=G.atmo?.night||0,wild=this.wild!==false;this.set(this.crickets.g,wild&&night>.4&&w!=='rain'?.012:0,1);
   if(wild&&night<.5&&w!=='rain'&&w!=='smoke'){this.nextBird-=dt;if(this.nextBird<0){this.chirp();this.nextBird=1.5+Math.random()*6;}}
   this.set(this.fireL.g,clamp(G.fireNear||0,0,1)*.4,.3);if((G.fireNear||0)>.2&&Math.random()<G.fireNear*.3)this.burst(.05,1800+Math.random()*2000,2,.1*G.fireNear);
   this.set(this.river.g,clamp(G.riverNear||0,0,1)*.08,.5);
-  const base=this.extBase||18000;this.ext.frequency.setTargetAtTime(G.view==='seat'?Math.min(2400,base):base,C.currentTime,.2);
+  const seat=G.view==='seat';this.seatK+=((seat?1:0)-this.seatK)*Math.min(1,dt*5);const k=this.seatK;
+  const base=this.extBase||18000;this.ext.frequency.setTargetAtTime(seat?Math.min(1400,base):base,C.currentTime,.2);const bg=(this.bodyCfg||{gain:1}).gain;this.extG.gain.setTargetAtTime(bg*(1-.55*k),C.currentTime,.2);
+  this.int.gain.setTargetAtTime(k,C.currentTime,.15);
+  if(k>.01){const flowK=clamp(flow/.006,0,1);this.pumpInt.gain.setTargetAtTime(1.6+flowK*1.2,C.currentTime,.1);
+   // hub drives: pitch with wheel speed (one motor pole pass per ~0.08 m of road), louder under torque and on the overrun
+   const tq=sp.wheels.reduce((a,w)=>a+Math.abs(w.torque||0),0)/6,tqK=clamp(tq/9000,0,1);const f0=40+speed*12.5;this.drv.o.frequency.setTargetAtTime(f0,C.currentTime,.08);this.drv.o2.frequency.setTargetAtTime(f0*2.02,C.currentTime,.08);this.drv.f.frequency.setTargetAtTime(Math.max(200,f0*3),C.currentTime,.1);this.set(this.drv.g,on?clamp(speed/9,0,1)*(.012+.03*tqK):0,.12);
+   this.set(this.fan.g,on?.014+.02*load+.02*(sp.engine.heat||0):0,.4);
+   // road vibration from the pod's own vertical acceleration, fast attack, slow release; and the surface's grain
+   const az=Math.abs(sp.cabinAcc?.[1]||0);this.vibAcc=az>this.vibAcc?az:this.vibAcc+(az-this.vibAcc)*Math.min(1,dt*3);const rough=(s.soft||0)*.6+(s.name==='Gravel'||s.name==='Rock'||s.name==='Riverbed'||s.name==='Ejecta'||s.name==='Ice cobbles'?.5:0)+(s.name==='Asphalt'?0:.15);
+   this.set(this.vib.g,contact?clamp(this.vibAcc/4,0,1)*.6+clamp(speed/15,0,1)*rough*.18:0,.08);this.set(this.vib2.g,contact?clamp(speed/12,0,1)*rough*.05+clamp(this.vibAcc/6,0,1)*.08:0,.1);this.vib.f.frequency.setTargetAtTime(55+speed*1.5,C.currentTime,.3);
+   this.engIntG.gain.setTargetAtTime(on?1.3:0,C.currentTime,.2);
+   // the cage creaks when the body twists
+   this.set(this.creak.g,clamp((Math.abs(sp.roll||0)+Math.abs(sp.pitch||0))/40,0,1)*clamp(this.vibAcc/3,0,1)*.03,.2);}
+  else{this.set(this.drv.g,0,.1);this.set(this.vib.g,0,.1);this.set(this.vib2.g,0,.1);this.set(this.fan.g,0,.1);this.set(this.creak.g,0,.1);}
  }
 }
 
