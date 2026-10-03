@@ -7,21 +7,22 @@
 
 export const GEOM=Object.freeze({R:1.7,tireWidth:.62,halfTrack:4.5,roadHalfTrack:3.0,splay:5.5*Math.PI/180,stations:[-4.7,0,4.7],stroke:3.6,hubTop:3.24,plateY:6.11,topPlate:6.4,belly:2.6,cabinY:4.2,cabinR:1.6,cabinHalf:5.4,wheelbase:9.4,maxLock:40*Math.PI/180,carriageMax:2.0,intakeY:7.3});
 export const DT=1/240;
-// Self-righting arms: two curved telescoping fingers on the roof, at one station just behind the middle legs, each
-// riding a circle about the body's long axis (centre just under the pod) that encloses the whole cross-section. Each
-// pokes up from one shoulder of the roof (a 35 deg sleeve) and extends along its circle over the top and down the far
-// side, five segments sliding out in turn, base first, with a broad rubber fingertip shoe on the last. The right finger
-// rides the outer circle and the left the inner, so either can pass over the other's sleeve.
-//  - On its side, the finger on the high side reaches over and its shoe levers the top edge up off the ground; the
-//    machine pivots on its low-side tyres until it falls back onto its wheels (legs retracted: a high pivot).
-//  - On its roof, the right finger's shoe carries the machine like a wheel rim (the carriage moves the centre of mass
-//    over the shoe first): as it slides on, the machine rolls over its left side until the extended left tyres catch,
-//    then tips onto its wheels.
+// Self-righting arms: two curved telescoping fingers hung from the top frame beside the pod, at one station just
+// behind the middle legs. Each sleeve hangs down the side of the pod, clear of it (the pod slides on its carriage;
+// the arms do not), and its finger pokes up out of the sleeve's top and slides out along a circle centred off on the
+// far side of the pod, so it arcs up over the roof and out past the far side's legs. Five segments slide out in turn,
+// base first, with a broad rubber fingertip shoe on the last. Stowed, everything sits inside the machine's outline:
+// on its roof or side it lies on its own frame, not on the arms.
+//  - On its side, the finger on the high side reaches over the roof and its shoe levers the top edge up off the
+//    ground; the machine pivots on its low-side tyres until it falls back onto its wheels (legs retracted: a high pivot).
+//  - On its roof, the finger on the high side (either, on the level) pokes straight down past the roof, lifts that
+//    edge and carries the machine over its far side like a wheel rim, onto that side and on over onto its wheels.
 const D2R=Math.PI/180;
-export const ARM=Object.freeze({cy:2.9,R:[6.05,5.45],z:1.0,tip:[85*D2R,95*D2R],dir:[1,-1],sleeve:35*D2R,L:36*D2R,S:31*D2R,n:5,
- rTube:[.2,.18,.16,.145,.13,.115],pad:{w:2.2,half:3.4*D2R,rin:.12,rout:.32},max:155*D2R,out:20*D2R,ret:45*D2R,acc:14*D2R,F:4.5e5,mu:.8,mass:900});
+export const ARM=Object.freeze({cy:4.2,cx:[-2.6,2.6],R:5.0,z:1.3,tip:[20*D2R,160*D2R],dir:[1,-1],sleeve:35*D2R,L:36*D2R,S:31*D2R,n:5,
+ rTube:[.2,.18,.16,.145,.13,.115],pad:{w:1.6,half:3.4*D2R,rin:.12,rout:.32},max:155*D2R,out:20*D2R,ret:45*D2R,acc:14*D2R,F:4.5e5,mu:.8,mass:900});
 export function armOffsets(E,out=[0,0,0,0,0,0]){let acc=0;out[0]=0;for(let j=1;j<=ARM.n;j++){acc+=clamp(E-(j-1)*ARM.S,0,ARM.S);out[j]=acc;}return out;}
 let G=9.81,RHO=1000,AIR=1.2,SEALED=false;/* gravity, liquid and air density of the body the machine is on; SEALED: closed-cycle power pack, no intake to drown */
+const STOPC=2.5e5;/* strut end-stop cushion damping */
 const PISTON=.0095,PN0=1.55e6,GAMMA=1.3,UNSPRUNG=820;/* hub motor, brake, rim and a fluid-ballasted tyre */
 // accumulator pre-charge and gas volume follow the weight: the struts are charged for the body they stand on
 // (pressure with g, volume with its square root), so a leg's share of the weight sits mid-stroke with a usable
@@ -78,10 +79,10 @@ export class Spider{
   const items=[
    {m:5000,pos:[0,4.2,0],size:[3.0,3.2,10.8],moves:true},// cabin shell, seats, glazing
    {m:2500,pos:[0,6.2,0],size:[2.6,.5,10.4],moves:false},// overhead plates, crossbars, top cover
-   {m:1700,pos:[0,3.8,4.4],size:[1.2,.9,1.1],moves:true},// turbo diesel V8, pumps, reservoir, cooling
+   {m:1250,pos:[0,3.8,4.4],size:[1.2,.9,1.1],moves:true},// compact turbo diesel V8 (aluminium block), pumps, reservoir, cooling
    {m:3000,pos:[0,4.3,0],size:[9.2,2.6,9.4],moves:false},// leg barrels, knee braces, arms, slide gear
    {m:7500,pos:[0,2.95,0],size:[2.4,.5,9.4],moves:true},// keel: battery bank, hydraulic reservoir, ballast tanks and armour under the floor
-   {m:ARM.mass,pos:[0,8.1,0],size:[7.4,1.6,1.6],moves:false},// self-righting arms and their drive housings on the roof
+   {m:ARM.mass,pos:[0,4.6,ARM.z],size:[4.6,3.2,.6],moves:false},// self-righting arms, hung either side of the pod
    {m:this.crewCount*110,pos:[0,3.7,-.8],size:[1.4,1,7],moves:true},
    ...VARIANTS[this.variant].payload];
   if(this.water>0)items.push({m:this.water,pos:[0,7.1,.2],size:[2.2,.9*Math.max(.1,this.water/3500),7.6],moves:false,slosh:true});
@@ -178,9 +179,12 @@ export class Spider{
    let tf=[0,0,0];// tyre force on wheel
    if(pen>0){
     const nt=env.normal(patches[0].pt[0],patches[0].pt[2]);const lh=[-fh[2],0,fh[0]];const lat=dot(nt,lh);
-    const kt=mix(260e3,620e3,(wh.pressure-.8)/1.7),ct=9000;/* the big carcass damps wheel hop */
+    const kt=mix(260e3,620e3,(wh.pressure-.8)/1.7);/* the big carcass damps wheel hop */
     for(const q of patches){q.n=norm(add(q.n,scl(lh,lat*(q===patches[0]?1:0))));const pdot=-dot(vH,q.n);
-     q.Fn=kt*q.pen+ct*pdot+(q.pen>.3?(q.pen-.3)*2.5e6:0);if(q.Fn<0)q.Fn=0;if(q.Fn>8e5)q.Fn=8e5;
+     // struck across the strut (on its side, landing on a wheel's flank) the blow goes straight into the frame,
+     // not through the strut's damper: the crushing sidewall and the sloshing ballast fluid soak it instead
+     const cross_=1-Math.abs(dot(q.n,ax)),ct=9000+9e4*cross_*cross_;
+     q.Fn=kt*q.pen+ct*pdot+(q.pen>.3?Math.max(0,(q.pen-.3)*2.5e6+1.5e5*pdot):0)/* crushed to the rim: steel into dirt */;if(q.Fn<0)q.Fn=0;if(q.Fn>8e5)q.Fn=8e5;
      q.t=norm(sub(fw,scl(q.n,dot(fw,q.n))));q.l=cross(q.n,q.t);Fn+=q.Fn;}
     if(Fn>8e5){const k=8e5/Fn;for(const q of patches)q.Fn*=k;Fn=8e5;}
     // resultant normal and contact point (load weighted) stand for the tyre in the strut and HUD
@@ -238,7 +242,7 @@ export class Spider{
    const tu=dot(tf,ax);
    const f0=mU*aMu-tu+mU*G*ax[1]+Fs;
    const Ks=this.gasStiffness(wh,wh.e)+(wh.e<0||wh.e>GEOM.stroke?9e5:0),Kt=pen>0?mix(260e3,620e3,(wh.pressure-.8)/1.7)*cnU*cnU:0;
-   const Cs=this.strutDamping(wh.ev),Ct=pen>0?9000*cnU*cnU:0;
+   const Cs=this.strutDamping(wh.ev)+(wh.e<0||wh.e>GEOM.stroke?STOPC:0),Ct=pen>0?9000*cnU*cnU:0;
    const Kk=Ks+Kt,Cc=Cs+Ct;
    const evn=(mU*wh.ev+DT*(f0+Cc*wh.ev))/(mU+DT*Cc+DT*DT*Kk);
    wh.ev=evn;wh.e+=DT*evn;if(wh.e<-.08){wh.e=-.08;wh.ev=Math.max(0,wh.ev);}if(wh.e>GEOM.stroke+.08){wh.e=GEOM.stroke+.08;wh.ev=Math.min(0,wh.ev);}
@@ -282,7 +286,7 @@ export class Spider{
  armContacts(R,o,applyAt,up){
   const A=this.arms;if(up[1]>.45&&A[0].ext<.004&&A[1].ext<.004){A[0].load=A[1].load=A[0].touch=A[1].touch=0;this.armScrape=0;return;}
   const off=this._aoff||(this._aoff=[0,0,0,0,0,0]),samp=this._asmp||(this._asmp=[]);let scrape=0;const P=ARM.pad;
-  for(let i=0;i<2;i++){const a=A[i],d=ARM.dir[i],Ra=ARM.R[i];a.load=0;a.touch=0;armOffsets(a.ext,off);
+  for(let i=0;i<2;i++){const a=A[i],d=ARM.dir[i],Ra=ARM.R,cx=ARM.cx[i];a.load=0;a.touch=0;armOffsets(a.ext,off);
    // the segment now sliding (those beyond it ride along); the ones behind it are still
    let m=ARM.n+1;for(let j=1;j<=ARM.n;j++)if(off[j]-off[j-1]<ARM.S-1e-6){m=j;break;}
    // samples: [s, z, radius of the outer surface, moving]
@@ -292,24 +296,28 @@ export class Spider{
    // the fingertip shoe on the last segment: always moving with the extension
    for(const ds of [-P.half,0,P.half])for(const dz of [-P.w*.45,0,P.w*.45])samp.push(a.ext+ds,ARM.z+dz,P.rout,1);
    for(let q=0;q<samp.length;q+=4){const s=samp[q],th=ARM.tip[i]+d*s,c=Math.cos(th),sn=Math.sin(th),rad=samp[q+2];
-    const pb=[Ra*c,ARM.cy+Ra*sn,samp[q+1]],pw=add(o,mv(R,pb));
+    const pb=[cx+Ra*c,ARM.cy+Ra*sn,samp[q+1]],pw=add(o,mv(R,pb));
     // the point of the surface nearest the ground: out along the radius where it faces down, else straight down
     const rw=mv(R,[c,sn,0]),f0=Math.max(0,-rw[1]);const cp=add(pw,scl(rw,rad*f0));cp[1]-=rad*(1-f0);
     const g=this.env.ground(cp[0],cp[2],cp[1]);const dpen=g-cp[1];if(dpen<=0)continue;
     const n=this.env.normal(cp[0],cp[2]);
     const tw=mv(R,[-sn*d,c*d,0]),vs=samp[q+3]?a.rate*Ra:0;
     const v=add(this.pointVel(cp),scl(tw,vs)),vn=dot(v,n);
-    let Fn=1.1e6*dpen-6e4*vn;if(Fn<=0)continue;Fn=Math.min(Fn,2.5e6);
+    let Fn=1.1e6*dpen-1.6e5*vn;if(Fn<=0)continue;/* steel into dirt: heavily damped, next to no rebound */Fn=Math.min(Fn,2.5e6);
     const vt=sub(v,scl(n,vn)),vtl=len(vt);let f=scl(n,Fn);
     if(vtl>1e-4){const fr=Math.min(ARM.mu*Fn,vtl*1.5e5);f=sub(f,scl(vt,fr/vtl));if(vs!==0)scrape=Math.max(scrape,Math.min(1,vtl*.6+Fn/4e5));}
     applyAt(f,cp);a.touch++;if(vs!==0)a.load+=Math.abs(dot(f,tw));
-}}
+   }
+   // relief valve: a finger loaded along its path past what the drive holds is pushed back into its sleeve
+   if(a.load>ARM.F*1.15&&a.ext>0){a.ext=Math.max(0,a.ext-(a.load-ARM.F*1.15)/(4e6*Ra));if(a.rate>0)a.rate=0;}
+  }
   this.armScrape=scrape;
  }
  strutForce(wh,e,ev){
   let F=this.gasForce(wh,e);
-  if(e<0)F+=9e5*(-e)+3e4*Math.max(0,-ev);
-  if(e>GEOM.stroke)F-=9e5*(e-GEOM.stroke)+3e4*Math.max(0,ev);
+  // end stops are hydraulic cushions: stiff, and they take the energy rather than handing it back
+  if(e<0)F+=Math.max(0,9e5*(-e)-STOPC*ev);
+  if(e>GEOM.stroke)F-=Math.max(0,9e5*(e-GEOM.stroke)+STOPC*ev);
   F-=this.dampC1*ev+this.dampC2*ev*Math.abs(ev);
   return F;
  }
@@ -328,7 +336,7 @@ export class Spider{
   for(const pb of this.hullPoints()){
    const pw=add(o,mv(R,pb)),g=this.env.ground(pw[0],pw[2],pw[1]);if(pw[1]>=g)continue;
    const d=g-pw[1],n=this.env.normal(pw[0],pw[2]),v=this.pointVel(pw),vn=dot(v,n);
-   let Fn=4.5e5*d-3.5e4*vn;if(Fn<0)continue;Fn=Math.min(Fn,this.mass*(Math.max(0,-vn)+Math.min(d,.3)*3)/DT/8,1.2e6);
+   let Fn=4.5e5*d-1.3e5*vn;if(Fn<0)continue;/* a 20 t frame ploughing into dirt: the ground gives, it does not spring back */Fn=Math.min(Fn,this.mass*(Math.max(0,-vn)+Math.min(d,.3)*3)/DT/8,1.2e6);
    const vt=sub(v,scl(n,vn)),vtl=len(vt);let f=scl(n,Fn);
    if(vtl>1e-3){const fr=Math.min(.55*Fn,vtl*6e4);f=sub(f,scl(vt,fr/vtl));}
    applyAt(f,pw);hit=Math.max(hit,Math.abs(vn));
@@ -464,16 +472,16 @@ export class Spider{
     const abort=m=>{for(const w of this.wheels)if(!w.disabled)w.lifted=false;this.trackSeq=null;this._trackReq=Q.tgt;c.track=Q.tgt;this.say(m+'. G walks the legs back',3.5);};
     if(Q.t>10&&Q.phase!=='settle')abort('Track change stalled: legs set down');
     else if(speed>2||this.overturned)abort('Track change interrupted');
-    else if(Q.phase==='raise'){Q.carriage=0;let m=0,n=0;for(const w of this.wheels)if(!w.lifted){m+=w.e;n++;}if(m/n>GEOM.stroke-.75||Q.t>6){Q.phase='shift';Q.t=0;Q.holdE=this.wheels.map(w=>w.e);}}
+    else if(Q.phase==='raise'){Q.carriage=0;let m=0,n=0;for(const w of this.wheels)if(!w.lifted){m+=w.e;n++;}if(m/n>GEOM.stroke-.75||Q.t>6){Q.phase='shift';Q.t=0;Q.holdE=this.wheels.map(w=>w.e);Q.att=[this.roll||0,this.pitch||0];}}
     else if(Q.phase==='settle'){Q.carriage=undefined;if(Q.t>1.5){this.trackSeq=null;this.say(Q.tgt?'Track wide':'Track narrow: road width',2);}}
     else{const U=Q.order[Q.k],W=U.map(i=>this.wheels[i]),p=U[0]>>1;Q.carriage=U.length===1?-1.2:p===0?GEOM.carriageMax:0;
      if(Q.phase==='shift'){if(Math.abs(this.carriage-Q.carriage)<.08||Q.t>9){const rx=[],rz=[];for(let i=0;i<6;i++){const q=this.wheels[i].contact?this.wheels[i].cp:this.wheels[i].hub,rr=sub(q,this.pos);rx.push(dot(rr,[-hf[2],0,hf[0]]));rz.push(dot(rr,hf));}
        const idx=[];for(let i=0;i<6;i++)if(!U.includes(i)&&!this.wheels[i].disabled)idx.push(i);
-       if(supportMargin(rx,rz,idx)<.3)abort('Cannot lift those legs here: find level ground');else{Q.phase='lift';Q.t=0;for(const w of W)w.lifted=true;}}}
-     else if((Q.phase==='lift'||Q.phase==='slide')&&(Math.abs(this.pitch||0)>8||Math.abs(this.roll||0)>8))abort('Body tilting: legs set down, track change stopped');
+       if(supportMargin(rx,rz,idx)<.3||W.some(w=>w.e<1.1))abort('Cannot lift those legs here: find level ground');/* a leg already near its top cannot draw its tyre clear */else{Q.phase='lift';Q.t=0;for(const w of W)w.lifted=true;}}}
+     else if((Q.phase==='lift'||Q.phase==='slide')&&(Math.abs((this.pitch||0)-(Q.att?.[1]??0))>7||Math.abs((this.roll||0)-(Q.att?.[0]??0))>7))/* tilting away from the stance it was raised to (on a side slope that stance is already tilted) */abort('Body tilting: legs set down, track change stopped');
      else if(Q.phase==='lift'){let clear=true;for(const w of W){const needHub=this.env.ground(w.hub[0],w.hub[2],1e9)+GEOM.R+.35;w.liftE=clamp(w.eset-(needHub-w.hub[1]),-.3,GEOM.stroke);if(w.contact||w.hub[1]<needHub-.15)clear=false;}
       if(clear&&Q.t>.4){Q.phase='slide';Q.t=0;}else if(Q.t>5)abort('Could not lift the legs clear');}
-     else if(Q.phase==='slide'){let done=true;for(const i of U){this.wheelTrack[i]+=clamp(Q.tgt-this.wheelTrack[i],-dt*.9,dt*.9);if(Math.abs(this.wheelTrack[i]-Q.tgt)>1e-3)done=false;else this.wheelTrack[i]=Q.tgt;}this._hp=null;if(done){Q.phase='lower';Q.t=0;for(const w of W)w.lifted=false;}}
+     else if(Q.phase==='slide'){let done=true;for(const w of W){const needHub=this.env.ground(w.hub[0],w.hub[2],1e9)+GEOM.R+.35;w.liftE=Math.min(w.liftE??GEOM.stroke,clamp(w.eset-(needHub-w.hub[1]),-.3,GEOM.stroke));}/* keep the tyre clear of ground rising under it as it slides */for(const i of U){this.wheelTrack[i]+=clamp(Q.tgt-this.wheelTrack[i],-dt*.9,dt*.9);if(Math.abs(this.wheelTrack[i]-Q.tgt)>1e-3)done=false;else this.wheelTrack[i]=Q.tgt;}this._hp=null;if(done){Q.phase='lower';Q.t=0;for(const w of W)w.lifted=false;}}
      else if(Q.phase==='lower'){const Fn=this.totalMass*G/6;if(W.every(w=>w.load>.35*Fn)||Q.t>3){Q.k++;Q.t=0;Q.phase=Q.k>=Q.order.length?'settle':'shift';}}}}
    this.trackFrac=this.wheelTrack.reduce((a,b)=>a+b,0)/6;}
   // speed-sensitive lock from what the machine can actually take: the lesser of the tyres' grip and the
@@ -483,8 +491,7 @@ export class Spider{
   const muAvg=this.wheels.reduce((a,w)=>a+(w.surface?.mu||.6),0)/6*1.2;
   const aMax=Math.max(2.2*Math.min(1,G/9.81),Math.min(muAvg*G*.8,G*htm*.8/cmH));this.aLatMax=aMax;/* the floor shrinks with gravity: a sixth of the weight is a sixth of the grip */
   const lock=Math.min(GEOM.maxLock*(.5+.5*trF),Math.max(1.5*Math.PI/180,Math.atan(GEOM.wheelbase*aMax/Math.max(1e-3,speed*speed))));
-  // a roof roll: the pairs swing to full lock so the low-side middle tyre is clear of the arm's plane when it comes round
-  const dTarget=this.sr?.roof&&this.sr.phase!=='stow'?-GEOM.maxLock*(.5+.5*trF):clamp(c.steer,-1,1)*lock;
+  const dTarget=clamp(c.steer,-1,1)*lock;
   {const sr=75*Math.PI/180*dt;this.steer[0]+=clamp(dTarget-this.steer[0],-sr,sr);}/* fast electro-hydraulic plate steering */
   this.steer[1]=Math.atan(Math.tan(this.steer[0])/2);this.steer[2]=0;
   // ---- longitudinal command (hydrostatic: release = controlled stop)
@@ -567,7 +574,7 @@ export class Spider{
   if(c.assist&&this.tipMargin<2.6&&!this.climbState){sReq=clamp(sReq+(2.6-this.tipMargin)*.6,0,1);if(this.tipMargin<.9&&this.t-(this._tipMsg||0)>4){this._tipMsg=this.t;this.say('Rollover risk: lowering the cabin',2.5);}}
   const eNom=GEOM.stroke*(1-sReq);
   // body attitude target: level fraction f by bisection so every leg stays within stroke
-  const margin=this.climbState||sReq<.04?.06:.16,lo=margin,hi=GEOM.stroke-margin;
+  const margin=this.climbState||sReq<.04?.06:.16,lo=margin,hi=GEOM.stroke-(this.trackSeq&&this.trackSeq.phase!=='raise'&&this.trackSeq.order[this.trackSeq.k]?.length===1?.35:margin);/* walking a rear leg on its own: the five planted legs keep some stroke in hand to take its load (on a side slope the downhill ones would otherwise be at full stretch) */
   const tanOf=v=>v/Math.sqrt(Math.max(1e-6,1-v*v));
   const aB=tanOf(right[1]),bB=tanOf(fwd[1]),upY=Math.max(.3,up[1]);
   const eTouch=wheels.map((wh,i)=>wh.e+(wh.hub[1]-(gH[i]+GEOM.R-.035))/(Math.max(.3,wh.axis?wh.axis[1]:upY)));this.eTouch=eTouch;
@@ -604,7 +611,7 @@ export class Spider{
    this.eTs[i]=v;return v;});
   // during a track change the planted legs hold the raised stance exactly (load-compensated), leveller paused
   if(this.engine.off)for(let i=0;i<6;i++){eT[i]=wheels[i].e;this.eTs[i]=wheels[i].e;}/* engine off: the levelling waits, and restarts from where the legs stand */
-  const TQ=this.trackSeq;if(TQ&&TQ.holdE)for(let i=0;i<6;i++)if(!wheels[i].lifted){eT[i]=TQ.holdE[i];this.eTs[i]=TQ.holdE[i];}
+  const TQ=this.trackSeq;if(TQ&&TQ.holdE)for(let i=0;i<6;i++)if(!wheels[i].lifted){if(TQ.phase==='lower'&&TQ.order[TQ.k]?.includes(i))TQ.holdE[i]=Math.max(TQ.holdE[i],Math.min(GEOM.stroke-.1,eTouch[i]+.1));/* set down on a slope, the moved leg reaches for ground lower than where it stood, and holds there */eT[i]=TQ.holdE[i];this.eTs[i]=TQ.holdE[i];}
   // ---- load allocation: minimum-variance loads satisfying force and moment balance about the CoM
   const W=this.totalMass*G*Math.max(.3,1+dot(this.acc,[0,1,0])/G*.0);
   const comH=[0,0];// CoM horizontal is at 0 in hr/hf coords relative to pos
@@ -627,7 +634,7 @@ export class Spider{
   const cm=wheels.map((w,i)=>active[i]&&w.contact);let he=0,hn=0;for(let i=0;i<6;i++)if(cm[i]){he+=eT[i]-wheels[i].e;hn++;}
   const nearStop=wheels.some((w,i)=>cm[i]&&(w.e>GEOM.stroke-.1||w.e<.08));
   if(hn&&!this.engine.off&&!(nearStop&&Math.sign(he)===Math.sign(this.integ[0]||he)))this.integ[0]=clamp(this.integ[0]+he/hn*dt*1.2,-.25,.25);
-  let pumpDemand=0;const newSet=[];
+  let pumpDemand=0;const newSet=[];const tipped=up[1]<.5&&!this.sr;
   for(let i=0;i<6;i++){
    const wh=wheels[i];let target;
    if(wh.disabled){target=-.1;}
@@ -654,7 +661,7 @@ export class Spider{
   let ext=0;for(let i=0;i<6;i++){const d=newSet[i]-wheels[i].eset;if(d>0)ext+=d;}
   const cap=Qmax*dt/PISTON;const s=ext>cap?cap/ext:1;
   for(let i=0;i<6;i++){const wh=wheels[i],d=newSet[i]-wh.eset;wh.liftT=wh.lifted?(wh.liftT||0)+dt:0;const unload=wh.liftT>0&&wh.liftT<3&&wh.load>.12*this.totalMass*G/6;// hand the load over gently, then snatch the tyre up
-   let dd=d>0?Math.min(d*s,1.0*dt):Math.max(d,-(unload?.22:1.2)*dt);if(E.off)dd=0;/* no pump: the valves close and the accumulators hold the stance */wh.eset+=dd;if(d>0&&!E.off)pumpDemand+=dd*PISTON/dt;wh.valve=Math.sign(dd);}
+   let dd=d>0?Math.min(d*s,1.0*dt):Math.max(d,-(unload?.22:1.2)*dt);if(E.off||tipped)dd=0;/* no pump: the valves close and the accumulators hold the stance; over on its side the levelling has nothing to level and would only lever the machine about */wh.eset+=dd;if(d>0&&!E.off)pumpDemand+=dd*PISTON/dt;wh.valve=Math.sign(dd);}
   // levelling corrections chatter up and down; the accumulators absorb that, so the pump (and the engine)
   // only see the smoothed flow, and small trims are carried by the accumulators alone
   pumpDemand+=(Math.abs(this.arms[0].rate)+Math.abs(this.arms[1].rate))*.03;/* the arm drives run off the same pump */
@@ -696,13 +703,13 @@ export class Spider{
   const R=qmat(this.q),up=[R[1],R[4],R[7]],right=[R[0],R[3],R[6]],tilt=Math.acos(clamp(up[1],-1,1));
   this.cancelTrack(true);this.climbState=null;for(const w of this.wheels)if(!w.disabled)w.lifted=false;this.ctl.lift=[false,false,false];
   if(tilt<35*D2R&&!this.overturned){if(this.speed()>1.5){this.say('Stop to run the arm test',2);return;}this.sr={mode:'test',phase:'out',t:0};this.say('Self-righting arms: test cycle',2.5);this.events.push({type:'arm',k:'start'});return;}
-  this.sr=this.planRight(right,1);this.say(this.sr.roof?'Self-righting: rolling her over on the right arm':`Self-righting: ${this.sr.arm===0?'right':'left'} arm reaching over`,3);this.events.push({type:'arm',k:'start'});
+  this.sr=this.planRight(right,1);this.say(`Self-righting: ${this.sr.arm===0?'right':'left'} arm ${this.sr.roof?'rolling her over':'reaching over'}`,3);this.events.push({type:'arm',k:'start'});
  }
- // On a side the arm on the high side levers (right side up: lying on its left, so the right arm, which curls over to
- // the left). On the roof only the outer, right arm can carry the machine, rolling it over its left side.
+ // Either way the arm on the high side works (right side up: the right arm, which curls over to the left).
  planRight(right,tries){const up=qmat(this.q)[4],tilt=Math.acos(clamp(up,-1,1));
-  // on the roof (more than 125 deg over) the right arm rolls it over its left side; on a side, the arm on the high side levers
-  const roof=tilt>125*D2R,arm=roof?0:right[1]>=0?0:1;
+  // on a side the arm on the high side levers; on the roof (more than 125 deg over) the arm on the high side rolls it
+  // over the low side (the downhill way); on the level, the right arm
+  const roof=tilt>125*D2R,arm=right[1]>=0?0:1;
   return {mode:'right',phase:'wait',arm,roof,t:0,stuck:0,tries};}
  selfRight(dt,up,right){
   const S=this.sr,A=this.arms,E=this.engine;
@@ -710,7 +717,7 @@ export class Spider{
   for(const a of A){const st=stage(a);if(a._st!==undefined&&st!==a._st)this.events.push({type:'arm',k:'clunk'});a._st=st;}
   if(!S){for(const a of A)a.rate=a.ext>0?-ARM.ret:0;return;}
   S.t+=dt;const tilt=Math.acos(clamp(up[1],-1,1)),power=(E.off||E.stalled?0:1)*Math.min(1,Math.sqrt(G/9.81)*1.15);/* low gravity: a slower arm, or the shoe slips on what little weight it carries */
-  if(S.mode==='test'){const T=40*D2R;
+  if(S.mode==='test'){const T=25*D2R;/* the two paths cross over the roof further out */
    if(S.phase==='out'){for(const a of A)a.rate=a.ext<T?ARM.out*power:0;if(A.every(a=>a.ext>=T)){S.phase='hold';S.th=S.t;}}
    else if(S.phase==='hold'){for(const a of A)a.rate=0;if(S.t-S.th>1.4)S.phase='stow';}
    if(S.phase==='stow'){for(const a of A)a.rate=a.ext>0?-ARM.ret*.6*power:0;if(A.every(a=>a.ext<=0)){this.sr=null;this.events.push({type:'arm',k:'stow'});if(!S.abort)this.say('Arms stowed',1.5);}}
@@ -719,9 +726,9 @@ export class Spider{
   // on the roof the carriage brings the centre of mass over the arms' station, so the machine stands level on the broad
   // fingertip shoe instead of dropping onto one end of its roof (and then yawing round that end rather than rolling)
   if(S.roof){const mm=this.items.filter(it=>it.moves).reduce((s,it)=>s+it.m,0);S.carriage=clamp(this.carriage+(ARM.z-this.com[2])*this.mass/mm,-GEOM.carriageMax,GEOM.carriageMax);}
-  // legs: retracted for a lever off a side (the pivot is then high), full out for a roll off the roof (the low-side tyres catch)
-  // (only when it is really down on its side: part-way over it is still standing on those legs)
-  if(!S.ok&&(S.roof||tilt>75*D2R)){const tgt=S.roof?GEOM.stroke-.12:.1;S.le=S.le??(this.wheels.reduce((s,w)=>s+w.eset,0)/6);S.le+=clamp(tgt-S.le,-1.2*dt,1.2*dt);for(const w of this.wheels)if(!w.disabled)w.eset=S.roof?Math.max(w.eset,S.le):Math.min(w.eset,S.le);}
+  // legs retracted: the machine comes down over its low-side tyres, and a short leg puts that pivot high, nearer the
+  // centre of mass (only when it is really down: part-way over it is still standing on those legs)
+  if(!S.ok&&tilt>75*D2R){S.le=S.le??(this.wheels.reduce((s,w)=>s+w.eset,0)/6);S.le+=clamp(.1-S.le,-1.2*dt,1.2*dt);for(const w of this.wheels)if(!w.disabled)w.eset=Math.min(w.eset,S.le);}
   // still rolling or rocking from the fall: let it come to rest first, then choose the arm for how it lies
   if(S.phase==='wait'){a.rate=0;const wl=len(this.w);S.calm=wl<.12?(S.calm||0)+dt:0;if((S.calm>.6&&(!S.roof||Math.abs(this.com[2]-ARM.z)<.1))||S.t>12){const p=this.planRight(right,S.tries);S.arm=p.arm;S.roof=p.roof;S.phase='out';S.t0=S.t;}else if(this.messageT<=0)this.say('Self-righting: waiting for her to settle',1);}
   if(S.phase==='out'){

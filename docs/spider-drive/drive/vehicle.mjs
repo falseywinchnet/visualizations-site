@@ -385,48 +385,55 @@ float n3(vec3 x){vec3 i=floor(x),f=fract(x);f=f*f*(3.0-2.0*f);return mix(mix(mix
   this.updateArms(sp);
  }
  // ------------------------------------------------------------ self-righting arms
- // Two curved telescoping fingers on one circle station behind the middle legs (physics ARM). Each is a painted sleeve
- // rooted on a roof shoulder, five polished segments that slide out of it in turn (each a group rotating about the
- // circle's axis), collars at the segment ends, and a broad ribbed rubber shoe on the last segment. The right finger
- // rides the outer circle; its sleeve stands on a yoke that bridges the left finger's path.
+ // Two curved telescoping fingers at one station behind the middle legs (physics ARM), each hung from the top frame
+ // down one side of the pod and riding a circle centred off on the far side. Each is a painted sleeve with its gearbox
+ // at the top mouth, five polished segments that slide out of it in turn (each a group rotating about its circle's
+ // axis), collars at the segment ends, and a broad ribbed rubber shoe on the last. The sleeve hangs on a bracket from
+ // the top side rail and a twin drop link down its inner side, clear of the pod, which slides past on its carriage.
  buildArms(){
-  const M=this.mats,g0=this.armsGroup=new T.Group();g0.name='Self-righting arms';g0.position.set(0,ARM.cy,ARM.z);this.root.add(g0);
+  const M=this.mats;this.arms=[];
   const steel=new T.MeshStandardMaterial({color:0xc9cfd1,roughness:.18,metalness:.95}),rubber=new T.MeshStandardMaterial({color:0x1d1e1c,roughness:.92}),warn=new T.MeshStandardMaterial({color:0xe0b028,roughness:.5,metalness:.2});
   const arc=(R,a0,a1,r,mat,parent,radial=20)=>{const n=Math.max(8,Math.ceil(Math.abs(a1-a0)/(2*Math.PI/180)));const pts=[];for(let k=0;k<=n;k++){const a=a0+(a1-a0)*k/n;pts.push(new T.Vector3(R*Math.cos(a),R*Math.sin(a),0));}
    const m=new T.Mesh(new T.TubeGeometry(new T.CatmullRomCurve3(pts),n*2,r,radial,false),mat);m.castShadow=true;m.receiveShadow=true;parent.add(m);return m;};
-  const ring=(R,a,r,tube,mat,parent)=>{const m=new T.Mesh(new T.TorusGeometry(r,tube,8,24),mat);m.position.set(R*Math.cos(a),R*Math.sin(a),0);m.rotation.set(Math.PI/2,0,0);m.rotateOnWorldAxis?0:0;
-   // the ring's plane is normal to the tangent of the circle at a
-   m.quaternion.setFromUnitVectors(new T.Vector3(0,0,1),new T.Vector3(-Math.sin(a),Math.cos(a),0));m.castShadow=true;parent.add(m);return m;};
+  // a ring whose plane is normal to the circle's tangent at a
+  const ring=(R,a,r,tube,mat,parent)=>{const m=new T.Mesh(new T.TorusGeometry(r,tube,8,24),mat);m.position.set(R*Math.cos(a),R*Math.sin(a),0);m.quaternion.setFromUnitVectors(new T.Vector3(0,0,1),new T.Vector3(-Math.sin(a),Math.cos(a),0));m.castShadow=true;parent.add(m);return m;};
   const sector=(Ri,Ro,a0,a1,z0,z1,mat,parent)=>{const sh=new T.Shape();const n=10;for(let k=0;k<=n;k++){const a=a0+(a1-a0)*k/n;const p=[Ro*Math.cos(a),Ro*Math.sin(a)];k?sh.lineTo(...p):sh.moveTo(...p);}for(let k=n;k>=0;k--){const a=a0+(a1-a0)*k/n;sh.lineTo(Ri*Math.cos(a),Ri*Math.sin(a));}
    const g=new T.ExtrudeGeometry(sh,{depth:z1-z0,bevelEnabled:true,bevelThickness:.02,bevelSize:.02,bevelSegments:1,curveSegments:4});g.translate(0,0,z0);const m=new T.Mesh(g,mat);m.castShadow=true;m.receiveShadow=true;parent.add(m);return m;};
-  this.arms=[];
-  for(let i=0;i<2;i++){const R=ARM.R[i],d=ARM.dir[i],tip=ARM.tip[i],A={segs:[],R,d};
-   // sleeve, painted in the livery, with a gearbox at its mouth and hydraulic lines along its back
+  const R=ARM.R,Z=ARM.z;
+  for(let i=0;i<2;i++){const d=ARM.dir[i],tip=ARM.tip[i],cx=ARM.cx[i],side=-Math.sign(cx),A={segs:[],d};
+   const g0=new T.Group();g0.name=(side>0?'Right':'Left')+' self-righting arm';g0.position.set(cx,ARM.cy,Z);this.root.add(g0);
+   const P=a=>[cx+R*Math.cos(a),ARM.cy+R*Math.sin(a),Z];// a point on the arm's circle, machine frame
+   // sleeve, painted in the livery, with hydraulic lines down its outer back and collars at both ends
    const s0=tip-d*ARM.sleeve;arc(R,s0,tip,ARM.rTube[0],M.paint,g0);
    arc(R+ARM.rTube[0]+.02,s0+d*.06,tip-d*.08,.035,M.hose,g0,8);
-   {const box=new T.Mesh(new T.BoxGeometry(.62,.5,.62),M.frame);box.position.set((R)*Math.cos(tip-d*.04),(R)*Math.sin(tip-d*.04),0);box.rotation.z=tip-d*.04;box.castShadow=true;g0.add(box);
-    const pin=new T.Mesh(new T.CylinderGeometry(.14,.14,.7,14),M.dark);pin.rotation.x=Math.PI/2;pin.position.copy(box.position).multiplyScalar(1-.34/R);g0.add(pin);
-    ring(R,tip,ARM.rTube[0]+.03,.04,M.dark,g0);ring(R,s0,ARM.rTube[0]+.02,.035,M.dark,g0);}
+   ring(R,tip,ARM.rTube[0]+.03,.04,M.dark,g0);ring(R,s0,ARM.rTube[0]+.025,.04,M.dark,g0);ring(R,(s0+tip)/2,ARM.rTube[0]+.02,.03,M.dark,g0);
+   // drive gearbox at the mouth: a housing and its pinion shaft across the sleeve
+   {const a=tip-d*.05,box=new T.Mesh(new T.BoxGeometry(.6,.48,.62),M.frame);box.position.set(R*Math.cos(a),R*Math.sin(a),0);box.rotation.z=a;box.castShadow=true;g0.add(box);
+    const pin=new T.Mesh(new T.CylinderGeometry(.13,.13,.74,14),M.dark);pin.rotation.x=Math.PI/2;pin.position.copy(box.position).multiplyScalar(1-.3/R);g0.add(pin);
+    const cap=new T.Mesh(new T.CylinderGeometry(.18,.18,.12,16),M.engine||M.frame);cap.rotation.x=Math.PI/2;cap.position.copy(pin.position);cap.position.z=.4;g0.add(cap);}
    // segments: each its own group pivoting on the circle's axis, built stowed (ending at the sleeve's mouth)
    for(let k=1;k<=ARM.n;k++){const sg=new T.Group();g0.add(sg);const r=ARM.rTube[k];
     arc(R,tip-d*ARM.L,tip,r,steel,sg,16);ring(R,tip-d*.005,r+.022,.03,M.dark,sg);
-    // a yellow-black band at each segment's end so the stages read as they come out
+    // a yellow band at each segment's end so the stages read as they come out
     const band=new T.Mesh(new T.CylinderGeometry(r+.006,r+.006,.12,16,1,true),warn);band.position.set(R*Math.cos(tip-d*.04),R*Math.sin(tip-d*.04),0);band.quaternion.setFromUnitVectors(new T.Vector3(0,1,0),new T.Vector3(-Math.sin(tip),Math.cos(tip),0));sg.add(band);
     A.segs.push(sg);}
-   // the fingertip shoe on the last segment: a steel backing plate and a ribbed rubber tread, wide across the machine
-   {const sg=A.segs[ARM.n-1],P=ARM.pad,a0=tip-P.half,a1=tip+P.half,w=P.w;
-    sector(R+P.rin,R+P.rin+.08,a0-.004,a1+.004,-w/2,w/2,steel,sg);
-    const ribs=7;for(let q=0;q<ribs;q++){const z0=-w/2+q*w/ribs+.04,z1=z0+w/ribs-.08;sector(R+P.rin+.08,R+P.rout,a0,a1,z0,z1,rubber,sg);}
-    // gussets from the tube to the plate
-    for(const z of [-w*.3,0,w*.3]){const gs=new T.Mesh(new T.BoxGeometry(.05,P.rin+.02,.5),steel);const a=tip;gs.position.set((R+P.rin/2)*Math.cos(a),(R+P.rin/2)*Math.sin(a),z);gs.rotation.z=a-Math.PI/2;sg.add(gs);}}
+   // the fingertip shoe on the last segment: a steel backing plate and a ribbed rubber tread, wide along the machine
+   {const sg=A.segs[ARM.n-1],Pd=ARM.pad,a0=tip-Pd.half,a1=tip+Pd.half,w=Pd.w;
+    sector(R+Pd.rin,R+Pd.rin+.08,a0-.004,a1+.004,-w/2,w/2,steel,sg);
+    const ribs=6;for(let q=0;q<ribs;q++){const z0=-w/2+q*w/ribs+.04,z1=z0+w/ribs-.08;sector(R+Pd.rin+.08,R+Pd.rout,a0,a1,z0,z1,rubber,sg);}
+    for(const z of [-w*.3,0,w*.3]){const gs=new T.Mesh(new T.BoxGeometry(.05,Pd.rin+.02,.42),steel);gs.position.set((R+Pd.rin/2)*Math.cos(tip),(R+Pd.rin/2)*Math.sin(tip),z);gs.rotation.z=tip-Math.PI/2;sg.add(gs);}}
+   // mounts, all inside the finger's circle and outboard of the pod: a short bracket from the top side rail to the
+   // gearbox, and a twin drop link from the rail down the sleeve's inner side to its foot, braced at mid-height
+   {const rail=[side*1.35,GEOM.topPlate-.12],top=P(tip-d*.1),foot=P(s0+d*.03),mid=P((s0+tip)/2);
+    const inward=(p,k)=>{const dx=cx-p[0],dy=ARM.cy-p[1],l=Math.hypot(dx,dy);return [p[0]+dx/l*k,p[1]+dy/l*k];};
+    const tIn=inward(top,.3),fIn=inward(foot,.26),mIn=inward(mid,.26);
+    for(const dz of [-.3,.3]){this.rod([rail[0],rail[1],Z+dz],[tIn[0],tIn[1],Z+dz*.6],.08,M.frame);
+     this.rod([rail[0],rail[1]-.05,Z+dz],[fIn[0],fIn[1],Z+dz],.065,M.frame);
+     this.mesh(new T.SphereGeometry(.1,10,8),M.dark,[rail[0],rail[1],Z+dz]);
+     this.rod([fIn[0],fIn[1],Z+dz],[foot[0],foot[1],Z+dz*.5],.06,M.frame);this.rod([mIn[0],mIn[1],Z+dz],[mid[0],mid[1],Z+dz*.5],.05,M.frame);}
+    this.rod([fIn[0],fIn[1],Z-.3],[fIn[0],fIn[1],Z+.3],.05,M.frame);this.rod([tIn[0],tIn[1],Z-.18],[tIn[0],tIn[1],Z+.18],.06,M.frame);
+    this.box([.26,.16,.9],[rail[0],rail[1]+.02,Z],M.frame);}
    this.arms.push(A);}
-  // mounts. Left (inner) sleeve: two struts straight down to the left roof edge, inside every path that sweeps past.
-  {const R=ARM.R[1];for(const a of [105,122].map(v=>v*Math.PI/180)){const p=[R*Math.cos(a),R*Math.sin(a)-.15,0];this.rod([p[0],p[1]+ARM.cy,ARM.z],[-1.25,GEOM.topPlate+.08,ARM.z+(a>1.95?.35:-.35)],.09,M.frame);}}
-  // Right (outer) sleeve: a yoke whose cross-beams sit at the sleeve's radius, bridging over the left finger and its
-  // shoe, with legs down to the right roof edge either side of that path.
-  {const R=ARM.R[0],zs=[ARM.z-ARM.pad.w/2-.32,ARM.z+ARM.pad.w/2+.32];for(const a of [58,74].map(v=>v*Math.PI/180)){const x=R*Math.cos(a),y=R*Math.sin(a)+ARM.cy;
-    this.rod([x,y,zs[0]],[x,y,zs[1]],.07,M.frame);for(const z of zs){this.rod([x,y,z],[1.25,GEOM.topPlate+.08,z],.08,M.frame);this.mesh(new T.SphereGeometry(.11,10,8),M.dark,[x,y,z]);}
-    this.box([.34,.34,.34],[x,y,ARM.z],M.frame).rotation.z=a;}}
  }
  updateArms(sp){
   if(!this.arms||!sp.arms)return;const off=this._aoff||(this._aoff=[0,0,0,0,0,0]);
