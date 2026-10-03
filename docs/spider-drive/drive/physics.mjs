@@ -24,11 +24,12 @@ export function armOffsets(E,out=[0,0,0,0,0,0]){let acc=0;out[0]=0;for(let j=1;j
 let G=9.81,RHO=1000,AIR=1.2,SEALED=false;/* gravity, liquid and air density of the body the machine is on; SEALED: closed-cycle power pack, no intake to drown */
 const STOPC=2.5e5;/* strut end-stop cushion damping */
 const PISTON=.0095,PN0=1.55e6,GAMMA=1.3,UNSPRUNG=820;/* hub motor, brake, rim and a fluid-ballasted tyre */
-// accumulator pre-charge and gas volume follow the weight: the struts are charged for the body they stand on
-// (pressure with g, volume with its square root), so a leg's share of the weight sits mid-stroke with a usable
-// spring rate instead of riding the oil lock at full extension
-let PN=PN0,VSC=1,DSC=1;
-export function setBody(b){G=b.g;RHO=b.liquid?b.liquid.rho:1000;AIR=b.air;SEALED=b.id!=='earth';const r=G/9.81;PN=PN0*r;VSC=Math.sqrt(r);DSC=Math.pow(r,.25);}
+// charged for the body it stands on: accumulator pre-charge with g (a leg's share of the weight still sits mid-stroke),
+// the same gas volume, damper bleed with its square root (the tyres keep the pressures the driver sets). The machine is then the
+// same machine in proportion to its weight: its ride and its hops scale as the ground's do (speed with the square
+// root of g), and a bump in low gravity does not hand back more than that gravity can hold down.
+let PN=PN0,VSC=1,DSC=1,TSC=1;
+export function setBody(b){G=b.g;RHO=b.liquid?b.liquid.rho:1000;AIR=b.air;SEALED=b.id!=='earth';const r=G/9.81;PN=PN0*r;VSC=1;DSC=Math.sqrt(r);TSC=1;}
 export const bodyG=()=>G;
 const clamp=(v,a,b)=>v<a?a:v>b?b:v,mix=(a,b,t)=>a+(b-a)*t;
 // ---- small vector helpers (arrays)
@@ -70,7 +71,7 @@ export class Spider{
   this.hull=100;this.damage=[];this.events=[];this.cabinAcc=[0,0,0];this.jerk=0;this.comfort=1;
   this.climbState=null;this.message='Ready';this.messageT=0;this.overturned=false;this.flooded=0;this.brush=0;this.breaks=0;
   this.distance=0;this.maxTilt=0;this.impacts=0;this.integ=[0,0,0];
-  this.suspMode='soft';this.Vn=.006*VSC;this.dampC1=5200*DSC;this.dampC2=2600*DSC;this.kGas=GAMMA*PN*PISTON*PISTON/this.Vn;
+  this.suspMode='soft';this.Vn=.006*VSC;this.dampC1=5200*DSC;this.dampC2=2600;this.kGas=GAMMA*PN*PISTON*PISTON/this.Vn;
   this.recomputeMass();
   this.place(opts.x??0,opts.z??0,opts.yaw??0);
  }
@@ -93,6 +94,11 @@ export class Spider{
    I[0]+=m*(sy*sy+sz*sz)/12+m*(r[1]*r[1]+r[2]*r[2]);I[4]+=m*(sx*sx+sz*sz)/12+m*(r[0]*r[0]+r[2]*r[2]);I[8]+=m*(sx*sx+sy*sy)/12+m*(r[0]*r[0]+r[1]*r[1]);
    I[1]-=m*r[0]*r[1];I[3]-=m*r[0]*r[1];I[2]-=m*r[0]*r[2];I[6]-=m*r[0]*r[2];I[5]-=m*r[1]*r[2];I[7]-=m*r[1]*r[2];}
   const unsprung=6*UNSPRUNG;
+  // the wheel assemblies slide only along their struts: across them (body x and z) they move with the frame, so they
+  // add to its inertia as points that carry those two components of their motion (along the strut they are the
+  // unsprung DOF). Without this the frame rolls as if 5 t of hub, motor and tyre out at the legs weighed nothing.
+  if(this.wheels?.length===6)for(const wh of this.wheels){const h=this.hubBody(wh,GEOM.stroke/2),rx=h[0]-c[0],ry=h[1]-c[1],rz=h[2]-c[2],m=UNSPRUNG;
+   I[0]+=m*ry*ry;I[4]+=m*(rx*rx+rz*rz);I[8]+=m*ry*ry;I[1]-=m*rx*ry;I[3]-=m*rx*ry;I[5]-=m*ry*rz;I[7]-=m*ry*rz;}
   if(this.com){// keep the body origin fixed when the CoM moves
    const R=qmat(this.q),origin=sub(this.pos,mv(R,this.com));this.pos=add(origin,mv(R,c));}
   this.mass=M;this.com=c;this.Ib=I;this.IbInv=inv3(I);this.totalMass=M+unsprung;this.items=items;
@@ -179,11 +185,11 @@ export class Spider{
    let tf=[0,0,0];// tyre force on wheel
    if(pen>0){
     const nt=env.normal(patches[0].pt[0],patches[0].pt[2]);const lh=[-fh[2],0,fh[0]];const lat=dot(nt,lh);
-    const kt=mix(260e3,620e3,(wh.pressure-.8)/1.7);/* the big carcass damps wheel hop */
+    const kt=mix(260e3,620e3,(wh.pressure-.8)/1.7)*TSC;/* the big carcass damps wheel hop */
     for(const q of patches){q.n=norm(add(q.n,scl(lh,lat*(q===patches[0]?1:0))));const pdot=-dot(vH,q.n);
      // struck across the strut (on its side, landing on a wheel's flank) the blow goes straight into the frame,
      // not through the strut's damper: the crushing sidewall and the sloshing ballast fluid soak it instead
-     const cross_=1-Math.abs(dot(q.n,ax)),ct=9000+9e4*cross_*cross_;
+     const cross_=1-Math.abs(dot(q.n,ax)),ct=9000*DSC+9e4*cross_*cross_;
      q.Fn=kt*q.pen+ct*pdot+(q.pen>.3?Math.max(0,(q.pen-.3)*2.5e6+1.5e5*pdot):0)/* crushed to the rim: steel into dirt */;if(q.Fn<0)q.Fn=0;if(q.Fn>8e5)q.Fn=8e5;
      q.t=norm(sub(fw,scl(q.n,dot(fw,q.n))));q.l=cross(q.n,q.t);Fn+=q.Fn;}
     if(Fn>8e5){const k=8e5/Fn;for(const q of patches)q.Fn*=k;Fn=8e5;}
@@ -233,7 +239,9 @@ export class Spider{
     // each patch carries its share of the tyre force along its own surface
     for(const q of patches){const sh=Fn>0?q.Fn/Fn:1/patches.length;tf=add(tf,add(add(scl(q.n,q.Fn),scl(q.t,Fx*sh*q.grip)),scl(q.l,Fy*sh*q.grip)));}
     wh.fx=Fx;wh.fy=Fy;
-   }else{wh.deflection=0;wh.anchor=null;const I=300;const wT=wh.targetOmega||0;wh.omega+=clamp((wT-wh.omega)*8,-20,20)*DT;wh.spin+=wh.omega*DT;wh.fx=wh.fy=0;}
+   }else{wh.deflection=0;wh.anchor=null;const I=300;const wT=wh.targetOmega||0,al=wh.disabled||this.engine.stalled?0:clamp((wT-wh.omega)*8,-20,20);wh.omega+=al*DT;wh.spin+=wh.omega*DT;wh.fx=wh.fy=0;
+    // in the air the hub motor's torque reacts on the frame: drive the wheels up and the nose lifts, brake them and it drops
+    T[0]+=I*al*axl[0];T[1]+=I*al*axl[1];T[2]+=I*al*axl[2];}
    wh.load=Fn;wh.cp=cpt;wh.cn=cn;
    // ---- unsprung DOF along the strut, implicit
    const mU=UNSPRUNG,cnU=dot(cn,ax);
@@ -241,14 +249,15 @@ export class Spider{
    const aMu=dot(this.acc,ax);
    const tu=dot(tf,ax);
    const f0=mU*aMu-tu+mU*G*ax[1]+Fs;
-   const Ks=this.gasStiffness(wh,wh.e)+(wh.e<0||wh.e>GEOM.stroke?9e5:0),Kt=pen>0?mix(260e3,620e3,(wh.pressure-.8)/1.7)*cnU*cnU:0;
-   const Cs=this.strutDamping(wh.ev)+(wh.e<0||wh.e>GEOM.stroke?STOPC:0),Ct=pen>0?9000*cnU*cnU:0;
+   const Ks=this.gasStiffness(wh,wh.e)+(wh.e<0||wh.e>GEOM.stroke?9e5:0),Kt=pen>0?mix(260e3,620e3,(wh.pressure-.8)/1.7)*TSC*cnU*cnU:0;
+   const Cs=this.strutDamping(wh.ev)+(wh.e<0||wh.e>GEOM.stroke?STOPC:0),Ct=pen>0?9000*DSC*cnU*cnU:0;
    const Kk=Ks+Kt,Cc=Cs+Ct;
    const evn=(mU*wh.ev+DT*(f0+Cc*wh.ev))/(mU+DT*Cc+DT*DT*Kk);
    wh.ev=evn;wh.e+=DT*evn;if(wh.e<-.08){wh.e=-.08;wh.ev=Math.max(0,wh.ev);}if(wh.e>GEOM.stroke+.08){wh.e=GEOM.stroke+.08;wh.ev=Math.min(0,wh.ev);}
    const Fs2=this.strutForce(wh,wh.e,wh.ev);wh.strut=Fs2;
    // body: strut force at the mount, tyre force components across the strut at the contact
    applyAt(scl(ax,Fs2),M);
+   {const gw=UNSPRUNG*G,ga=ax[1]*gw;applyAt([ax[0]*ga,-gw+ax[1]*ga,ax[2]*ga],hub);}/* the assembly's weight across its strut bears on the frame (along it, on the strut) */
    if(pen>0){const perp=sub(tf,scl(ax,tu));applyAt(perp,cpt);}
   }
   // ---- hull contacts
@@ -263,7 +272,8 @@ export class Spider{
   // ---- aerodynamic drag (small)
   {const v=this.vel,sp=len(v);if(sp>.1&&AIR>0){const k=.5*AIR*1.1*18;applyAt(scl(v,-k*sp),this.pos);}}
   // ---- integrate
-  const a=scl(F,1/this.mass);
+  // along the body's up axis (the struts) the frame carries only itself; across it the wheel assemblies come along
+  const Fu=dot(F,up),a=add(scl(up,Fu/this.mass),scl(sub(F,scl(up,Fu)),1/this.totalMass));
   const prevAcc=this.acc;this.acc=[a[0],a[1]+G*0,a[2]];
   this.vel=add(this.vel,scl(a,DT));
   const IbInvW=(()=>{// R * IbInv * R^T
@@ -446,7 +456,7 @@ export class Spider{
   // (same gas volume ratio v/Vn => same pressure: eset-e scales with Vn)
   if(Vn!==this.Vn){const k=Vn/this.Vn;for(const wh of this.wheels)wh.eset=wh.e+(wh.eset-wh.e)*k;this.Vn=Vn;}
   const kGas=GAMMA*PN*PISTON*PISTON/this.Vn;this.kGas=kGas;
-  this.dampC1=(this.suspMode==='soft'?8000:12500)*DSC;this.dampC2=(this.suspMode==='soft'?3200:4600)*DSC;
+  this.dampC1=(this.suspMode==='soft'?8000:12500)*DSC;this.dampC2=this.suspMode==='soft'?3200:4600;
   // ---- CTIS
   const pTarget=PRESSURES[c.tire];let hiss=0;for(const wh of this.wheels){const d=pTarget-wh.pressure;if(Math.abs(d)>.005){wh.pressure+=clamp(d,-.35*dt,.28*dt);hiss=1;}}this.hiss=hiss;
   const safe=c.tire==="soft"?60/3.6:c.tire==="terrain"?110/3.6:145/3.6;/* Kevlar-belted: rated well past the drivetrain */this.safeSpeed=safe;
@@ -589,7 +599,7 @@ export class Spider{
   const aT=(1-f)*tp.a+lean,bT=(1-f)*tp.b;this.targetSlopes=[aT,bT];
   // attitude integrator closes the loop on the measured body tilt (compliance, deflection, sinkage)
   const sat=wheels.some((w,i)=>reach[i]&&(w.e>GEOM.stroke-.12||w.e<.1));
-  if(c.assist&&!sat&&!this.engine.off&&(!this.hold||Math.abs(aT-aB)+Math.abs(bT-bB)>.02)){this.integ[1]=clamp(this.integ[1]+(aT-aB)*dt*.7,-.12,.12);this.integ[2]=clamp(this.integ[2]+(bT-bB)*dt*.7,-.12,.12);}
+  if(c.assist&&!sat&&!this.engine.off&&(!this.hold||Math.abs(aT-aB)+Math.abs(bT-bB)>.02)){const fk=Math.sqrt(Math.min(1,G/9.81));/* the machine answers more slowly in low gravity (its ride scales with the square root of g): so does the trim, or it chases its own lag into a rock */this.integ[1]=clamp(this.integ[1]+(aT-aB)*dt*.7*fk,-.12,.12);this.integ[2]=clamp(this.integ[2]+(bT-bB)*dt*.7*fk,-.12,.12);}
   if(!c.assist){this.integ[1]*=.98;this.integ[2]*=.98;}
   const eRaw=need(f);
   let mean=0,na=0,mx=-1e9,mn=1e9;for(let i=0;i<6;i++)if(reach[i]){mean+=eRaw[i];na++;mx=Math.max(mx,eRaw[i]);mn=Math.min(mn,eRaw[i]);}mean/=na||1;
@@ -633,7 +643,7 @@ export class Spider{
   // ---- heave integral on the supporting legs' extension error, and setpoint synthesis
   const cm=wheels.map((w,i)=>active[i]&&w.contact);let he=0,hn=0;for(let i=0;i<6;i++)if(cm[i]){he+=eT[i]-wheels[i].e;hn++;}
   const nearStop=wheels.some((w,i)=>cm[i]&&(w.e>GEOM.stroke-.1||w.e<.08));
-  if(hn&&!this.engine.off&&!(nearStop&&Math.sign(he)===Math.sign(this.integ[0]||he)))this.integ[0]=clamp(this.integ[0]+he/hn*dt*1.2,-.25,.25);
+  if(hn&&!this.engine.off&&!(nearStop&&Math.sign(he)===Math.sign(this.integ[0]||he)))this.integ[0]=clamp(this.integ[0]+he/hn*dt*1.2*Math.sqrt(Math.min(1,G/9.81)),-.25,.25);
   let pumpDemand=0;const newSet=[];const tipped=up[1]<.5&&!this.sr;
   for(let i=0;i<6;i++){
    const wh=wheels[i];let target;
