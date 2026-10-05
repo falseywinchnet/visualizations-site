@@ -22,7 +22,7 @@
 // The melodies and rhythms are original. The mantra syllables are the
 // traditional "om mani padme hum".
 
-import { Choir, Hall, makeSingerConfig } from "./choir.js?v=e293c30802";
+import { Choir, Hall, makeSingerConfig } from "./choir.js?v=ee6ab9568f";
 import {
     Dungchen, Gyaling, Conch, Rolmo, Nga, Drilbu, Kick, Snare, Hats, Sub, Riser, Dunk, softSaturate
 } from "./instruments.js?v=84dae2630a";
@@ -529,6 +529,11 @@ export class SongEngine {
         this.ended = false;
         this.envFollow = 0.0;
         this.master = 0.9;
+        this.srcL = new Float32Array(128);
+        this.srcR = new Float32Array(128);
+        if (this.room === undefined) {
+            this.room = null;
+        }
         if (this.def.setup) {
             this.def.setup(this);
         }
@@ -536,6 +541,39 @@ export class SongEngine {
 
     play() {
         this.playing = true;
+    }
+
+    // Detailed room: every part and ritual instrument gets a seat on the
+    // stage; the electronic drop stays dry (in the listener's headphones).
+    setRoom(room) {
+        this.room = room;
+        if (room === null) {
+            return;
+        }
+        room.clearSeats();
+        const h = room.postureHeight;
+        const places = [
+            [0.0, 0.0, h], [0.0, -1.5, 1.6], [0.0, -0.8, h],
+            [-3.5, -0.5, 1.2], [3.5, -0.5, 1.2], [-1.5, 0.3, 1.3], [1.5, 0.3, 1.3],
+            [-2.5, -0.3, 1.4], [2.8, -0.3, 1.0], [-1.0, 0.0, 1.2]
+        ];
+        for (let i = 0; i < places.length; i = i + 1) {
+            const seat = room.addSeat(places[i][0], places[i][1], places[i][2], i === 0 || i === 2 || i === 8);
+            seat.input = new Float32Array(128);
+        }
+        this.roomGain = room.loudnessScale();
+    }
+
+    // render one source into a seat as mono (scaled)
+    toSeat(k, m, scale) {
+        const seat = this.room.seats[k];
+        const l = this.srcL;
+        const r = this.srcR;
+        for (let i = 0; i < m; i = i + 1) {
+            seat.input[i] = seat.input[i] + (l[i] + r[i]) * scale;
+            l[i] = 0.0;
+            r[i] = 0.0;
+        }
     }
 
     stop() {
@@ -699,6 +737,54 @@ export class SongEngine {
         }
     }
 
+    ritualInHall(rl, rr, m) {
+        this.parts.monks.renderDry(rl, rr, 0, m);
+
+        this.parts.upper.renderDry(rl, rr, 0, m);
+        this.parts.solo.renderDry(rl, rr, 0, m);
+        this.horns[0].render(rl, rr, 0, m, 0.9, 0.55);
+        this.horns[1].render(rl, rr, 0, m, 0.55, 0.9);
+        this.gyas[0].render(rl, rr, 0, m, 0.85, 0.5);
+        this.gyas[1].render(rl, rr, 0, m, 0.5, 0.85);
+        this.conch.render(rl, rr, 0, m, 0.75, 0.65);
+        this.kangling.render(rl, rr, 0, m, 0.6, 0.8);
+        this.rolmo.render(rl, rr, 0, m);
+        this.nga.render(rl, rr, 0, m);
+        this.bell.render(rl, rr, 0, m);
+        for (let i = 0; i < m; i = i + 1) {
+            rl[i] = rl[i] * 0.28;
+            rr[i] = rr[i] * 0.28;
+        }
+        this.hall.process(rl, rr, m);
+
+    }
+
+    ritualInRoom(rl, rr, m) {
+        const seats = this.room.seats;
+        for (let k = 0; k < seats.length; k = k + 1) {
+            seats[k].input.fill(0.0, 0, m);
+        }
+        const l = this.srcL;
+        const r = this.srcR;
+        l.fill(0.0);
+        r.fill(0.0);
+        const g = 0.28 * this.roomGain * 0.7071;
+        this.parts.monks.renderDry(l, r, 0, m); this.toSeat(0, m, g);
+        this.parts.upper.renderDry(l, r, 0, m); this.toSeat(1, m, g);
+        this.parts.solo.renderDry(l, r, 0, m); this.toSeat(2, m, g);
+        this.horns[0].render(l, r, 0, m, 1.0, 1.0); this.toSeat(3, m, g);
+        this.horns[1].render(l, r, 0, m, 1.0, 1.0); this.toSeat(4, m, g);
+        this.gyas[0].render(l, r, 0, m, 1.0, 1.0); this.toSeat(5, m, g);
+        this.gyas[1].render(l, r, 0, m, 1.0, 1.0); this.toSeat(6, m, g);
+        this.rolmo.render(l, r, 0, m); this.toSeat(7, m, g);
+        this.nga.render(l, r, 0, m); this.toSeat(8, m, g);
+        this.bell.render(l, r, 0, m);
+        this.conch.render(l, r, 0, m, 1.0, 1.0);
+        this.kangling.render(l, r, 0, m, 1.0, 1.0);
+        this.toSeat(9, m, g);
+        this.room.process(rl, rr, m, 0);
+    }
+
     processChunk(outL, outR, offset, m) {
         const sr = this.sr;
         if (this.playing) {
@@ -744,25 +830,11 @@ export class SongEngine {
         }
         this.kickOffsets.length = keep;
 
-        // ritual bus: voices and ritual instruments, through the hall
-        this.parts.monks.renderDry(rl, rr, 0, m);
-        this.parts.upper.renderDry(rl, rr, 0, m);
-        this.parts.solo.renderDry(rl, rr, 0, m);
-        this.horns[0].render(rl, rr, 0, m, 0.9, 0.55);
-        this.horns[1].render(rl, rr, 0, m, 0.55, 0.9);
-        this.gyas[0].render(rl, rr, 0, m, 0.85, 0.5);
-        this.gyas[1].render(rl, rr, 0, m, 0.5, 0.85);
-        this.conch.render(rl, rr, 0, m, 0.75, 0.65);
-        this.kangling.render(rl, rr, 0, m, 0.6, 0.8);
-        this.rolmo.render(rl, rr, 0, m);
-        this.nga.render(rl, rr, 0, m);
-        this.bell.render(rl, rr, 0, m);
-        for (let i = 0; i < m; i = i + 1) {
-            rl[i] = rl[i] * 0.28;
-            rr[i] = rr[i] * 0.28;
+        if (this.room !== null) {
+            this.ritualInRoom(rl, rr, m);
+        } else {
+            this.ritualInHall(rl, rr, m);
         }
-        this.hall.process(rl, rr, m);
-
         // drop bus: throat bass (saturated, ducked), sub, kit, riser
         this.parts.bass.renderDry(bl, br, 0, m);
         for (let i = 0; i < m; i = i + 1) {

@@ -555,3 +555,24 @@ figcaption {
 
 .control.syllables label { margin-right: 6px; }
 .control.syllables button { padding: 4px 12px; }
+
+.room-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: center;
+  margin: 2px 8px 8px;
+  font-size: 13px;
+  color: var(--paper-dim);
+}
+
+.room-bar select {
+  background: var(--ink-3);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 3px 6px;
+  margin-left: 4px;
+}
+
+.room-bar input[type=range] { width: 120px; accent-color: var(--saffron); vertical-align: middle; }
+#room-info { color: var(--paper-dim); }

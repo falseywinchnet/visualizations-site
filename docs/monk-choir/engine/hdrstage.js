@@ -1,11 +1,11 @@
 // The HDR tab's audio: one HDR voice and, for A/B, the physical voice it
 // extends with the same body, register and gestures.
 
-import { Singer, CONTROL_BLOCK } from "./singer.js?v=27da92ec4d";
-import { HdrVoice, LAYERS } from "./hdr.js?v=674df1f0c5";
+import { Singer, CONTROL_BLOCK } from "./singer.js?v=7c9b69f214";
+import { HdrVoice, LAYERS } from "./hdr.js?v=2a2db22a1b";
 import { makeAnatomy } from "./anatomy.js?v=9500908dbe";
-import { makeVoiceSource } from "./glottis.js?v=aa724f7289";
-import { Hall } from "./choir.js?v=e293c30802";
+import { makeVoiceSource } from "./glottis.js?v=e11d9ec07d";
+import { Hall } from "./choir.js?v=ee6ab9568f";
 
 function probeRms(voice) {
     const t = voice.anatomy.type;
@@ -47,6 +47,8 @@ export class HdrStage {
         this.l = new Float32Array(CONTROL_BLOCK);
         this.clock = 0.0;
         this.queue = [];
+        this.room = null;
+        this.mono = new Float32Array(CONTROL_BLOCK);
         this.r = new Float32Array(CONTROL_BLOCK);
         this.build();
     }
@@ -169,6 +171,16 @@ export class HdrStage {
         this.queue = keep;
     }
 
+    setRoom(room) {
+        this.room = room;
+        if (room !== null) {
+            room.clearSeats();
+            const seat = room.addSeat(0.0, 0.0, room.postureHeight, true);
+            seat.input = this.mono;
+            this.roomGain = room.loudnessScale();
+        }
+    }
+
     noteOn(note) {
         this.held = this.held.filter(function other(n) { return n !== note; });
         this.held.push(note);
@@ -225,11 +237,20 @@ export class HdrStage {
             if (voice.isAwake()) {
                 voice.render(l, r, 0, m);
             }
-            for (let k = 0; k < m; k = k + 1) {
-                l[k] = l[k] * 0.35;
-                r[k] = r[k] * 0.35;
+            if (this.room !== null) {
+                for (let k = 0; k < m; k = k + 1) {
+                    this.mono[k] = (l[k] + r[k]) * 0.7071 * 0.35 * this.roomGain;
+                    l[k] = 0.0;
+                    r[k] = 0.0;
+                }
+                this.room.process(l, r, m, 0);
+            } else {
+                for (let k = 0; k < m; k = k + 1) {
+                    l[k] = l[k] * 0.35;
+                    r[k] = r[k] * 0.35;
+                }
+                this.hall.process(l, r, m);
             }
-            this.hall.process(l, r, m);
             for (let k = 0; k < m; k = k + 1) {
                 outL[done + k] = Math.tanh(l[k]);
                 outR[done + k] = Math.tanh(r[k]);

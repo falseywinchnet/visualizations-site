@@ -5,9 +5,9 @@
 // independent glottal jitter, vibrato, pitch wander and onsets, whose small
 // disagreements are what a real choir sounds like.
 
-import { Singer, CONTROL_BLOCK, hzToNote } from "./singer.js?v=27da92ec4d";
+import { Singer, CONTROL_BLOCK, hzToNote } from "./singer.js?v=7c9b69f214";
 import { makeAnatomy, VOICE_TYPES } from "./anatomy.js?v=9500908dbe";
-import { REGISTERS } from "./glottis.js?v=aa724f7289";
+import { REGISTERS } from "./glottis.js?v=e11d9ec07d";
 import { CLASSIC_BODY } from "./vowels.js?v=260f005eba";
 
 export const MAX_SINGERS = 24;
@@ -187,7 +187,43 @@ export class Choir {
         this.mixR = new Float32Array(CONTROL_BLOCK);
         this.padActive = false;
         this.padNote = 48.0;
+        this.room = null;
+        this.seatOf = [];
+        this.voiceL = new Float32Array(CONTROL_BLOCK);
+        this.voiceR = new Float32Array(CONTROL_BLOCK);
         this.seedCounter = 1;
+    }
+
+    // Seats for the detailed room: up to six, across the stage by pan, back
+    // row for the second half of a large choir, seated or standing.
+    setRoom(room) {
+        this.room = room;
+        this.layoutSeats();
+    }
+
+    layoutSeats() {
+        const room = this.room;
+        this.seatOf = [];
+        if (room === null) {
+            return;
+        }
+        room.clearSeats();
+        const n = this.members.length;
+        const seatCount = Math.max(1, Math.min(6, n));
+        for (let k = 0; k < seatCount; k = k + 1) {
+            const x = seatCount === 1 ? 0.0 : -3.0 + 6.0 * k / (seatCount - 1);
+            const back = n > 8 && k % 2 === 1;
+            const s = room.addSeat(x, back ? -1.2 : 0.0, room.postureHeight, true);
+            s.input = new Float32Array(CONTROL_BLOCK);
+        }
+        for (let i = 0; i < n; i = i + 1) {
+            const pan = this.members[i].cfg.pan;
+            let k = Math.round((pan + 1.0) * 0.5 * (seatCount - 1));
+            if (k < 0) { k = 0; }
+            if (k > seatCount - 1) { k = seatCount - 1; }
+            this.seatOf.push(k);
+        }
+        this.roomGain = room.loudnessScale();
     }
 
     configure(config) {
@@ -207,6 +243,9 @@ export class Choir {
         }
         if (config.voicing !== undefined) {
             this.voicing = config.voicing;
+        }
+        if (this.room !== null) {
+            this.layoutSeats();
         }
         if (config.hall !== undefined) {
             this.hall.mix = config.hall.mix;
@@ -435,6 +474,10 @@ export class Choir {
     }
 
     process(outL, outR, n) {
+        if (this.room !== null) {
+            this.processRoom(outL, outR, n);
+            return;
+        }
         let offset = 0;
         while (offset < n) {
             const m = Math.min(CONTROL_BLOCK, n - offset);
@@ -457,6 +500,49 @@ export class Choir {
             for (let k = 0; k < m; k = k + 1) {
                 outL[offset + k] = softClip(l[k]);
                 outR[offset + k] = softClip(r[k]);
+            }
+            offset = offset + m;
+        }
+    }
+
+    // Each singer is rendered centred (mono), summed into its seat, and the
+    // room places the seats: reflections, floor, dais and late field.
+    processRoom(outL, outR, n) {
+        const room = this.room;
+        let offset = 0;
+        while (offset < n) {
+            const m = Math.min(CONTROL_BLOCK, n - offset);
+            const seats = room.seats;
+            for (let k = 0; k < seats.length; k = k + 1) {
+                seats[k].input.fill(0.0, 0, m);
+            }
+            const g = this.master * 0.8 / Math.sqrt(Math.max(1, this.members.length)) * this.roomGain;
+            for (let i = 0; i < this.members.length; i = i + 1) {
+                const s = this.members[i].singer;
+                if (!s.isAwake()) {
+                    continue;
+                }
+                const l = this.voiceL;
+                const r = this.voiceR;
+                l.fill(0.0, 0, m);
+                r.fill(0.0, 0, m);
+                const pan = s.pan;
+                s.pan = 0.0;
+                s.render(l, r, 0, m);
+                s.pan = pan;
+                const input = seats[this.seatOf[i]].input;
+                for (let k = 0; k < m; k = k + 1) {
+                    input[k] = input[k] + (l[k] + r[k]) * 0.7071 * g;
+                }
+            }
+            const L = this.mixL;
+            const R = this.mixR;
+            L.fill(0.0, 0, m);
+            R.fill(0.0, 0, m);
+            room.process(L, R, m, 0);
+            for (let k = 0; k < m; k = k + 1) {
+                outL[offset + k] = softClip(L[k]);
+                outR[offset + k] = softClip(R[k]);
             }
             offset = offset + m;
         }

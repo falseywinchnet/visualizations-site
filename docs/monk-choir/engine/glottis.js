@@ -123,11 +123,15 @@ export class Glottis {
         this.returnState = (1.0 - a) * u + a * this.returnState;
         const opening = this.returnState + src.leak;
         this.opening = opening;
-        // Turbulence: white noise, band-shaped, modulated by the flow.
+        // Turbulence at the glottis, scaled by the flow through it. It is
+        // shaped to fall above ~2.5 kHz; the mouth's radiation lifts it back
+        // to roughly flat. (The first version subtracted a low-passed copy,
+        // a high-pass that radiation then lifted again: most of a falsetto's
+        // energy sat above 5 kHz and chest-voice HNR measured 4 dB. Same
+        // shaping and level as the HDR voice; see .dev/test_hdr.mjs.)
         const white = this.random() * 2.0 - 1.0;
-        this.noiseLow = 0.6 * this.noiseLow + 0.4 * white;
-        const shaped = white - this.noiseLow;
-        const noise = shaped * src.breath * (0.25 + opening);
+        this.noiseLow = this.noiseLow + (white - this.noiseLow) * (1.0 - Math.exp(-2.0 * Math.PI * 2500.0 / tickRate));
+        const noise = this.noiseLow * src.breath * 0.2 * (0.2 + opening);
         this.flow = amp * this.cycleAmp * (opening + noise);
         let r = 0.985 - 0.6 * opening;
         if (r < 0.35) {

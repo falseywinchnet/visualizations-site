@@ -3,11 +3,12 @@
 // posted back for the drawing.
 
 import { ClassicMonk } from "./engine/classic.js?v=a0051c9211";
-import { Choir } from "./engine/choir.js?v=e293c30802";
-import { SongEngine, ROLMO } from "./engine/song.js?v=78bbd92ccc";
-import { FUGUE } from "./engine/songs/fugue.js?v=0383378de8";
-import { PASSACAGLIA } from "./engine/songs/passacaglia.js?v=6a59a62492";
-import { HdrStage } from "./engine/hdrstage.js?v=e26ccf7176";
+import { Choir } from "./engine/choir.js?v=ee6ab9568f";
+import { SongEngine, ROLMO } from "./engine/song.js?v=4a9ca68930";
+import { FUGUE } from "./engine/songs/fugue.js?v=e2159e78b4";
+import { PASSACAGLIA } from "./engine/songs/passacaglia.js?v=84b254ba6a";
+import { HdrStage } from "./engine/hdrstage.js?v=bba375ad84";
+import { makeRoom, defaultRoomSettings } from "./engine/room.js?v=8963a58369";
 
 const SONGS = { rolmo: ROLMO, fugue: FUGUE, passacaglia: PASSACAGLIA };
 
@@ -23,6 +24,8 @@ class MonkProcessor extends AudioWorkletProcessor {
         this.classicBufL = new Float32Array(128);
         this.classicBufR = new Float32Array(128);
         this.frames = 0;
+        this.roomSettings = defaultRoomSettings();
+        this.choir.setRoom(makeRoom(sampleRate, this.roomSettings));
         this.port.onmessage = this.receive.bind(this);
     }
 
@@ -35,12 +38,22 @@ class MonkProcessor extends AudioWorkletProcessor {
             if (this.song !== null) {
                 this.song.stop();
             }
+        } else if (m.type === "room") {
+            this.roomSettings = m.settings;
+            this.choir.setRoom(makeRoom(sampleRate, m.settings));
+            if (this.hdr !== null) {
+                this.hdr.setRoom(makeRoom(sampleRate, m.settings));
+            }
+            if (this.song !== null) {
+                this.song.setRoom(makeRoom(sampleRate, m.settings));
+            }
         } else if (m.type === "songLoad") {
             if (this.song === null || this.songId !== m.id) {
                 if (this.song !== null) {
                     this.song.stop();
                 }
                 this.song = new SongEngine(sampleRate, SONGS[m.id]);
+                this.song.setRoom(makeRoom(sampleRate, this.roomSettings));
                 this.song.warmUp();
                 this.songId = m.id;
             } else {
@@ -109,6 +122,7 @@ class MonkProcessor extends AudioWorkletProcessor {
     hdrStage() {
         if (this.hdr === null) {
             this.hdr = new HdrStage(sampleRate);
+            this.hdr.setRoom(makeRoom(sampleRate, this.roomSettings));
         }
         return this.hdr;
     }

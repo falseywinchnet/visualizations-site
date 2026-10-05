@@ -20,7 +20,7 @@ import {
     areaFunction, nasalAreas, velumJunction, velumArea, lipRadius, ARTICULATION_KEYS, VOICE_TYPES
 } from "./anatomy.js?v=9500908dbe";
 import { Tract, radiationPole, SECTION_LOSS } from "./tract.js?v=711fe62fc7";
-import { Glottis, makeVoiceSource, copyVoiceSource } from "./glottis.js?v=aa724f7289";
+import { Glottis, makeVoiceSource, copyVoiceSource } from "./glottis.js?v=e11d9ec07d";
 import { scanPeaks } from "./analysis.js?v=887637021b";
 import { VOWEL_SHAPES } from "./vowels.js?v=260f005eba";
 

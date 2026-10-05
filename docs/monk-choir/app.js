@@ -1,18 +1,19 @@
 // Page: audio start-up, pad, keyboard, MIDI, controls, stage and inspector.
 
-import { PRESETS, presetById } from "./engine/presets.js?v=9f8be4e349";
-import { makeSingerConfig, anatomyFor, foldIntoRange } from "./engine/choir.js?v=e293c30802";
+import { PRESETS, presetById } from "./engine/presets.js?v=b050e15f5f";
+import { makeSingerConfig, anatomyFor, foldIntoRange } from "./engine/choir.js?v=ee6ab9568f";
 import { VOICE_TYPES, SECTIONS, SPEED_OF_SOUND, makeArticulation, areaFunction, lipRadius, segmentLengths } from "./engine/anatomy.js?v=9500908dbe";
-import { REGISTERS } from "./engine/glottis.js?v=aa724f7289";
+import { REGISTERS } from "./engine/glottis.js?v=e11d9ec07d";
 import { radiationPole } from "./engine/tract.js?v=711fe62fc7";
 import { responseCurve, findFormants, makeFormantSlots } from "./engine/analysis.js?v=887637021b";
-import { vowelArticulation, noteToHz } from "./engine/singer.js?v=27da92ec4d";
+import { vowelArticulation, noteToHz } from "./engine/singer.js?v=7c9b69f214";
 import { VOWEL_SHAPES, CLASSIC_BODY } from "./engine/vowels.js?v=260f005eba";
-import { ROLMO } from "./engine/song.js?v=78bbd92ccc";
-import { FUGUE } from "./engine/songs/fugue.js?v=0383378de8";
-import { PASSACAGLIA } from "./engine/songs/passacaglia.js?v=6a59a62492";
+import { ROLMO } from "./engine/song.js?v=4a9ca68930";
+import { FUGUE } from "./engine/songs/fugue.js?v=e2159e78b4";
+import { PASSACAGLIA } from "./engine/songs/passacaglia.js?v=84b254ba6a";
 import { drawSongStage, drawScore, buildSongPanel, songTimeText, scoreSeekTime } from "./songview.js?v=cb255e5fee";
-import { buildHdrPanel, drawHdrMeters, makeSpectrogram, drawSpectrogram } from "./hdrview.js?v=e1f122b850";
+import { buildHdrPanel, drawHdrMeters, makeSpectrogram, drawSpectrogram } from "./hdrview.js?v=15e79ed03c";
+import { ROOMS, MATERIALS, eyring, defaultRoomSettings } from "./engine/room.js?v=8963a58369";
 
 const SONGS = { passacaglia: PASSACAGLIA, fugue: FUGUE, rolmo: ROLMO };
 const SONG_LEDES = {
@@ -49,7 +50,8 @@ const state = {
     analyser: null,
     spectrogram: null,
     songId: "passacaglia",
-    songReady: false
+    songReady: false,
+    room: defaultRoomSettings()
 };
 
 const VOWEL_NAMES = ["ooh", "ow", "ah", "ayh", "eeh"];
@@ -99,7 +101,7 @@ async function startAudio() {
         return;
     }
     const ctx = new AudioContext({ latencyHint: "interactive" });
-    await ctx.audioWorklet.addModule("./worklet.js?v=f947daaf95");
+    await ctx.audioWorklet.addModule("./worklet.js?v=a45153451f");
     const node = new AudioWorkletNode(ctx, "monk-processor", { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2] });
     const limiter = ctx.createDynamicsCompressor();
     limiter.threshold.value = -6;
@@ -128,6 +130,7 @@ async function startAudio() {
 
 function syncEngine() {
     post({ type: "mode", mode: state.mode });
+    post({ type: "room", settings: state.room });
     if (state.hdr !== null) {
         state.hdr.sync();
     }
@@ -251,6 +254,81 @@ function selectSong() {
 
 function selectHdr() {
     setMode("hdr");
+}
+
+// ------------------------------------------------------------------ room
+
+function buildRoomBar() {
+    const preset = $("room-preset");
+    const classic = document.createElement("option");
+    classic.value = "classic";
+    classic.textContent = "Classic hall (reverb only)";
+    preset.appendChild(classic);
+    const keys = Object.keys(ROOMS);
+    for (let i = 0; i < keys.length; i = i + 1) {
+        const o = document.createElement("option");
+        o.value = keys[i];
+        o.textContent = ROOMS[keys[i]].label;
+        preset.appendChild(o);
+    }
+    preset.value = state.room.preset;
+    const floor = $("room-floor");
+    const floors = [["room", "as built"], ["stone", "stone"], ["dais", "wooden dais"], ["carpet", "carpet"], ["earth", "earth / grass"]];
+    for (let i = 0; i < floors.length; i = i + 1) {
+        const o = document.createElement("option");
+        o.value = floors[i][0];
+        o.textContent = floors[i][1];
+        floor.appendChild(o);
+    }
+    floor.value = state.room.floor;
+    preset.addEventListener("change", onRoomPreset);
+    floor.addEventListener("change", onRoomChange);
+    $("room-posture").addEventListener("change", onRoomChange);
+    $("room-distance").addEventListener("input", onRoomDistance);
+    $("room-distance").addEventListener("change", onRoomChange);
+    onRoomPreset();
+}
+
+function onRoomPreset() {
+    const p = $("room-preset").value;
+    if (p !== "classic") {
+        $("room-distance").value = String(ROOMS[p].listenerDistance);
+    }
+    onRoomDistance();
+    onRoomChange();
+}
+
+function onRoomDistance() {
+    $("room-distance-out").textContent = Number($("room-distance").value).toFixed(1) + " m";
+}
+
+function onRoomChange() {
+    state.room = {
+        preset: $("room-preset").value,
+        floor: $("room-floor").value,
+        posture: $("room-posture").value,
+        distance: Number($("room-distance").value)
+    };
+    const disabled = state.room.preset === "classic";
+    $("room-floor").disabled = disabled;
+    $("room-posture").disabled = disabled;
+    $("room-distance").disabled = disabled;
+    if (disabled) {
+        $("room-info").textContent = "The original feedback-delay hall.";
+    } else {
+        const r = Object.assign({}, ROOMS[state.room.preset]);
+        if (state.room.floor !== "room") {
+            r.floor = state.room.floor;
+        }
+        const t = eyring(r);
+        const floorName = MATERIALS[r.floor].label.toLowerCase();
+        if (r.walls === "open") {
+            $("room-info").textContent = "No walls or ceiling: the direct sound and the " + floorName + " floor's reflection only. Move the singers between seated and standing to hear the floor's comb notches move.";
+        } else {
+            $("room-info").textContent = r.dims.join(" × ") + " m, " + floorName + " floor · decay " + (0.5 * (t[2] + t[3])).toFixed(1) + " s mid, " + t[0].toFixed(1) + " s low, " + t[5].toFixed(1) + " s high" + (r.floor === "dais" ? " · the dais rings at 38, 54, 72 Hz…" : "");
+        }
+    }
+    post({ type: "room", settings: state.room });
 }
 
 // ------------------------------------------------------------------ song transport
@@ -1640,6 +1718,7 @@ function init() {
     $("mode-choir").addEventListener("click", selectChoir);
     $("mode-song").addEventListener("click", selectSong);
     $("mode-hdr").addEventListener("click", selectHdr);
+    buildRoomBar();
     state.hdr = buildHdrPanel(post, makeSlider, makeSelect);
     state.spectrogram = makeSpectrogram($("hdr-spectrogram"));
     loadSongView("passacaglia");

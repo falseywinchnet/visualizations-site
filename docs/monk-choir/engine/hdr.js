@@ -29,7 +29,7 @@
 //                the folds press harder; the small cycle jitter that remains
 //                is no longer the main source of life.
 
-import { Singer, CONTROL_BLOCK } from "./singer.js?v=27da92ec4d";
+import { Singer, CONTROL_BLOCK } from "./singer.js?v=7c9b69f214";
 import { Tract, SECTION_LOSS } from "./tract.js?v=711fe62fc7";
 import { SECTIONS, SPEED_OF_SOUND, S_VELUM } from "./anatomy.js?v=9500908dbe";
 
