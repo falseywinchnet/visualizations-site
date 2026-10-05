@@ -23,12 +23,12 @@
 // chooses a drone and a harmonic of it (music.js mapOvertones), preferring
 // drones in the current harmony.
 
-import * as M from "../music.js";
-import { makeSingerConfig } from "../choir.js";
+import * as M from "../music.js?v=74884be0cf";
+import { makeSingerConfig } from "../choir.js?v=e293c30802";
 import {
     newTracks, append, chordSpan, chordAtBeat, harmonizeBeats, placeEntry, fillVoice,
     sortTrack, Score, MANTRA, orbitFor, rolmoPattern, horn, makeWriters, ORBITS
-} from "./common.js";
+} from "./common.js?v=036c2aecc9";
 
 export const TEMPO = 140.0;
 export const BEAT = 60.0 / TEMPO;

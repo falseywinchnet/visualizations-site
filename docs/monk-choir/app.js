@@ -1,17 +1,18 @@
 // Page: audio start-up, pad, keyboard, MIDI, controls, stage and inspector.
 
-import { PRESETS, presetById } from "./engine/presets.js";
-import { makeSingerConfig, anatomyFor, foldIntoRange } from "./engine/choir.js";
-import { VOICE_TYPES, SECTIONS, SPEED_OF_SOUND, makeArticulation, areaFunction, lipRadius, segmentLengths } from "./engine/anatomy.js";
-import { REGISTERS } from "./engine/glottis.js";
-import { radiationPole } from "./engine/tract.js";
-import { responseCurve, findFormants, makeFormantSlots } from "./engine/analysis.js";
-import { vowelArticulation, noteToHz } from "./engine/singer.js";
-import { VOWEL_SHAPES, CLASSIC_BODY } from "./engine/vowels.js";
-import { ROLMO } from "./engine/song.js";
-import { FUGUE } from "./engine/songs/fugue.js";
-import { PASSACAGLIA } from "./engine/songs/passacaglia.js";
-import { drawSongStage, drawScore, buildSongPanel, songTimeText, scoreSeekTime } from "./songview.js";
+import { PRESETS, presetById } from "./engine/presets.js?v=9f8be4e349";
+import { makeSingerConfig, anatomyFor, foldIntoRange } from "./engine/choir.js?v=e293c30802";
+import { VOICE_TYPES, SECTIONS, SPEED_OF_SOUND, makeArticulation, areaFunction, lipRadius, segmentLengths } from "./engine/anatomy.js?v=9500908dbe";
+import { REGISTERS } from "./engine/glottis.js?v=aa724f7289";
+import { radiationPole } from "./engine/tract.js?v=711fe62fc7";
+import { responseCurve, findFormants, makeFormantSlots } from "./engine/analysis.js?v=887637021b";
+import { vowelArticulation, noteToHz } from "./engine/singer.js?v=27da92ec4d";
+import { VOWEL_SHAPES, CLASSIC_BODY } from "./engine/vowels.js?v=260f005eba";
+import { ROLMO } from "./engine/song.js?v=78bbd92ccc";
+import { FUGUE } from "./engine/songs/fugue.js?v=0383378de8";
+import { PASSACAGLIA } from "./engine/songs/passacaglia.js?v=6a59a62492";
+import { drawSongStage, drawScore, buildSongPanel, songTimeText, scoreSeekTime } from "./songview.js?v=cb255e5fee";
+import { buildHdrPanel, drawHdrMeters, makeSpectrogram, drawSpectrogram } from "./hdrview.js?v=767d954b48";
 
 const SONGS = { passacaglia: PASSACAGLIA, fugue: FUGUE, rolmo: ROLMO };
 const SONG_LEDES = {
@@ -43,6 +44,10 @@ const state = {
     inspectDirty: true,
     lastInspect: 0,
     song: null,
+    hdr: null,
+    hdrTelemetry: null,
+    analyser: null,
+    spectrogram: null,
     songId: "passacaglia",
     songReady: false
 };
@@ -94,7 +99,7 @@ async function startAudio() {
         return;
     }
     const ctx = new AudioContext({ latencyHint: "interactive" });
-    await ctx.audioWorklet.addModule("./worklet.js");
+    await ctx.audioWorklet.addModule("./worklet.js?v=0d6d5f50ec");
     const node = new AudioWorkletNode(ctx, "monk-processor", { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2] });
     const limiter = ctx.createDynamicsCompressor();
     limiter.threshold.value = -6;
@@ -104,6 +109,13 @@ async function startAudio() {
     limiter.release.value = 0.15;
     node.connect(limiter);
     limiter.connect(ctx.destination);
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 4096;
+    analyser.smoothingTimeConstant = 0.0;
+    analyser.minDecibels = -150;
+    analyser.maxDecibels = 0;
+    node.connect(analyser);
+    state.analyser = analyser;
     node.port.onmessage = receiveTelemetry;
     state.audio = ctx;
     state.node = node;
@@ -116,6 +128,9 @@ async function startAudio() {
 
 function syncEngine() {
     post({ type: "mode", mode: state.mode });
+    if (state.hdr !== null) {
+        state.hdr.sync();
+    }
     const ck = Object.keys(state.classic);
     for (let i = 0; i < ck.length; i = i + 1) {
         post({ type: "classicParam", name: ck[i], value: state.classic[ck[i]] });
@@ -145,6 +160,10 @@ function receiveTelemetry(event) {
         return;
     }
     if (m.type !== "telemetry") {
+        return;
+    }
+    if (m.mode === "hdr") {
+        state.hdrTelemetry = m;
         return;
     }
     if (m.mode === "song") {
@@ -191,7 +210,7 @@ function noteOff(note) {
 
 function setMode(mode) {
     state.mode = mode;
-    const modes = ["classic", "choir", "song"];
+    const modes = ["classic", "choir", "song", "hdr"];
     for (let i = 0; i < modes.length; i = i + 1) {
         $("mode-" + modes[i]).classList.toggle("on", mode === modes[i]);
         $("mode-" + modes[i]).setAttribute("aria-selected", String(mode === modes[i]));
@@ -200,6 +219,7 @@ function setMode(mode) {
     $("choir-panel").classList.toggle("hidden", mode !== "choir");
     $("inspector").classList.toggle("hidden", mode !== "choir");
     $("song-panel").classList.toggle("hidden", mode !== "song");
+    $("hdr-panel").classList.toggle("hidden", mode !== "hdr");
     document.querySelector(".play").classList.toggle("hidden", mode === "song");
     if (mode === "song") {
         state.song.playing = false;
@@ -227,6 +247,10 @@ function selectChoir() {
 
 function selectSong() {
     setMode("song");
+}
+
+function selectHdr() {
+    setMode("hdr");
 }
 
 // ------------------------------------------------------------------ song transport
@@ -710,6 +734,9 @@ function padMode() {
     if (state.mode === "classic") {
         return "classic";
     }
+    if (state.mode === "hdr") {
+        return "vowel";
+    }
     if (state.preset.pad === "harmonic") {
         return "harmonic";
     }
@@ -755,6 +782,10 @@ function applyPad(phase, p) {
         return;
     }
     const note = PAD_LOW_NOTE + PAD_SPAN * p.x;
+    if (state.mode === "hdr") {
+        post({ type: "hdrPad", note: note, vowel: p.y, down: phase !== "up" });
+        return;
+    }
     if (m === "harmonic") {
         const h = harmonicForY(p.y);
         if (h !== state.globals.harmonic) {
@@ -1202,6 +1233,25 @@ function drawStage() {
     ctx.fillStyle = "rgba(233,162,59,0.06)";
     ctx.fillRect(0, h - 26, w, 26);
     stageLayout.length = 0;
+    if (state.mode === "hdr") {
+        const t = state.hdrTelemetry;
+        let target = { jaw: 0.2, lip: 0.4, protrusion: 0.2, velum: 0, active: 0 };
+        if (t !== null) {
+            target = { jaw: t.jaw, lip: t.lip, protrusion: t.protrusion, velum: t.velum, active: Math.min(1, t.env * 1.2) };
+        }
+        const mouth = smoothMouth(0, target);
+        const size = Math.min(110, h * 0.55) * Math.pow((t !== null ? t.length : 17) / 17.0, 1.2);
+        drawMonk(ctx, w / 2, h - 18, size, mouth, mouth.active, false, HUES[1]);
+        if (t !== null && t.model === "hdr" && t.layers.living) {
+            // the breath: a slow glow that follows lung pressure
+            ctx.fillStyle = "rgba(111,181,154," + Math.max(0, Math.min(0.5, (t.ps - 0.9) * 2.5)).toFixed(3) + ")";
+            ctx.beginPath();
+            ctx.arc(w / 2, h - 18 - size * 0.6, size * 0.35, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        $("stage-caption").textContent = t !== null && t.env > 0.05 ? (t.model === "hdr" ? "HDR voice · " : "Physical voice · ") + noteName(69 + 12 * Math.log2(t.f0 / 440)) + " · tract " + t.length.toFixed(1) + " cm" : "Play the pad or keys. Switch Physical / HDR to compare.";
+        return;
+    }
     if (state.mode === "song") {
         drawSongStage(ctx, w, h, state.song, drawMonk, smoothMouth, HUES);
         const sec = state.song.sections[state.song.telemetry !== null ? state.song.telemetry.section : 0];
@@ -1570,6 +1620,10 @@ function frame() {
     } else {
         drawPad();
     }
+    if (state.mode === "hdr") {
+        drawSpectrogram(state.spectrogram, state.analyser, state.audio !== null ? state.audio.sampleRate : 48000);
+        drawHdrMeters(state.hdrTelemetry);
+    }
     drawStage();
     drawInspector();
     requestAnimationFrame(frame);
@@ -1585,6 +1639,9 @@ function init() {
     $("mode-classic").addEventListener("click", selectClassic);
     $("mode-choir").addEventListener("click", selectChoir);
     $("mode-song").addEventListener("click", selectSong);
+    $("mode-hdr").addEventListener("click", selectHdr);
+    state.hdr = buildHdrPanel(post, makeSlider, makeSelect);
+    state.spectrogram = makeSpectrogram($("hdr-spectrogram"));
     loadSongView("passacaglia");
     $("song-play").addEventListener("click", toggleSong);
     $("song-select").addEventListener("change", onSongSelect);

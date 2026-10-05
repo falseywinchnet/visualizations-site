@@ -2,7 +2,7 @@
 // piano roll built from the same event list the audio engine plays, so the
 // counterpoint is visible: every voice is its own coloured line.
 
-import { makeAnatomy, makeArticulation, areaFunction, SECTIONS as TUBE_SECTIONS } from "./engine/anatomy.js";
+import { makeAnatomy, makeArticulation, areaFunction, SECTIONS as TUBE_SECTIONS } from "./engine/anatomy.js?v=9500908dbe";
 
 const WINDOW = 14.0; // seconds of score on screen
 const PLAYHEAD = 0.28;

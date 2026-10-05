@@ -20,12 +20,12 @@
 // passacaglia, the ground repeating in the bass while variations pile up
 // above, which is also how a looped drop accumulates layers.
 
-import * as M from "../music.js";
-import { makeSingerConfig } from "../choir.js";
+import * as M from "../music.js?v=74884be0cf";
+import { makeSingerConfig } from "../choir.js?v=e293c30802";
 import {
     BEAT, BAR, newTracks, append, chordSpan, chordAtBeat, placeEntry, fillVoice, smoothFollower,
     sortTrack, Score, rolmoPattern, horn, makeWriters
-} from "./common.js";
+} from "./common.js?v=036c2aecc9";
 
 const INTRO = 18.0;
 const OUTRO = 20.0;

@@ -5,10 +5,10 @@
 // independent glottal jitter, vibrato, pitch wander and onsets, whose small
 // disagreements are what a real choir sounds like.
 
-import { Singer, CONTROL_BLOCK, hzToNote } from "./singer.js";
-import { makeAnatomy, VOICE_TYPES } from "./anatomy.js";
-import { REGISTERS } from "./glottis.js";
-import { CLASSIC_BODY } from "./vowels.js";
+import { Singer, CONTROL_BLOCK, hzToNote } from "./singer.js?v=27da92ec4d";
+import { makeAnatomy, VOICE_TYPES } from "./anatomy.js?v=9500908dbe";
+import { REGISTERS } from "./glottis.js?v=aa724f7289";
+import { CLASSIC_BODY } from "./vowels.js?v=260f005eba";
 
 export const MAX_SINGERS = 24;
 

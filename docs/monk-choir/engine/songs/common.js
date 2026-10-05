@@ -4,7 +4,7 @@
 // Event writers that need a clock come from makeWriters(at), where at()
 // maps a grid beat to seconds for the song being built.
 
-import * as M from "../music.js";
+import * as M from "../music.js?v=74884be0cf";
 
 export const TEMPO = 140.0;
 export const BEAT = 60.0 / TEMPO;

@@ -16,8 +16,8 @@
 // at any frequency with no time stepping. Resonances are then read off |H|.
 // tests/ checks this against the impulse response of the time-domain tract.
 
-import { SECTIONS } from "./anatomy.js";
-import { SECTION_LOSS, LIP_REFLECTION, junctionCoefficient } from "./tract.js";
+import { SECTIONS } from "./anatomy.js?v=9500908dbe";
+import { SECTION_LOSS, LIP_REFLECTION, junctionCoefficient } from "./tract.js?v=711fe62fc7";
 
 // Scratch, reused by every call (single-threaded use).
 const RHO = new Float64Array(SECTIONS + 1);

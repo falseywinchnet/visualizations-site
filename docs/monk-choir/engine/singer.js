@@ -18,11 +18,11 @@
 import {
     SECTIONS, SPEED_OF_SOUND, MAX_NASAL_SECTIONS, makeArticulation, copyArticulation,
     areaFunction, nasalAreas, velumJunction, velumArea, lipRadius, ARTICULATION_KEYS, VOICE_TYPES
-} from "./anatomy.js";
-import { Tract, radiationPole, SECTION_LOSS } from "./tract.js";
-import { Glottis, makeVoiceSource, copyVoiceSource } from "./glottis.js";
-import { scanPeaks } from "./analysis.js";
-import { VOWEL_SHAPES } from "./vowels.js";
+} from "./anatomy.js?v=9500908dbe";
+import { Tract, radiationPole, SECTION_LOSS } from "./tract.js?v=711fe62fc7";
+import { Glottis, makeVoiceSource, copyVoiceSource } from "./glottis.js?v=aa724f7289";
+import { scanPeaks } from "./analysis.js?v=887637021b";
+import { VOWEL_SHAPES } from "./vowels.js?v=260f005eba";
 
 export const CONTROL_BLOCK = 64;
 const FIT_KEYS = ["tonguePos", "tongueHeight", "jaw", "lipAperture", "lipProtrusion"];

@@ -2,11 +2,12 @@
 // the pad and parameters; telemetry (mouth shapes, pitches, resonances) is
 // posted back for the drawing.
 
-import { ClassicMonk } from "./engine/classic.js";
-import { Choir } from "./engine/choir.js";
-import { SongEngine, ROLMO } from "./engine/song.js";
-import { FUGUE } from "./engine/songs/fugue.js";
-import { PASSACAGLIA } from "./engine/songs/passacaglia.js";
+import { ClassicMonk } from "./engine/classic.js?v=a0051c9211";
+import { Choir } from "./engine/choir.js?v=e293c30802";
+import { SongEngine, ROLMO } from "./engine/song.js?v=78bbd92ccc";
+import { FUGUE } from "./engine/songs/fugue.js?v=0383378de8";
+import { PASSACAGLIA } from "./engine/songs/passacaglia.js?v=6a59a62492";
+import { HdrStage } from "./engine/hdrstage.js?v=605e171c06";
 
 const SONGS = { rolmo: ROLMO, fugue: FUGUE, passacaglia: PASSACAGLIA };
 
@@ -18,6 +19,7 @@ class MonkProcessor extends AudioWorkletProcessor {
         this.mode = "classic";
         this.song = null;
         this.songId = "";
+        this.hdr = null;
         this.classicBufL = new Float32Array(128);
         this.classicBufR = new Float32Array(128);
         this.frames = 0;
@@ -65,19 +67,32 @@ class MonkProcessor extends AudioWorkletProcessor {
         } else if (m.type === "noteOn") {
             if (this.mode === "classic") {
                 this.classic.noteOn(m.note);
+            } else if (this.mode === "hdr") {
+                this.hdrStage().noteOn(m.note);
             } else {
                 this.choir.noteOn(m.note, m.velocity);
             }
         } else if (m.type === "noteOff") {
             if (this.mode === "classic") {
                 this.classic.noteOff(m.note);
+            } else if (this.mode === "hdr") {
+                this.hdrStage().noteOff(m.note);
             } else {
                 this.choir.noteOff(m.note);
             }
+        } else if (m.type === "hdrConfig") {
+            this.hdrStage().configure(m.voiceType, m.register);
+        } else if (m.type === "hdrSet") {
+            this.hdrStage().set(m.name, m.value);
+        } else if (m.type === "hdrPad") {
+            this.hdrStage().pad(m.note, m.vowel, m.down);
         } else if (m.type === "allOff") {
             this.classic.held_notes = [];
             this.classic.noteOff(-1);
             this.choir.allNotesOff();
+            if (this.hdr !== null) {
+                this.hdr.allOff();
+            }
         } else if (m.type === "classicPad") {
             this.receiveClassicPad(m);
         } else if (m.type === "classicParam") {
@@ -89,6 +104,13 @@ class MonkProcessor extends AudioWorkletProcessor {
         } else if (m.type === "choirPad") {
             this.choir.pad(m.note, m.down);
         }
+    }
+
+    hdrStage() {
+        if (this.hdr === null) {
+            this.hdr = new HdrStage(sampleRate);
+        }
+        return this.hdr;
     }
 
     receiveClassicPad(m) {
@@ -138,6 +160,8 @@ class MonkProcessor extends AudioWorkletProcessor {
         const n = l.length;
         if (this.mode === "classic") {
             this.classic.process(l, r, n);
+        } else if (this.mode === "hdr") {
+            this.hdrStage().process(l, r, n);
         } else if (this.mode === "song") {
             if (this.song !== null) {
                 this.song.process(l, r, n);
@@ -151,7 +175,12 @@ class MonkProcessor extends AudioWorkletProcessor {
         this.frames = this.frames + n;
         if (this.frames >= 1600) {
             this.frames = 0;
-            if (this.mode === "song") {
+            if (this.mode === "hdr") {
+                const t = this.hdrStage().telemetry();
+                t.type = "telemetry";
+                t.mode = "hdr";
+                this.port.postMessage(t);
+            } else if (this.mode === "song") {
                 if (this.song !== null) {
                     const t = this.song.telemetry();
                     t.type = "telemetry";

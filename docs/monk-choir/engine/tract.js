@@ -14,7 +14,7 @@
 // through a one-pole low-pass (high frequencies radiate, low frequencies
 // return). The output is the volume velocity leaving the lips plus nostrils.
 
-import { SECTIONS, MAX_NASAL_SECTIONS } from "./anatomy.js";
+import { SECTIONS, MAX_NASAL_SECTIONS } from "./anatomy.js?v=9500908dbe";
 
 export const SECTION_LOSS = 0.9993;
 export const LIP_REFLECTION = 0.97;
@@ -77,6 +77,19 @@ export class Tract {
         this.nasalEnergy = 0.0;
         this.inputScale = 1.0;
         this.hasShape = false;
+        // Optional pressure source between sections injIndex-1 and injIndex
+        // (a dipole: half into each travelling direction), set per tick.
+        this.injIndex = -1;
+        this.injValue = 0.0;
+    }
+
+    // Acoustic pressure at the glottal end of the tube.
+    glottalPressure() {
+        return this.R[0] + this.L[0];
+    }
+
+    pressureAt(i) {
+        return this.R[i] + this.L[i];
     }
 
     reset() {
@@ -225,6 +238,10 @@ export class Tract {
             outL[vj] = L[vj] + w;
         }
 
+        if (this.injIndex > 0) {
+            outR[this.injIndex] = outR[this.injIndex] + 0.5 * this.injValue;
+            outL[this.injIndex] = outL[this.injIndex] - 0.5 * this.injValue;
+        }
         for (let i = 0; i < n; i = i + 1) {
             R[i] = outR[i] * loss;
             L[i] = outL[i + 1] * loss;

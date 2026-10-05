@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sangha monk choir</title>
 <meta name="description" content="A singing-monk synthesizer: the classic 2002 monk voice reproduced sample for sample, then rebuilt as physical singers with their own throats, mouths and registers — choirs, sopranos, falsetto, Gyuto chord chant, ventricular half tones, khöömei and sygyt.">
-<link rel="stylesheet" href="./style.css">
+<link rel="stylesheet" href="./style.css?v=db6ca817bb">
 </head>
 <body>
 <header class="top">
@@ -17,6 +17,7 @@
     <button id="mode-classic" role="tab" aria-selected="true" class="on">Classic monk</button>
     <button id="mode-choir" role="tab" aria-selected="false">Physical choir</button>
     <button id="mode-song" role="tab" aria-selected="false">Song</button>
+    <button id="mode-hdr" role="tab" aria-selected="false">HDR voice</button>
   </div>
   <div class="top-actions">
     <button id="midi-button" class="ghost" title="Use a MIDI keyboard">MIDI</button>
@@ -48,6 +49,29 @@
     <canvas id="score" aria-label="Score: every voice as a line, pitch upward, time to the right"></canvas>
     <div id="roll-legend" class="roll-legend"></div>
     <ol id="song-sections" class="song-sections"></ol>
+  </section>
+
+  <section id="hdr-panel" class="panel hdr hidden">
+    <div class="hdr-head">
+      <div>
+        <h2>HDR voice</h2>
+        <p class="lede">The physical singer rendered across more of its range: shadows (turbulence where the air is fast, a body whose breath, tremor and heartbeat move pitch, loudness and fold pressure together), highlights (the folds' collision, cross-modes above 5 kHz), and a glottis that hears its own tube. The layers sum exactly: solo any of them.</p>
+      </div>
+      <div class="ab" role="group" aria-label="Model">
+        <button id="hdr-model-base" class="ghost">Physical</button>
+        <button id="hdr-model-hdr" class="ghost on">HDR</button>
+      </div>
+    </div>
+    <canvas id="hdr-spectrogram" aria-label="Spectrogram, 120 dB range"></canvas>
+    <p class="caption small">Spectrogram over 120 dB (50 Hz – 20 kHz, log). The quiet detail the layers add lives in the dark third of this range.</p>
+    <div class="exposures" role="group" aria-label="Exposure">
+      <button data-exposure="fused" class="ghost on">Fused</button>
+      <button data-exposure="mid" class="ghost">Midtones</button>
+      <button data-exposure="shadow" class="ghost">Shadows</button>
+      <button data-exposure="high" class="ghost">Highlights</button>
+    </div>
+    <div class="controls" id="hdr-controls"></div>
+    <div class="hdr-meters" id="hdr-meters"></div>
   </section>
 
   <section class="play">
@@ -117,6 +141,7 @@
         <p><strong>The song (Rol-mo at 140).</strong> Monastic ritual music is not harmony led by a conductor. It is independent cycles layered together, and each has a cousin in a bass drop. Dungchen are played in pairs that overlap, so the drone never breaks: here they become the sub-bass and the brass stabs. Rolmo cymbal strokes accelerate into rolls and slow down like a bouncing ball: the build's snare roll is the same gesture forced onto a grid. Two gyaling play one melody with their own ornaments, which becomes the doubled lead. The free ritual pulse settles at 70 BPM, exactly the half-time feel of a 140 BPM drop. The drop's “wobble” is a basso's vocal tract running the vowel orbit at the tempo, growling with the ventricular half tone, while a sygyt singer whistles the hook on harmonics 8–12. The melodies and rhythms are original; the chanted syllables are the traditional <em>om mani padme hum</em>. The instruments are signal models of how each one sounds (lip buzz, double reed, cymbal and membrane modes), not waveguide physics like the voices.</p>
         <p><strong>The fugue (Fugue in C minor for throats).</strong> Five minutes built from one original two-bar subject. It is answered at the fifth against a countersubject written for it, and slowed fourfold into a cantus firmus for the monks. It is walked around the circle of fifths in episodes, overlapped with itself one bar apart at the octave over dominant and tonic pedals (stretto), turned upside down, harmonized as four-part chorales by a search over chords and voice leading, and set in canon between the chant and a throat bass. The overtone singer carries two lines at once: for every note it picks a drone and a harmonic of that drone, preferring drones in the current chord. The drops borrow general bass-music technique (call and response, switching timbre within a bar, pitch dives, a short transient near 200 Hz at the head of each call, syncopated gaps) and play it on three throats instead of three synth patches. It ends with a Picardy third, and that major third is the overtone singer's 10th harmonic, the same overtone the Gyuto monks tune to. An audit counts the counterpoint: about 8% of voice pairs are dissonant on strong beats over the whole piece, mostly in the pedal-point builds. A few dozen parallel fifths and octaves remain across five minutes and seven voices.</p>
         <p><strong>The passacaglia (Passacaglia on a Throat Ground).</strong> Written after measuring a 30-second clip of bass-music sound design. The measurements were technique, not notes. The sub and the mid-bass are independent layers: their envelopes are uncorrelated. The sub keeps its own phrasing, with a gap of about a beat and a half every two bars. A kick falls about 16 semitones onto the sub's pitch every half bar. The mid-bass talks in held, vowel-like plateaus joined by fast V-shaped resonance sweeps. Parallel descending sweeps fill the gaps, and a high tone is held above with a slow vibrato. Here a throat does each of those things. The parallel sweep is the throat itself getting longer: the larynx lowers and the lips push out, so every formant slides down together. A real tract can only manage about three semitones that way, so it is combined with a vowel sweep. The form is a passacaglia: the descending A–G–F–E ground repeats under sixteen variations, among them a canon in free imitation, the ground rising into the upper voices, the theme sinking into the chant, a chorale, a stretto and three drops. Audit: 6.6% of voice pairs dissonant on strong beats.</p>
+        <p><strong>The HDR voice.</strong> The physical voice renders the midtones well: harmonics through formants, within about 40 dB of the loudest partial. The HDR tab adds what lives in the shadows and the highlights, and lets the source hear the tube. The tube is linear for a given shape, so it runs three times on the same shape: voiced flow, turbulence, and fold collisions. Their sum is the voice, and each can be soloed without approximation. Five experiments. (1) The glottis prescribes only its opening; the flow follows the pressure across it, with the inertia of the air in the glottis lagging it. (2) Turbulence is born at the narrowest point of the mouth, grows with the jet's speed past a threshold, and is coloured by jet speed over gap width. (3) A contact transient when the folds close, scaled by closing speed squared: pressed voice clicks, falsetto (which never closes) makes none. (4) Transverse resonances of the widest section (1.84, 3.05 and 3.83 × c/πd) driven by the tube's own pressure. (5) One physiological state (breath pressure, laryngeal tremor, heartbeat) moves pitch, loudness and fold pressure together. Measured against the physical voice on the same notes (chest, baritone): harmonics-to-noise ratio 14.8 dB instead of 4.0 dB, energy above 5 kHz −17 dB instead of −5.5 dB, and frame-level pitch–loudness correlation 0.51 instead of −0.01. The comparison is loudness-matched. Measuring it showed that the physical voice's breath noise was shaped as a high-pass, which made it too hissy; that voice is left unchanged so the songs sound as before.</p>
         <p class="small">Numbers checked by the test suite in this page's source: the closed-form tube response matches the time-domain waveguide to 10<sup>−13</sup>; scaling a body by 0.8 raises every resonance by exactly 1.25; Gyuto locking settles at 327/654 Hz for a 65.4 Hz fundamental; khöömei holds harmonics 8–12 of 110 Hz at 8–10 dB above their neighbours, and sygyt holds 10–12 at 17 dB.</p>
         <p class="small">Credits: the classic engine is ported from <a href="https://github.com/JonET/monksynth">MonkSynth</a> by Jonathan Taylor (MIT licence, notice in <code>engine/classic.js</code>), itself a reimplementation of AudioNerdz's 2002 freeware plugin. The physical engine, its anatomy and register models, and the drawings are original to this page. Research the presets draw on: Smith, Stevens &amp; Tomlinson (1967) on Gyuto chant; Lindestad et al. (2001) and Bailly, Henrich &amp; Pelorson (2010) on ventricular period doubling; Kob (2004) on sygyt.</p>
       </div>
@@ -124,6 +149,6 @@
   </section>
 </main>
 
-<script type="module" src="./app.js"></script>
+<script type="module" src="./app.js?v=581b83e9c9"></script>
 </body>
 </html>
