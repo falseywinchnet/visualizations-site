@@ -4,6 +4,7 @@
 
 import { ClassicMonk } from "./engine/classic.js";
 import { Choir } from "./engine/choir.js";
+import { SongEngine } from "./engine/song.js";
 
 class MonkProcessor extends AudioWorkletProcessor {
     constructor() {
@@ -11,6 +12,7 @@ class MonkProcessor extends AudioWorkletProcessor {
         this.classic = new ClassicMonk(sampleRate);
         this.choir = new Choir(sampleRate);
         this.mode = "classic";
+        this.song = null;
         this.classicBufL = new Float32Array(128);
         this.classicBufR = new Float32Array(128);
         this.frames = 0;
@@ -23,6 +25,31 @@ class MonkProcessor extends AudioWorkletProcessor {
             this.mode = m.mode;
             this.classic.noteOff(-1);
             this.choir.allNotesOff();
+            if (this.song !== null) {
+                this.song.stop();
+            }
+            if (m.mode === "song" && this.song === null) {
+                this.song = new SongEngine(sampleRate);
+                this.song.warmUp();
+                this.port.postMessage({ type: "songReady" });
+            }
+        } else if (m.type === "songPlay") {
+            if (this.song !== null) {
+                if (this.song.ended) {
+                    this.song.seek(0.0);
+                    this.song.ended = false;
+                }
+                this.song.play();
+            }
+        } else if (m.type === "songStop") {
+            if (this.song !== null) {
+                this.song.stop();
+            }
+        } else if (m.type === "songSeek") {
+            if (this.song !== null) {
+                this.song.seek(m.time);
+                this.song.ended = false;
+            }
         } else if (m.type === "noteOn") {
             if (this.mode === "classic") {
                 this.classic.noteOn(m.note);
@@ -99,8 +126,12 @@ class MonkProcessor extends AudioWorkletProcessor {
         const n = l.length;
         if (this.mode === "classic") {
             this.classic.process(l, r, n);
-            if (r === l) {
-                // mono output: nothing else to do
+        } else if (this.mode === "song") {
+            if (this.song !== null) {
+                this.song.process(l, r, n);
+            } else {
+                l.fill(0.0);
+                r.fill(0.0);
             }
         } else {
             this.choir.process(l, r, n);
@@ -108,7 +139,14 @@ class MonkProcessor extends AudioWorkletProcessor {
         this.frames = this.frames + n;
         if (this.frames >= 1600) {
             this.frames = 0;
-            if (this.mode === "classic") {
+            if (this.mode === "song") {
+                if (this.song !== null) {
+                    const t = this.song.telemetry();
+                    t.type = "telemetry";
+                    t.mode = "song";
+                    this.port.postMessage(t);
+                }
+            } else if (this.mode === "classic") {
                 this.port.postMessage({
                     type: "telemetry", mode: "classic",
                     vowel: this.classic.currentVowel(),

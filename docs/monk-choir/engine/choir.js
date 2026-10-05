@@ -12,6 +12,10 @@ import { CLASSIC_BODY } from "./vowels.js";
 
 export const MAX_SINGERS = 24;
 
+// Rate multipliers for the "ratio" oscillator mode: small-integer
+// polyrhythms against the base rate.
+export const OSC_RATIOS = [1.0, 1.5, 2.0, 1.25, 4.0 / 3.0, 5.0 / 3.0, 3.0, 1.75, 2.5, 0.75, 0.5, 1.2];
+
 export function makeSingerConfig(type, register, interval) {
     return {
         type: type,               // key of VOICE_TYPES or "classic"
@@ -30,7 +34,12 @@ export function makeSingerConfig(type, register, interval) {
         epilarynx: 0.3,
         larynx: 0.0,
         effort: 0.6,
-        lengthScale: 1.0          // individual body size around the type
+        lengthScale: 1.0,         // individual body size around the type
+        oscRate: null,            // per-singer vowel-oscillator overrides (null: follow the ensemble)
+        oscDepth: null,
+        oscRound: null,
+        oscPhase: null,
+        oscShape: null
     };
 }
 
@@ -153,9 +162,18 @@ export class Choir {
         this.sampleRate = sampleRate;
         this.members = [];
         this.held = [];
+        this.velocity = 0.85;
         this.voicing = "stack";   // stack: every singer sings note+interval; chord: split held notes
         this.vowel = 0.5;
         this.hum = 0.0;
+        this.stopLip = 0.0;
+        this.stopTip = 0.0;
+        this.velumOpen = 0.0;
+        this.vowelGlide = 0.06;
+        // Ensemble vowel oscillator. Each singer runs its own orbit; mode
+        // sets how their periods relate: sync (same), ratio (small-integer
+        // polyrhythm), free (independent periods, spread wide or narrow).
+        this.osc = { depth: 0.0, round: 0.0, rate: 0.25, spread: 0.5, mode: "free", shape: "sine" };
         this.bend = 0.0;
         this.halftone = 0.0;
         this.harmonic = 10;
@@ -215,6 +233,11 @@ export class Choir {
     applyGlobals(singer, cfg) {
         singer.vowelTarget = this.vowel;
         singer.humTarget = this.hum;
+        singer.stopLipTarget = this.stopLip;
+        singer.stopTipTarget = this.stopTip;
+        singer.velumOpenTarget = this.velumOpen;
+        singer.vowelGlide = this.vowelGlide;
+        this.applyOscillator(singer, cfg);
         singer.bend = this.bend;
         singer.glideRate = 1.0 / Math.max(this.glide, 0.005) * 2.0;
         if (cfg.tuning === "overtone" || cfg.tuning === "sygyt") {
@@ -225,7 +248,63 @@ export class Choir {
         singer.effort = Math.min(1.0, cfg.effort * this.effortScale);
     }
 
+    singerIndex(singer) {
+        for (let i = 0; i < this.members.length; i = i + 1) {
+            if (this.members[i].singer === singer) {
+                return i;
+            }
+        }
+        return this.members.length;
+    }
+
+    applyOscillator(singer, cfg) {
+        const o = this.osc;
+        const i = this.singerIndex(singer);
+        let mult = 1.0;
+        let phase = 0.0;
+        if (o.mode === "ratio") {
+            mult = OSC_RATIOS[i % OSC_RATIOS.length];
+            phase = 0.0;
+        } else if (o.mode === "free") {
+            // golden-ratio sequence: well spread, reproducible per seat
+            const u = (i * 0.6180339887 + 0.37) % 1.0;
+            mult = Math.exp(o.spread * (u - 0.5) * 2.0 * Math.log(3.0));
+            phase = (i * 0.7548776662) % 1.0;
+        }
+        const rate = cfg.oscRate !== null && cfg.oscRate !== undefined ? cfg.oscRate : o.rate * mult;
+        const depth = cfg.oscDepth !== null && cfg.oscDepth !== undefined ? cfg.oscDepth : o.depth;
+        const round = cfg.oscRound !== null && cfg.oscRound !== undefined ? cfg.oscRound : o.round;
+        const shape = cfg.oscShape !== null && cfg.oscShape !== undefined ? cfg.oscShape : o.shape;
+        const wasRunning = singer.oscRate > 0.0;
+        singer.oscRate = rate;
+        singer.oscDepth = depth;
+        singer.oscRound = round;
+        singer.oscShape = shape;
+        if (cfg.oscPhase !== null && cfg.oscPhase !== undefined) {
+            if (!wasRunning) {
+                singer.oscPhase = cfg.oscPhase;
+            }
+        } else if (!wasRunning || o.mode === "sync") {
+            singer.oscPhase = phase;
+        }
+    }
+
+    // Restart every singer's orbit from its seat phase (used for sync).
+    resetOscillatorPhases() {
+        for (let i = 0; i < this.members.length; i = i + 1) {
+            this.members[i].singer.oscRate = 0.0;
+            this.applyOscillator(this.members[i].singer, this.members[i].cfg);
+        }
+    }
+
     setGlobal(name, value) {
+        if (name.indexOf("osc.") === 0) {
+            const key = name.substring(4);
+            this.osc[key] = value;
+            if (key === "mode") {
+                this.resetOscillatorPhases();
+            }
+        }
         if (name === "vowel") {
             this.vowel = value;
         } else if (name === "hum") {
@@ -246,6 +325,10 @@ export class Choir {
             this.hall.mix = value;
         } else if (name === "hallTime") {
             this.hall.setTime(value, this.hall.damping);
+        } else if (name === "stopLip" || name === "stopTip" || name === "velumOpen") {
+            this[name] = value;
+        } else if (name === "vowelGlide") {
+            this.vowelGlide = value;
         } else if (name === "voicing") {
             this.voicing = value;
             this.retarget(false);
@@ -306,7 +389,7 @@ export class Choir {
     }
 
     sing(member, note) {
-        member.singer.noteOn(note, this.velocity === undefined ? 0.85 : this.velocity);
+        member.singer.noteOn(note, this.velocity);
     }
 
     noteOn(note, velocity) {
@@ -374,6 +457,34 @@ export class Choir {
         }
     }
 
+    // Render the ensemble without the hall, gain staging or clipping, adding
+    // into outL/outR from offset. Used by the song engine's own mix.
+    renderDry(outL, outR, offset, n) {
+        let done = 0;
+        while (done < n) {
+            const m = Math.min(CONTROL_BLOCK, n - done);
+            const l = this.mixL;
+            const r = this.mixR;
+            l.fill(0.0, 0, m);
+            r.fill(0.0, 0, m);
+            let any = false;
+            for (let i = 0; i < this.members.length; i = i + 1) {
+                const s = this.members[i].singer;
+                if (s.isAwake()) {
+                    s.render(l, r, 0, m);
+                    any = true;
+                }
+            }
+            if (any) {
+                for (let k = 0; k < m; k = k + 1) {
+                    outL[offset + done + k] = outL[offset + done + k] + l[k];
+                    outR[offset + done + k] = outR[offset + done + k] + r[k];
+                }
+            }
+            done = done + m;
+        }
+    }
+
     telemetry() {
         const out = [];
         for (let i = 0; i < this.members.length; i = i + 1) {
@@ -384,7 +495,8 @@ export class Choir {
                 velum: s.art.velum, length: s.length, F1: s.measuredF1, F2: s.measuredF2,
                 vent: s.source.vent, oq: s.source.oq, gate: s.gate,
                 tipPos: s.art.tipPos, tipClose: s.art.tipClose, epilarynx: s.art.epilarynx, larynx: s.art.larynx,
-                tuning: s.tuning, harmonic: s.harmonic
+                tuning: s.tuning, harmonic: s.harmonic,
+                vowel: s.vowelEff, oscRate: s.oscRate, oscValue: s.oscValue
             });
         }
         return out;

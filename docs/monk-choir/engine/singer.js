@@ -19,7 +19,7 @@ import {
     SECTIONS, SPEED_OF_SOUND, MAX_NASAL_SECTIONS, makeArticulation, copyArticulation,
     areaFunction, nasalAreas, velumJunction, velumArea, lipRadius, ARTICULATION_KEYS, VOICE_TYPES
 } from "./anatomy.js";
-import { Tract, radiationPole } from "./tract.js";
+import { Tract, radiationPole, SECTION_LOSS } from "./tract.js";
 import { Glottis, makeVoiceSource, copyVoiceSource } from "./glottis.js";
 import { scanPeaks } from "./analysis.js";
 import { VOWEL_SHAPES } from "./vowels.js";
@@ -60,6 +60,15 @@ function clamp(x, lo, hi) {
     return x;
 }
 
+// Exponential approach with separate rise and fall time constants.
+function approachAsym(x, target, dt, riseTau, fallTau) {
+    let tau = fallTau;
+    if (target > x) {
+        tau = riseTau;
+    }
+    return x + (target - x) * (1.0 - Math.exp(-dt / tau));
+}
+
 function catmullRom(p0, p1, p2, p3, t) {
     const t2 = t * t;
     const t3 = t2 * t;
@@ -90,6 +99,30 @@ export function vowelArticulation(vowel, out) {
     out.lipAperture = clamp(out.lipAperture, 0.03, 1.0);
     out.lipProtrusion = clamp(out.lipProtrusion, 0.0, 1.0);
     return out;
+}
+
+// Periodic shapes on phase (cycles), range -1..1.
+//   sine, triangle, ramp (slow rise, snap back: "yoi"), step (held ends
+//   with quick moves between them).
+export function oscillatorWave(shape, phase) {
+    const p = phase - Math.floor(phase);
+    if (shape === "triangle") {
+        if (p < 0.5) {
+            return 4.0 * p - 1.0;
+        }
+        return 3.0 - 4.0 * p;
+    }
+    if (shape === "ramp") {
+        if (p < 0.85) {
+            return -1.0 + 2.0 * p / 0.85;
+        }
+        return 1.0 - 2.0 * (p - 0.85) / 0.15;
+    }
+    if (shape === "step") {
+        const s = Math.sin(2.0 * Math.PI * p);
+        return Math.tanh(4.0 * s) / Math.tanh(4.0);
+    }
+    return Math.sin(2.0 * Math.PI * p);
 }
 
 export function noteToHz(note) {
@@ -131,6 +164,22 @@ export class Singer {
         this.vowelGlide = 0.06; // seconds
         this.hum = 0.0;
         this.humTarget = 0.0;
+        // Consonant closures: lips (p, b, m), tongue tip (t, d, n), velum (n, m).
+        this.stopLip = 0.0;
+        this.stopLipTarget = 0.0;
+        this.stopTip = 0.0;
+        this.stopTipTarget = 0.0;
+        this.velumOpen = 0.0;
+        this.velumOpenTarget = 0.0;
+        // Vowel-space oscillator: an orbit around the vowel target. One axis
+        // runs along the vowel line (ooh..eeh), the other is lip rounding.
+        this.oscRate = 0.0;    // Hz
+        this.oscDepth = 0.0;   // vowel-axis amplitude (0..0.5)
+        this.oscRound = 0.0;   // rounding-axis amplitude (0..1)
+        this.oscPhase = 0.0;   // cycles
+        this.oscShape = "sine";
+        this.oscValue = 0.0;
+        this.vowelEff = 0.5;
         this.epilarynx = 0.3;
         this.larynx = 0.0;
         this.base = makeArticulation();
@@ -143,7 +192,7 @@ export class Singer {
         this.r1Mix = 0.0;      // soprano vowel modification toward open "ah"
         this.tuneLip = 0.0;    // gyuto lip-aperture offset for F1
         this.peaks = new Float64Array(8);
-        this.tuneCounter = 0;
+        this.tuneCounter = seed % 4; // stagger the analysis across singers
         this.measuredF1 = 0.0;
         this.measuredF2 = 0.0;
 
@@ -161,6 +210,7 @@ export class Singer {
         this.randomState = (seed * 2654435761) >>> 0;
 
         this.gate = false;
+        this.velocity = 1.0;
         this.envelope = 0.0;
         this.attack = 0.08;
         this.release = 0.25;
@@ -278,6 +328,11 @@ export class Singer {
         const vg = 1.0 - Math.exp(-dt / Math.max(this.vowelGlide, 0.002));
         this.vowel = this.vowel + (this.vowelTarget - this.vowel) * vg;
         this.hum = this.hum + (this.humTarget - this.hum) * (1.0 - Math.exp(-dt / 0.05));
+        // Closures form fast and open more slowly, which also tames the
+        // pressure release after a seal.
+        this.stopLip = approachAsym(this.stopLip, this.stopLipTarget, dt, 0.01, 0.03);
+        this.stopTip = approachAsym(this.stopTip, this.stopTipTarget, dt, 0.01, 0.03);
+        this.velumOpen = approachAsym(this.velumOpen, this.velumOpenTarget, dt, 0.015, 0.04);
         if (this.tuning === "overtone") {
             mixInto(this.base, KHOOMEI_PATH[0], KHOOMEI_PATH[1], this.pathQ);
         } else if (this.tuning === "gyuto") {
@@ -291,7 +346,15 @@ export class Singer {
         } else if (this.posture !== null) {
             copyArticulation(this.posture, this.base);
         } else {
-            vowelArticulation(this.vowel, this.base);
+            this.advanceOscillator(dt);
+            this.vowelEff = clamp(this.vowel + this.oscDepth * this.oscValue, 0.0, 1.0);
+            vowelArticulation(this.vowelEff, this.base);
+            if (this.oscRound > 0.0) {
+                // quarter cycle out of phase with the vowel axis: an ellipse
+                const r = this.oscRound * oscillatorWave(this.oscShape, this.oscPhase + 0.25);
+                this.base.lipProtrusion = clamp(this.base.lipProtrusion + 0.6 * r, 0.0, 1.0);
+                this.base.lipAperture = clamp(this.base.lipAperture * (1.0 - 0.45 * r), 0.03, 1.0);
+            }
             this.base.tipPos = 0.88;
             this.base.tipClose = 0.0;
             this.base.velum = 0.0;
@@ -316,6 +379,27 @@ export class Singer {
             this.art.lipAperture = this.art.lipAperture * (1.0 - this.hum);
             this.art.velum = Math.max(this.art.velum, 0.9 * this.hum);
         }
+        if (this.stopLip > 0.001) {
+            // Sealed lips still leak a little (the cheeks and walls yield).
+            this.art.lipAperture = Math.max(0.012, this.art.lipAperture * (1.0 - this.stopLip));
+        }
+        if (this.stopTip > 0.001) {
+            this.art.tipPos = 0.9;
+            this.art.tipClose = Math.max(this.art.tipClose, this.stopTip);
+        }
+        if (this.velumOpen > 0.001) {
+            this.art.velum = Math.max(this.art.velum, 0.9 * this.velumOpen);
+        }
+    }
+
+    advanceOscillator(dt) {
+        if (this.oscRate <= 0.0 || (this.oscDepth <= 0.0 && this.oscRound <= 0.0)) {
+            this.oscValue = 0.0;
+            return;
+        }
+        this.oscPhase = this.oscPhase + this.oscRate * dt;
+        this.oscPhase = this.oscPhase - Math.floor(this.oscPhase);
+        this.oscValue = oscillatorWave(this.oscShape, this.oscPhase);
     }
 
     // Feedback formant tuning, run every few control blocks. The singer's
@@ -326,6 +410,11 @@ export class Singer {
         if (this.tuning === "none") {
             this.r1Mix = this.r1Mix * Math.exp(-dt / 0.15);
             this.tuneLip = this.tuneLip * Math.exp(-dt / 0.15);
+            return;
+        }
+        // A closed or nasalised mouth has no oral resonance to listen to:
+        // hold the tuning until it opens again (no wind-up during an Om).
+        if (this.hum > 0.15 || this.stopLip > 0.15 || this.stopTip > 0.15 || this.velumOpen > 0.15) {
             return;
         }
         const rate = this.tickRate;
@@ -442,7 +531,12 @@ export class Singer {
         const ratio = this.tickRate / this.sampleRate;
         this.updateShape(Math.max(1, Math.round(n * ratio)));
         const tickRatio = this.tickRate / this.sampleRate;
-        const amp = this.envelope * (0.35 + 0.65 * this.velocityOrOne()) * (0.4 + 0.9 * this.effort);
+        // A closed mouth with a closed velum lets pressure build above the
+        // glottis, so the flow through the folds (and the voicing) drops.
+        const occlusion = Math.max(this.stopLip, this.stopTip) * (1.0 - this.art.velum);
+        const amp = this.envelope * (0.35 + 0.65 * this.velocityOrOne()) * (0.4 + 0.9 * this.effort) * (1.0 - 0.9 * occlusion);
+        // Behind a seal the yielding walls absorb the trapped pressure.
+        this.tract.loss = SECTION_LOSS * (1.0 - 0.006 * occlusion);
         const glottis = this.glottis;
         const tract = this.tract;
         const src = this.source;

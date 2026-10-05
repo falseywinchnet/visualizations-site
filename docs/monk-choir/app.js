@@ -8,6 +8,8 @@ import { radiationPole } from "./engine/tract.js";
 import { responseCurve, findFormants, makeFormantSlots } from "./engine/analysis.js";
 import { vowelArticulation, noteToHz } from "./engine/singer.js";
 import { VOWEL_SHAPES, CLASSIC_BODY } from "./engine/vowels.js";
+import { buildScore, SECTIONS as SONG_SECTIONS, SONG_LENGTH } from "./engine/song.js";
+import { drawSongStage, drawScore, buildSongPanel, songTimeText } from "./songview.js";
 
 // ------------------------------------------------------------------ state
 
@@ -19,7 +21,7 @@ const state = {
     octave: 0,
     preset: PRESETS[0],
     config: null,
-    globals: { vowel: 0.5, hum: 0.0, halftone: 0.0, harmonic: 10, effort: 1.0, glide: 0.15, hallMix: 0.3, hallTime: 3.5, voicing: "stack", master: 0.6 },
+    globals: { vowel: 0.5, hum: 0.0, halftone: 0.0, harmonic: 10, effort: 1.0, glide: 0.15, hallMix: 0.3, hallTime: 3.5, voicing: "stack", master: 0.6, "osc.depth": 0.0, "osc.round": 0.0, "osc.rate": 0.25, "osc.rateUi": 0.32, "osc.spread": 0.5, "osc.mode": "free", "osc.shape": "sine" },
     classic: { voice: 0.5, glide: 0.5, vibrato: 0.0, vibratoRate: 0.5, delayMix: 0.8, delayRate: 0.5, unison: 1, detune: 0.0, spread: 0.0, aspiration: 0.5, volume: 0.1, level: 1.0 },
     telemetry: null,
     classicTelemetry: { vowel: 0.5, pitch: 0.5, active: false, amp: 0.0 },
@@ -30,13 +32,16 @@ const state = {
     keysDown: {},
     mouths: [],
     inspectDirty: true,
-    lastInspect: 0
+    lastInspect: 0,
+    song: null,
+    songReady: false
 };
 
 const VOWEL_NAMES = ["ooh", "ow", "ah", "ayh", "eeh"];
 const NOTE_NAMES = ["C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "A♯", "B"];
 const TUNINGS = { none: "—", r1: "F1 follows pitch", overtone: "khöömei", sygyt: "sygyt", gyuto: "Gyuto chord" };
 const PAD_LOW_NOTE = 36;
+const DOT_COLORS = ["#6fb59a", "#e9a23b", "#d96a4f", "#9ab6e0", "#f2cf6b", "#c58fd1", "#8fd1c3", "#e6b8a2"];
 const PAD_SPAN = 24;
 
 function noteName(n) {
@@ -108,13 +113,34 @@ function syncEngine() {
     post({ type: "choirConfig", config: state.config });
     const gk = Object.keys(state.globals);
     for (let i = 0; i < gk.length; i = i + 1) {
-        post({ type: "choirGlobal", name: gk[i], value: state.globals[gk[i]] });
+        if (gk[i] !== "osc.rateUi") {
+            post({ type: "choirGlobal", name: gk[i], value: state.globals[gk[i]] });
+        }
     }
 }
 
 function receiveTelemetry(event) {
     const m = event.data;
+    if (m.type === "songReady") {
+        state.songReady = true;
+        if (state.song.pendingPlay) {
+            state.song.pendingPlay = false;
+            post({ type: "songPlay" });
+            state.song.playing = true;
+        }
+        updateSongButton();
+        return;
+    }
     if (m.type !== "telemetry") {
+        return;
+    }
+    if (m.mode === "song") {
+        state.song.telemetry = m;
+        state.song.time = m.time;
+        if (m.ended && state.song.playing) {
+            state.song.playing = false;
+            updateSongButton();
+        }
         return;
     }
     if (m.mode === "classic") {
@@ -152,13 +178,24 @@ function noteOff(note) {
 
 function setMode(mode) {
     state.mode = mode;
-    $("mode-classic").classList.toggle("on", mode === "classic");
-    $("mode-choir").classList.toggle("on", mode === "choir");
-    $("mode-classic").setAttribute("aria-selected", String(mode === "classic"));
-    $("mode-choir").setAttribute("aria-selected", String(mode === "choir"));
+    const modes = ["classic", "choir", "song"];
+    for (let i = 0; i < modes.length; i = i + 1) {
+        $("mode-" + modes[i]).classList.toggle("on", mode === modes[i]);
+        $("mode-" + modes[i]).setAttribute("aria-selected", String(mode === modes[i]));
+    }
     $("classic-panel").classList.toggle("hidden", mode !== "classic");
     $("choir-panel").classList.toggle("hidden", mode !== "choir");
     $("inspector").classList.toggle("hidden", mode !== "choir");
+    $("song-panel").classList.toggle("hidden", mode !== "song");
+    document.querySelector(".play").classList.toggle("hidden", mode === "song");
+    if (mode === "song") {
+        state.song.playing = false;
+        updateSongButton();
+        if (!state.started) {
+            $("song-play").disabled = false;
+            $("song-play").textContent = "Play";
+        }
+    }
     post({ type: "mode", mode: mode });
     updatePadLabels();
     clearKeys();
@@ -170,6 +207,49 @@ function selectClassic() {
 
 function selectChoir() {
     setMode("choir");
+}
+
+function selectSong() {
+    setMode("song");
+}
+
+// ------------------------------------------------------------------ song transport
+
+function updateSongButton() {
+    const b = $("song-play");
+    if (state.started && !state.songReady) {
+        b.disabled = true;
+        b.textContent = "Preparing…";
+        return;
+    }
+    b.disabled = false;
+    b.textContent = state.song.playing ? "Pause" : "Play";
+}
+
+async function toggleSong() {
+    await ensureAudio();
+    if (!state.songReady) {
+        post({ type: "mode", mode: "song" });
+        updateSongButton();
+        state.song.pendingPlay = true;
+        return;
+    }
+    if (state.song.playing) {
+        post({ type: "songStop" });
+        state.song.playing = false;
+    } else {
+        post({ type: "songPlay" });
+        state.song.playing = true;
+    }
+    updateSongButton();
+}
+
+function seekSong(t) {
+    state.song.time = t;
+    post({ type: "songSeek", time: t });
+    if (state.song.playing) {
+        post({ type: "songPlay" });
+    }
 }
 
 // ------------------------------------------------------------------ controls
@@ -313,6 +393,35 @@ function buildChoirControls() {
     choirInputs.hallTime = makeSlider(c, { label: "Hall time", min: 0.8, max: 9, step: 0.1, value: state.globals.hallTime, format: fmtSeconds, onInput: choirSetter("hallTime") });
     choirInputs.master = makeSlider(c, { label: "Volume", min: 0, max: 1.5, step: 0.01, value: state.globals.master, format: fmtPercent, onInput: choirSetter("master") });
     choirInputs.voicing = makeSelect(c, { label: "Several keys held", options: [["stack", "newest note leads"], ["chord", "split the chord"]], value: state.globals.voicing, onInput: choirSetter("voicing") });
+    const head = document.createElement("h3");
+    head.className = "sub";
+    head.textContent = "Vowel orbit";
+    head.title = "Each singer's mouth circles through vowel space on its own period";
+    c.appendChild(head);
+    choirInputs["osc.depth"] = makeSlider(c, { label: "Orbit size (vowels)", min: 0, max: 0.5, step: 0.01, value: state.globals["osc.depth"], format: fmtFixed2, onInput: choirSetter("osc.depth"), title: "How far along ooh–ow–ah–ayh–eeh each mouth swings" });
+    choirInputs["osc.round"] = makeSlider(c, { label: "Orbit size (rounding)", min: 0, max: 1, step: 0.01, value: state.globals["osc.round"], format: fmtFixed2, onInput: choirSetter("osc.round"), title: "Lip rounding, a quarter cycle out of phase: the orbit becomes an ellipse" });
+    choirInputs["osc.rateUi"] = makeSlider(c, { label: "Speed", min: 0, max: 1, step: 0.005, value: state.globals["osc.rateUi"], format: formatOscRate, onInput: setOscRate });
+    choirInputs["osc.spread"] = makeSlider(c, { label: "Period spread", min: 0, max: 1, step: 0.01, value: state.globals["osc.spread"], format: fmtFixed2, onInput: choirSetter("osc.spread"), title: "In free mode: how different the singers' periods are" });
+    choirInputs["osc.mode"] = makeSelect(c, { label: "Periods", options: [["free", "each singer free"], ["ratio", "polyrhythm ratios"], ["sync", "all together"]], value: state.globals["osc.mode"], onInput: choirSetter("osc.mode") });
+    choirInputs["osc.shape"] = makeSelect(c, { label: "Motion", options: [["sine", "smooth (sine)"], ["triangle", "even (triangle)"], ["ramp", "yoi (ramp)"], ["step", "held vowels (step)"]], value: state.globals["osc.shape"], onInput: choirSetter("osc.shape") });
+}
+
+function oscRateFromUi(u) {
+    return 0.05 * Math.pow(160.0, u);
+}
+
+function formatOscRate(u) {
+    const r = oscRateFromUi(u);
+    if (r < 1.0) {
+        return (1.0 / r).toFixed(1) + " s period";
+    }
+    return r.toFixed(1) + " per s";
+}
+
+function setOscRate(u) {
+    state.globals["osc.rateUi"] = u;
+    state.globals["osc.rate"] = oscRateFromUi(u);
+    post({ type: "choirGlobal", name: "osc.rate", value: oscRateFromUi(u) });
 }
 
 function setGlobalInput(name, value) {
@@ -715,6 +824,22 @@ function drawPad() {
         ctx.lineTo(b.x * w, (1 - b.y) * h);
         ctx.stroke();
     }
+    if (m === "vowel" && state.telemetry !== null) {
+        for (let i = 0; i < state.telemetry.length; i = i + 1) {
+            const t = state.telemetry[i];
+            if (t.env < 0.03 || t.vowel === undefined) {
+                continue;
+            }
+            const note = 69 + 12 * Math.log2(t.f0 / 440);
+            const sx = Math.min(1, Math.max(0, (note - PAD_LOW_NOTE) / PAD_SPAN));
+            ctx.beginPath();
+            ctx.arc(sx * w, (1 - t.vowel) * h, 3 + 3 * t.env, 0, Math.PI * 2);
+            ctx.fillStyle = DOT_COLORS[i % DOT_COLORS.length];
+            ctx.globalAlpha = 0.85;
+            ctx.fill();
+            ctx.globalAlpha = 1.0;
+        }
+    }
     let px = state.padPoint.x;
     let py = state.padPoint.y;
     if (m === "classic" && !state.padDown) {
@@ -818,7 +943,12 @@ function keyDown(event) {
         }
         return;
     }
-    if (KEY_MAP[k] === undefined || event.repeat) {
+    if (k === " " && state.mode === "song") {
+        event.preventDefault();
+        toggleSong();
+        return;
+    }
+    if (KEY_MAP[k] === undefined || event.repeat || state.mode === "song") {
         return;
     }
     const note = BASE_NOTE + 12 * state.octave + KEY_MAP[k];
@@ -1031,6 +1161,12 @@ function drawStage() {
     ctx.fillStyle = "rgba(233,162,59,0.06)";
     ctx.fillRect(0, h - 26, w, 26);
     stageLayout.length = 0;
+    if (state.mode === "song") {
+        drawSongStage(ctx, w, h, state.song, drawMonk, smoothMouth, HUES);
+        const sec = SONG_SECTIONS[state.song.telemetry !== null ? state.song.telemetry.section : 0];
+        $("stage-caption").textContent = sec.name + ". " + sec.text;
+        return;
+    }
     if (state.mode === "classic") {
         const t = state.classicTelemetry;
         const art = makeArticulation();
@@ -1202,6 +1338,7 @@ function drawInspector() {
         ["F3", found > 2 ? inspectSlots[2].f.toFixed(0) + " Hz" : "—"],
         ["Open quotient", tel !== null ? tel.oq.toFixed(2) : reg.oq.toFixed(2)],
         ["Half tone", tel !== null ? Math.round(tel.vent * 100) + "%" : Math.round(reg.vent * 100) + "%"],
+        ["Vowel orbit", tel !== null && tel.oscRate > 0 && (state.globals["osc.depth"] > 0 || state.globals["osc.round"] > 0) ? (1 / tel.oscRate).toFixed(2) + " s period" : "still"],
         ["Tuning", TUNINGS[cfg.tuning] + (cfg.tuning === "overtone" || cfg.tuning === "sygyt" ? " #" + state.globals.harmonic : "")]
     ];
     const dl = $("readout");
@@ -1381,7 +1518,17 @@ function buildFitTable() {
 // ------------------------------------------------------------------ loop and start
 
 function frame() {
-    drawPad();
+    if (state.mode === "song") {
+        drawScore($("score"), fitCanvas($("score")), state.song);
+        $("song-time").textContent = songTimeText(state.song.time);
+        const items = $("song-sections").children;
+        const now = state.song.telemetry !== null ? state.song.telemetry.section : 0;
+        for (let i = 0; i < items.length; i = i + 1) {
+            items[i].classList.toggle("now", i === now);
+        }
+    } else {
+        drawPad();
+    }
     drawStage();
     drawInspector();
     requestAnimationFrame(frame);
@@ -1396,6 +1543,9 @@ function init() {
     loadPreset(PRESETS[0].id);
     $("mode-classic").addEventListener("click", selectClassic);
     $("mode-choir").addEventListener("click", selectChoir);
+    $("mode-song").addEventListener("click", selectSong);
+    state.song = buildSongPanel(buildScore(), SONG_SECTIONS, SONG_LENGTH, seekSong);
+    $("song-play").addEventListener("click", toggleSong);
     $("power").addEventListener("click", startAudio);
     $("midi-button").addEventListener("click", enableMidi);
     $("add-singer").addEventListener("click", addSinger);
