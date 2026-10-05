@@ -544,3 +544,14 @@ figcaption {
   gap: 8px;
   cursor: pointer;
 }
+
+.control.syllables {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.control.syllables label { margin-right: 6px; }
+.control.syllables button { padding: 4px 12px; }

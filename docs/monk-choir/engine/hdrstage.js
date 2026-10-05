@@ -2,7 +2,7 @@
 // extends with the same body, register and gestures.
 
 import { Singer, CONTROL_BLOCK } from "./singer.js?v=27da92ec4d";
-import { HdrVoice, LAYERS } from "./hdr.js?v=59f003b9e2";
+import { HdrVoice, LAYERS } from "./hdr.js?v=674df1f0c5";
 import { makeAnatomy } from "./anatomy.js?v=9500908dbe";
 import { makeVoiceSource } from "./glottis.js?v=aa724f7289";
 import { Hall } from "./choir.js?v=e293c30802";
@@ -45,6 +45,8 @@ export class HdrStage {
         this.hall.mix = 0.18;
         this.hall.setTime(2.2, 0.45);
         this.l = new Float32Array(CONTROL_BLOCK);
+        this.clock = 0.0;
+        this.queue = [];
         this.r = new Float32Array(CONTROL_BLOCK);
         this.build();
     }
@@ -117,6 +119,10 @@ export class HdrStage {
             e.high = e.high * lift;
             return;
         }
+        if (name === "syllable") {
+            this.saySyllable(value);
+            return;
+        }
         if (name === "hall") {
             this.hall.mix = value;
             return;
@@ -124,6 +130,43 @@ export class HdrStage {
         this.settings[name] = value;
         this.applySettings(this.hdr);
         this.applySettings(this.base);
+    }
+
+    // Short consonant/vowel gestures to hear the walls, burst and inertia.
+    saySyllable(kind) {
+        const now = this.clock;
+        const q = this.queue;
+        function at(t, field, value) {
+            q.push({ t: now + t, field: field, value: value });
+        }
+        if (kind === "b") {
+            at(0.0, "stopLipTarget", 1.0); at(0.15, "stopLipTarget", 0.0); at(0.0, "vowelTarget", 0.5);
+        } else if (kind === "m") {
+            at(0.0, "humTarget", 1.0); at(0.2, "humTarget", 0.0); at(0.0, "vowelTarget", 0.5);
+        } else if (kind === "d") {
+            at(0.0, "stopTipTarget", 1.0); at(0.12, "stopTipTarget", 0.0); at(0.0, "vowelTarget", 0.5);
+        } else if (kind === "s") {
+            at(0.0, "stopTipTarget", 0.93); at(0.35, "stopTipTarget", 0.0); at(0.0, "vowelTarget", 0.9);
+        } else if (kind === "ae") {
+            at(0.0, "vowelTarget", 0.5); at(0.35, "vowelTarget", 1.0);
+        } else if (kind === "ua") {
+            at(0.0, "vowelTarget", 0.0); at(0.35, "vowelTarget", 0.5);
+        }
+    }
+
+    runQueue(dt) {
+        this.clock = this.clock + dt;
+        const keep = [];
+        for (let i = 0; i < this.queue.length; i = i + 1) {
+            const e = this.queue[i];
+            if (e.t <= this.clock) {
+                this.hdr[e.field] = e.value;
+                this.base[e.field] = e.value;
+            } else {
+                keep.push(e);
+            }
+        }
+        this.queue = keep;
     }
 
     noteOn(note) {
@@ -172,6 +215,7 @@ export class HdrStage {
     process(outL, outR, n) {
         let done = 0;
         const voice = this.model === "hdr" ? this.hdr : this.base;
+        this.runQueue(n / this.sr);
         while (done < n) {
             const m = Math.min(CONTROL_BLOCK, n - done);
             const l = this.l;
@@ -203,7 +247,8 @@ export class HdrStage {
             velum: v.art.velum, length: v.length, oq: v.source.oq,
             meters: { mid: h.meter.mid, shadow: h.meter.shadow, high: h.meter.high },
             ps: h.ps, p0Ratio: h.p0Ratio, noiseCentre: h.noiseCentre, noiseGain: h.noiseGain,
-            cross: h.crossFreq.slice(), layers: Object.assign({}, h.layers)
+            cross: h.crossFreq.slice(), layers: Object.assign({}, h.layers),
+            trapped: h.trapped, subLength: h.sub.length
         };
     }
 }

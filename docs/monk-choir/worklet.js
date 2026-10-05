@@ -7,7 +7,7 @@ import { Choir } from "./engine/choir.js?v=e293c30802";
 import { SongEngine, ROLMO } from "./engine/song.js?v=78bbd92ccc";
 import { FUGUE } from "./engine/songs/fugue.js?v=0383378de8";
 import { PASSACAGLIA } from "./engine/songs/passacaglia.js?v=6a59a62492";
-import { HdrStage } from "./engine/hdrstage.js?v=605e171c06";
+import { HdrStage } from "./engine/hdrstage.js?v=e26ccf7176";
 
 const SONGS = { rolmo: ROLMO, fugue: FUGUE, passacaglia: PASSACAGLIA };
 

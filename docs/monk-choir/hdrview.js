@@ -8,7 +8,10 @@ const LAYER_INFO = [
     ["noise", "Turbulence at the constriction", "Noise born where the jet is fastest, coloured by jet speed over gap width.", "noise"],
     ["impact", "Fold collision", "A contact transient when the folds close, scaled by closing speed squared.", "impact"],
     ["crossmodes", "Cross-modes above 5 kHz", "Transverse resonances of the widest section, driven by the tube's pressure.", "crossmodes"],
-    ["living", "One living body", "Breath pressure, tremor and heartbeat move pitch, loudness and fold pressure together.", "living"]
+    ["living", "One living body", "Breath pressure, tremor and heartbeat move pitch, loudness and fold pressure together.", "living"],
+    ["subglottal", "Breathing below (trachea)", "A 20 cm airway under the glottis (resonances ~600/1400/2200 Hz for a man), coupled through the flow.", null],
+    ["walls", "Yielding walls", "A seal traps air: voicing continues into the cheeks and fades as pressure builds, the walls hum (voice bar), the release bursts.", null],
+    ["inertia", "Articulator inertia", "Each articulator is a damped mass with its own speed: lips/tip ~40 ms, tongue body ~90 ms, jaw ~100 ms, larynx ~200 ms.", null]
 ];
 
 export function buildHdrPanel(post, makeSlider, makeSelect) {
@@ -48,6 +51,20 @@ export function buildHdrPanel(post, makeSlider, makeSelect) {
     }
     function fmt2(v) { return v.toFixed(2); }
     function pct(v) { return Math.round(v * 100) + "%"; }
+    const syl = document.createElement("div");
+    syl.className = "control syllables";
+    const sylLabel = document.createElement("label");
+    sylLabel.textContent = "Say (hold a note first)";
+    syl.appendChild(sylLabel);
+    const SYLLABLES = [["ba", "b"], ["ma", "m"], ["da", "d"], ["sa", "s"], ["ah→ee", "ae"], ["oo→ah", "ua"]];
+    for (let i = 0; i < SYLLABLES.length; i = i + 1) {
+        const b = document.createElement("button");
+        b.className = "ghost";
+        b.textContent = SYLLABLES[i][0];
+        b.addEventListener("click", makeSyllableHandler(post, SYLLABLES[i][1]));
+        syl.appendChild(b);
+    }
+    c.appendChild(syl);
     makeSlider(c, { label: "Tongue tip toward teeth", min: 0, max: 0.97, step: 0.01, value: 0, format: fmt2, onInput: sender("tip"), title: "Narrow the front of the mouth and listen to the turbulence appear and brighten" });
     makeSlider(c, { label: "Om (close to hum)", min: 0, max: 1, step: 0.01, value: 0, format: pct, onInput: sender("hum") });
     makeSlider(c, { label: "Effort", min: 0.2, max: 1.0, step: 0.01, value: 0.7, format: fmt2, onInput: sender("effort") });
@@ -80,6 +97,13 @@ export function buildHdrPanel(post, makeSlider, makeSelect) {
     baseBtn.addEventListener("click", chooseBase);
     hdrBtn.addEventListener("click", chooseHdr);
     return { state: state, sync: sendConfig };
+}
+
+function makeSyllableHandler(post, kind) {
+    function say() {
+        post({ type: "hdrSet", name: "syllable", value: kind });
+    }
+    return say;
 }
 
 function addLayer(container, info, post, makeSlider) {
@@ -136,6 +160,8 @@ export function drawHdrMeters(t) {
     html = html + '<div class="meter-row"><span>Jet noise centre</span> ' + (t.noiseGain > 0.001 ? Math.round(t.noiseCentre) + " Hz" : "quiet") + "</div>";
     html = html + '<div class="meter-row"><span>Cross-modes</span> ' + t.cross.map(function k(f) { return (f / 1000).toFixed(1); }).join(" · ") + " kHz</div>";
     html = html + '<div class="meter-row"><span>Breath pressure</span> ' + (t.layers.living ? (100 * t.ps).toFixed(1) + "%" : "fixed") + "</div>";
+    html = html + '<div class="meter-row"><span>Air trapped behind a seal</span> ' + (t.layers.walls ? (100 * t.trapped).toFixed(0) + "% of lung pressure" : "off") + "</div>";
+    html = html + '<div class="meter-row"><span>Airway below</span> ' + (t.layers.subglottal ? t.subLength.toFixed(1) + " cm" : "off") + "</div>";
     html = html + '<div class="meter-row"><span>Model playing</span> ' + (t.model === "hdr" ? "HDR" : "Physical (A/B)") + "</div>";
     el.innerHTML = html;
 }
