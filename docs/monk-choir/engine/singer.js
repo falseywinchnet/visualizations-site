@@ -182,6 +182,13 @@ export class Singer {
         this.vowelEff = 0.5;
         this.epilarynx = 0.3;
         this.larynx = 0.0;
+        // Throat-length gesture: larynx height and extra lip protrusion move
+        // smoothly toward targets. Lowering the larynx and pushing the lips
+        // out lengthens the tube, so every formant slides down together.
+        this.larynxTarget = 0.0;
+        this.larynxGlide = 0.25;
+        this.protrusionAdd = 0.0;
+        this.protrusionTarget = 0.0;
         this.base = makeArticulation();
         this.art = makeArticulation();
         this.posture = null; // optional articulation that replaces the vowel
@@ -344,6 +351,9 @@ export class Singer {
         this.stopLip = approachAsym(this.stopLip, this.stopLipTarget, dt, 0.01, 0.03);
         this.stopTip = approachAsym(this.stopTip, this.stopTipTarget, dt, 0.01, 0.03);
         this.velumOpen = approachAsym(this.velumOpen, this.velumOpenTarget, dt, 0.015, 0.04);
+        const lk = 1.0 - Math.exp(-dt / Math.max(this.larynxGlide, 0.005));
+        this.larynx = this.larynx + (this.larynxTarget - this.larynx) * lk;
+        this.protrusionAdd = this.protrusionAdd + (this.protrusionTarget - this.protrusionAdd) * lk;
         if (this.tuning === "overtone") {
             mixInto(this.base, KHOOMEI_PATH[0], KHOOMEI_PATH[1], this.pathQ);
         } else if (this.tuning === "gyuto") {
@@ -375,6 +385,9 @@ export class Singer {
         }
         this.base.larynx = this.larynx;
         copyArticulation(this.base, this.art);
+        if (this.protrusionAdd !== 0.0) {
+            this.art.lipProtrusion = clamp(this.art.lipProtrusion + this.protrusionAdd, 0.0, 1.0);
+        }
         if (this.r1Mix > 0.0) {
             const m = this.r1Mix;
             this.art.tonguePos = this.art.tonguePos + (OPEN_AH.tonguePos - this.art.tonguePos) * m;

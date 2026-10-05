@@ -469,7 +469,10 @@ export const ROLMO = {
     warmSpots: [0.5, 27.0, 62.5, gridTime(6, 0), gridTime(9, 0), gridTime(25, 0), gridTime(33, 0), gridTime(40, 2)]
 };
 
-const VOICE_FIELDS = { vowel: "vowelTarget", hum: "humTarget", stopLip: "stopLipTarget", stopTip: "stopTipTarget", velumOpen: "velumOpenTarget" };
+const VOICE_FIELDS = {
+    vowel: "vowelTarget", hum: "humTarget", stopLip: "stopLipTarget", stopTip: "stopTipTarget", velumOpen: "velumOpenTarget",
+    larynx: "larynxTarget", larynxGlide: "larynxGlide", protrusion: "protrusionTarget", vibrato: "vibratoDepth", vowelGlide: "vowelGlide"
+};
 
 export class SongEngine {
     constructor(sampleRate, def) {
@@ -640,6 +643,8 @@ export class SongEngine {
             const singer = c.members[0].singer;
             singer.harmonic = a.harmonic;
             singer.noteOn(a.drone, 0.85);
+        } else if (act === "kickTune") {
+            this.kick.tailHz = a.hz;
         } else if (act === "dunk") {
             this.dunk.trigger(a.amp, delay);
         } else if (act === "horn") {

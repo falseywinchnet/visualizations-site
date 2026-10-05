@@ -612,6 +612,7 @@ export class Kick extends OneShot {
         this.phase = 0.0;
         this.noise = new Noise(seed);
         this.onHit = null;
+        this.tailHz = 46.0;
     }
 
     render(outL, outR, offset, n) {
@@ -622,7 +623,9 @@ export class Kick extends OneShot {
             if (this.t > 0.7) {
                 continue;
             }
-            const f = 46.0 + 130.0 * Math.exp(-this.t / 0.032);
+            // the pitch falls from about two octaves above into tailHz, so a
+            // tuned kick lands on the song's sub note
+            const f = this.tailHz + 130.0 * Math.exp(-this.t / 0.032);
             this.phase = this.phase + f / this.sr;
             let y = Math.sin(2.0 * Math.PI * this.phase) * Math.exp(-this.t / 0.32);
             y = y + 0.5 * this.noise.next() * Math.exp(-this.t / 0.0025);

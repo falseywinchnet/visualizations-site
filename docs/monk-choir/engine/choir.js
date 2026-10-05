@@ -228,6 +228,7 @@ export class Choir {
         singer.onsetDelay = cfg.onset;
         singer.epilarynx = cfg.epilarynx;
         singer.larynx = cfg.larynx;
+        singer.larynxTarget = cfg.larynx;
         singer.effort = cfg.effort;
         singer.attack = cfg.attack;
         singer.release = cfg.release;

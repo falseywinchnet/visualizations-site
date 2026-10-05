@@ -6,8 +6,9 @@ import { ClassicMonk } from "./engine/classic.js";
 import { Choir } from "./engine/choir.js";
 import { SongEngine, ROLMO } from "./engine/song.js";
 import { FUGUE } from "./engine/songs/fugue.js";
+import { PASSACAGLIA } from "./engine/songs/passacaglia.js";
 
-const SONGS = { rolmo: ROLMO, fugue: FUGUE };
+const SONGS = { rolmo: ROLMO, fugue: FUGUE, passacaglia: PASSACAGLIA };
 
 class MonkProcessor extends AudioWorkletProcessor {
     constructor() {

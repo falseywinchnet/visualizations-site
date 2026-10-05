@@ -10,10 +10,12 @@ import { vowelArticulation, noteToHz } from "./engine/singer.js";
 import { VOWEL_SHAPES, CLASSIC_BODY } from "./engine/vowels.js";
 import { ROLMO } from "./engine/song.js";
 import { FUGUE } from "./engine/songs/fugue.js";
+import { PASSACAGLIA } from "./engine/songs/passacaglia.js";
 import { drawSongStage, drawScore, buildSongPanel, songTimeText, scoreSeekTime } from "./songview.js";
 
-const SONGS = { fugue: FUGUE, rolmo: ROLMO };
+const SONGS = { passacaglia: PASSACAGLIA, fugue: FUGUE, rolmo: ROLMO };
 const SONG_LEDES = {
+    passacaglia: "A ground bass (A–G–F–E) and sixteen variations. Built from a study of bass sound design: a sub with its own breaths, a kick tuned to fall onto it, throats that talk in held vowels and quick V-sweeps, the throat lengthening to slide every formant down in the gaps, and a sygyt whistle held above.",
     fugue: "One original subject handled as a fugue for chant, overtones, upper voices and three throat basses: answer, countersubject, cantus firmus, stretto, inversion, chorale, canon, and two drops built on call and response between throats.",
     rolmo: "Monastic ritual music meets a bass drop. Every voice is a physical singer; the wobble is a monk’s throat orbiting through vowels at the tempo."
 };
@@ -41,7 +43,7 @@ const state = {
     inspectDirty: true,
     lastInspect: 0,
     song: null,
-    songId: "fugue",
+    songId: "passacaglia",
     songReady: false
 };
 
@@ -1583,7 +1585,7 @@ function init() {
     $("mode-classic").addEventListener("click", selectClassic);
     $("mode-choir").addEventListener("click", selectChoir);
     $("mode-song").addEventListener("click", selectSong);
-    loadSongView("fugue");
+    loadSongView("passacaglia");
     $("song-play").addEventListener("click", toggleSong);
     $("song-select").addEventListener("change", onSongSelect);
     $("score").addEventListener("click", onScoreClick);
