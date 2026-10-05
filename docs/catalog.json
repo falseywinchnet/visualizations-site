@@ -6,6 +6,12 @@
     "path": "interference/"
   },
   {
+    "slug": "monk-choir",
+    "title": "Sangha monk choir",
+    "description": "A singing-monk synthesizer: the classic 2002 monk voice reproduced sample for sample, then rebuilt as physical singers with their own throats, mouths and registers \u2014 choirs, sopranos, falsetto, Gyuto chord chant, ventricular half tones, kh\u00f6\u00f6mei and sygyt.",
+    "path": "monk-choir/"
+  },
+  {
     "slug": "spider-drive",
     "title": "Spider \u2014 drive the open country",
     "description": "Drive the Spider, a raised six-wheeled scout carrier with hydropneumatic legs, across a generated watershed of rivers, gullies, cliffs, forests and cornfields, or set it down at a lunar crater base, on the lava plains under the Olympus Mons scarp, or on Titan's dune shoreline by a methane lake. Free roam or fly wildfire, swiftwater rescue, forward pursuit and hostile crossing missions.",

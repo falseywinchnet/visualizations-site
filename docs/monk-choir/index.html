@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sangha monk choir</title>
+<meta name="description" content="A singing-monk synthesizer: the classic 2002 monk voice reproduced sample for sample, then rebuilt as physical singers with their own throats, mouths and registers — choirs, sopranos, falsetto, Gyuto chord chant, ventricular half tones, khöömei and sygyt.">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <h1>Sangha</h1>
+    <p>a choir of physically modeled monks</p>
+  </div>
+  <div class="engine-switch" role="tablist" aria-label="Engine">
+    <button id="mode-classic" role="tab" aria-selected="true" class="on">Classic monk</button>
+    <button id="mode-choir" role="tab" aria-selected="false">Physical choir</button>
+  </div>
+  <div class="top-actions">
+    <button id="midi-button" class="ghost" title="Use a MIDI keyboard">MIDI</button>
+    <button id="power" class="power">Start sound</button>
+  </div>
+</header>
+
+<main>
+  <section class="stage-wrap">
+    <canvas id="stage" aria-label="The singers"></canvas>
+    <p id="stage-caption" class="caption"></p>
+  </section>
+
+  <section class="play">
+    <div class="pad-wrap">
+      <canvas id="pad" aria-label="Pitch and vowel pad"></canvas>
+      <div class="pad-legend"><span id="pad-x-label">pitch →</span><span id="pad-y-label">vowel ↑</span></div>
+    </div>
+    <div class="keys-wrap">
+      <div id="keyboard" class="keyboard" aria-label="Keyboard"></div>
+      <p class="hint">Keys <kbd>A</kbd>–<kbd>;</kbd> play, <kbd>W E T Y U O P</kbd> sharps, <kbd>Z</kbd>/<kbd>X</kbd> octave. Drag the pad to sing.</p>
+    </div>
+  </section>
+
+  <section id="classic-panel" class="panel">
+    <h2>Classic monk</h2>
+    <p class="lede">The 2002 singing-monk voice: formant grains on a vowel spline, a stepped pitch quantizer and a stereo echo. This engine is a float-exact port of MonkSynth's reconstruction (measured −151 dB from its C reference).</p>
+    <div class="controls" id="classic-controls"></div>
+  </section>
+
+  <section id="choir-panel" class="panel hidden">
+    <div class="choir-head">
+      <h2>Physical choir</h2>
+      <label class="preset">Ensemble
+        <select id="preset"></select>
+      </label>
+    </div>
+    <p class="lede" id="preset-note"></p>
+    <div class="controls" id="choir-controls"></div>
+    <details class="singers" open>
+      <summary>Singers <span id="singer-count"></span></summary>
+      <div class="table-wrap"><table id="singer-table"></table></div>
+      <button id="add-singer" class="ghost">Add singer</button>
+    </details>
+  </section>
+
+  <section id="inspector" class="panel hidden">
+    <h2>Inside <span id="inspect-name">singer 1</span></h2>
+    <div class="inspect-grid">
+      <figure>
+        <canvas id="tube"></canvas>
+        <figcaption>Vocal tract, glottis (left) to lips (right). Width is cross-section diameter.</figcaption>
+      </figure>
+      <figure>
+        <canvas id="spectrum"></canvas>
+        <figcaption>Exact tube response with the voice's harmonics. Tuning targets in gold.</figcaption>
+      </figure>
+    </div>
+    <dl class="readout" id="readout"></dl>
+  </section>
+
+  <section class="panel about">
+    <details>
+      <summary><h2>How the monk was taken apart</h2></summary>
+      <div class="about-body">
+        <p>The classic voice is a <em>source–filter</em> sound in disguise. Each grain is three decaying sine waves, one per formant, restarted every pitch period. That is the impulse response of three resonators struck once per glottal pulse. A pulse train through three resonators is a voice with an idealised throat.</p>
+        <p>So the physical engine asks what <em>body</em> has those resonances. A vocal tract is a tube. Its shape (tongue, jaw, lips) sets where it rings. Its length scales every ring together, and the pharynx and mouth scale separately. We fit one body and five mouth shapes so the tube rings at the classic monk's fifteen formants:</p>
+        <div class="table-wrap"><table id="fit-table"></table></div>
+        <p id="fit-body"></p>
+        <p>Everyone else is that same gesture performed by another body, not a pitch-shifted copy. A soprano has a shorter tube, with most of the difference in the pharynx. Her folds close softly (head register) and she opens toward "ah" as she climbs, so her first resonance follows her pitch. A countertenor keeps a man's tube but sings with the folds barely touching (falsetto). Every singer has its own glottal jitter, vibrato, pitch wander and breath.</p>
+        <ul>
+          <li><strong>Gyuto chant.</strong> A fundamental near 65–70 Hz. Each monk tunes F1 onto the 5th harmonic and F2 onto the 10th by listening to his own resonances, so one voice sounds a chord.</li>
+          <li><strong>Half tone (dzo-ke, kargyraa).</strong> The ventricular ("false") folds vibrate once for every two glottal pulses and partly block every second one. Flow alternates, and the sub-octave appears.</li>
+          <li><strong>Khöömei.</strong> Pressed phonation keeps the glottis closed longer, so resonances ring sharper. The tongue slides one resonance onto a chosen harmonic.</li>
+          <li><strong>Sygyt.</strong> The tongue tip seals behind the teeth. The cavity in front clusters F2 and F3 into one narrow peak, the whistle.</li>
+        </ul>
+        <p class="small">Numbers checked by the test suite in this page's source: the closed-form tube response matches the time-domain waveguide to 10<sup>−13</sup>; scaling a body by 0.8 raises every resonance by exactly 1.25; Gyuto locking settles at 327/654 Hz for a 65.4 Hz fundamental; khöömei holds harmonics 8–12 of 110 Hz at 8–10 dB above their neighbours, and sygyt holds 10–12 at 17 dB.</p>
+        <p class="small">Credits: the classic engine is ported from <a href="https://github.com/JonET/monksynth">MonkSynth</a> by Jonathan Taylor (MIT licence, notice in <code>engine/classic.js</code>), itself a reimplementation of AudioNerdz's 2002 freeware plugin. The physical engine, its anatomy and register models, and the drawings are original to this page. Research the presets draw on: Smith, Stevens &amp; Tomlinson (1967) on Gyuto chant; Lindestad et al. (2001) and Bailly, Henrich &amp; Pelorson (2010) on ventricular period doubling; Kob (2004) on sygyt.</p>
+      </div>
+    </details>
+  </section>
+</main>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>
