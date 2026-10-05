@@ -24,7 +24,7 @@
 
 import { Choir, Hall, makeSingerConfig } from "./choir.js";
 import {
-    Dungchen, Gyaling, Conch, Rolmo, Nga, Drilbu, Kick, Snare, Hats, Sub, Riser, softSaturate
+    Dungchen, Gyaling, Conch, Rolmo, Nga, Drilbu, Kick, Snare, Hats, Sub, Riser, Dunk, softSaturate
 } from "./instruments.js";
 
 export const TEMPO = 140.0;
@@ -456,16 +456,32 @@ function partConfigs() {
 
 export const PART_NAMES = ["monks", "upper", "solo", "bass"];
 
+export const ROLMO = {
+    id: "rolmo",
+    title: "Rol-mo at 140",
+    sections: SECTIONS,
+    length: SONG_LENGTH,
+    grid: GRID,
+    bar: BAR,
+    buildScore: buildScore,
+    partConfigs: partConfigs,
+    setup: null,
+    warmSpots: [0.5, 27.0, 62.5, gridTime(6, 0), gridTime(9, 0), gridTime(25, 0), gridTime(33, 0), gridTime(40, 2)]
+};
+
+const VOICE_FIELDS = { vowel: "vowelTarget", hum: "humTarget", stopLip: "stopLipTarget", stopTip: "stopTipTarget", velumOpen: "velumOpenTarget" };
+
 export class SongEngine {
-    constructor(sampleRate) {
+    constructor(sampleRate, def) {
         this.sr = sampleRate;
-        this.events = buildScore();
+        this.def = def === undefined ? ROLMO : def;
+        this.events = this.def.buildScore();
         this.build();
     }
 
     build() {
         const sr = this.sr;
-        const cfg = partConfigs();
+        const cfg = this.def.partConfigs();
         this.parts = {};
         for (let i = 0; i < PART_NAMES.length; i = i + 1) {
             const name = PART_NAMES[i];
@@ -490,6 +506,7 @@ export class SongEngine {
         this.hats = new Hats(sr);
         this.sub = new Sub(sr);
         this.riser = new Riser(sr, 13);
+        this.dunk = new Dunk(sr);
         this.hall = new Hall(sr);
         this.hall.mix = 0.42;
         this.hall.setTime(4.2, 0.5);
@@ -509,6 +526,9 @@ export class SongEngine {
         this.ended = false;
         this.envFollow = 0.0;
         this.master = 0.9;
+        if (this.def.setup) {
+            this.def.setup(this);
+        }
     }
 
     play() {
@@ -531,7 +551,7 @@ export class SongEngine {
     // Compile every code path before the listener hears anything: render a
     // short stretch of each section silently, then return to the start.
     warmUp() {
-        const spots = [0.5, 27.0, 62.5, gridTime(6, 0), gridTime(9, 0), gridTime(25, 0), gridTime(33, 0), gridTime(40, 2)];
+        const spots = this.def.warmSpots;
         const l = new Float32Array(128);
         const r = new Float32Array(128);
         for (let i = 0; i < spots.length; i = i + 1) {
@@ -581,11 +601,47 @@ export class SongEngine {
                     if (c.members[k].cfg.register !== "ventricular" || a.value !== "gyuto") {
                         c.members[k].cfg.tuning = a.value;
                         c.members[k].singer.tuning = a.value;
+                        if (a.value === "overtone" || a.value === "sygyt") {
+                            c.members[k].singer.harmonic = c.harmonic;
+                        }
                     }
                 }
             } else {
                 c.setGlobal(a.name, a.value);
             }
+        } else if (act === "voice") {
+            const singer = this.parts[a.part].members[a.index].singer;
+            if (a.glide !== undefined) {
+                singer.glideRate = 1.0 / Math.max(a.glide, 0.002);
+            }
+            singer.noteOn(a.note, 0.85);
+        } else if (act === "voiceOff") {
+            this.parts[a.part].members[a.index].singer.noteOff();
+        } else if (act === "voiceSet") {
+            this.parts[a.part].members[a.index].singer[VOICE_FIELDS[a.name]] = a.value;
+        } else if (act === "env") {
+            const singer = this.parts[a.part].members[a.index].singer;
+            singer.attack = a.attack;
+            singer.release = a.release;
+        } else if (act === "orbit") {
+            const c = this.parts[a.part];
+            const m = c.members[a.index];
+            m.cfg.oscRate = a.rate;
+            m.cfg.oscDepth = a.depth;
+            m.cfg.oscRound = a.round;
+            m.cfg.oscShape = a.shape;
+            c.applyOscillator(m.singer, m.cfg);
+            if (a.phase !== undefined) {
+                m.singer.oscPhase = a.phase;
+            }
+        } else if (act === "overtone") {
+            const c = this.parts.solo;
+            c.harmonic = a.harmonic;
+            const singer = c.members[0].singer;
+            singer.harmonic = a.harmonic;
+            singer.noteOn(a.drone, 0.85);
+        } else if (act === "dunk") {
+            this.dunk.trigger(a.amp, delay);
         } else if (act === "horn") {
             this.horns[a.which].play(a.note, a.level, a.attack, a.growl);
         } else if (act === "hornStop") {
@@ -715,6 +771,7 @@ export class SongEngine {
         this.snare.render(dl, dr, 0, m);
         this.hats.render(dl, dr, 0, m);
         this.riser.render(dl, dr, 0, m);
+        this.dunk.render(dl, dr, 0, m);
 
         // master: sum, slow peak follower for gentle glue, soft clip
         for (let i = 0; i < m; i = i + 1) {
@@ -754,7 +811,7 @@ export class SongEngine {
                 conch: this.conch.level, kang: this.kangling.level,
                 rolmo: this.rolmo.level, nga: this.nga.level, bell: this.bell.level,
                 kick: this.kick.level, snare: this.snare.level, hat: this.hats.level,
-                sub: this.sub.level, riser: this.riser.level
+                sub: this.sub.level, riser: this.riser.level, dunk: this.dunk.level
             }
         };
     }

@@ -35,6 +35,8 @@ export function makeSingerConfig(type, register, interval) {
         larynx: 0.0,
         effort: 0.6,
         lengthScale: 1.0,         // individual body size around the type
+        attack: 0.08,             // seconds
+        release: 0.25,
         oscRate: null,            // per-singer vowel-oscillator overrides (null: follow the ensemble)
         oscDepth: null,
         oscRound: null,
@@ -227,6 +229,8 @@ export class Choir {
         singer.epilarynx = cfg.epilarynx;
         singer.larynx = cfg.larynx;
         singer.effort = cfg.effort;
+        singer.attack = cfg.attack;
+        singer.release = cfg.release;
         this.applyGlobals(singer, cfg);
     }
 

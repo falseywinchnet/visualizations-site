@@ -4,7 +4,10 @@
 
 import { ClassicMonk } from "./engine/classic.js";
 import { Choir } from "./engine/choir.js";
-import { SongEngine } from "./engine/song.js";
+import { SongEngine, ROLMO } from "./engine/song.js";
+import { FUGUE } from "./engine/songs/fugue.js";
+
+const SONGS = { rolmo: ROLMO, fugue: FUGUE };
 
 class MonkProcessor extends AudioWorkletProcessor {
     constructor() {
@@ -13,6 +16,7 @@ class MonkProcessor extends AudioWorkletProcessor {
         this.choir = new Choir(sampleRate);
         this.mode = "classic";
         this.song = null;
+        this.songId = "";
         this.classicBufL = new Float32Array(128);
         this.classicBufR = new Float32Array(128);
         this.frames = 0;
@@ -28,11 +32,18 @@ class MonkProcessor extends AudioWorkletProcessor {
             if (this.song !== null) {
                 this.song.stop();
             }
-            if (m.mode === "song" && this.song === null) {
-                this.song = new SongEngine(sampleRate);
+        } else if (m.type === "songLoad") {
+            if (this.song === null || this.songId !== m.id) {
+                if (this.song !== null) {
+                    this.song.stop();
+                }
+                this.song = new SongEngine(sampleRate, SONGS[m.id]);
                 this.song.warmUp();
-                this.port.postMessage({ type: "songReady" });
+                this.songId = m.id;
+            } else {
+                this.song.stop();
             }
+            this.port.postMessage({ type: "songReady", id: m.id });
         } else if (m.type === "songPlay") {
             if (this.song !== null) {
                 if (this.song.ended) {

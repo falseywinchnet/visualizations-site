@@ -798,6 +798,31 @@ export class Riser {
     }
 }
 
+// The "dunk": a short tonal transient near 200 Hz that falls into the bass,
+// placed at the head of a bass call so the hit reads before the body.
+export class Dunk extends OneShot {
+    constructor(sr) {
+        super();
+        this.sr = sr;
+        this.phase = 0.0;
+    }
+
+    render(outL, outR, offset, n) {
+        for (let i = 0; i < n; i = i + 1) {
+            this.step(this.sr);
+            if (this.t > 0.15) {
+                continue;
+            }
+            const f = 70.0 + 150.0 * Math.exp(-this.t / 0.02);
+            this.phase = this.phase + f / this.sr;
+            const y = Math.tanh(2.0 * Math.sin(2.0 * Math.PI * this.phase)) * Math.exp(-this.t / 0.05) * this.amp * 0.35;
+            outL[offset + i] = outL[offset + i] + y;
+            outR[offset + i] = outR[offset + i] + y;
+        }
+        this.level = this.level * 0.85;
+    }
+}
+
 export function softSaturate(x, drive) {
     return Math.tanh(drive * x) / Math.tanh(drive);
 }

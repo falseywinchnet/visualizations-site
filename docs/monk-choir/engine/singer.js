@@ -191,6 +191,7 @@ export class Singer {
         this.pathQ = 0.4;      // position along the overtone / gyuto path
         this.r1Mix = 0.0;      // soprano vowel modification toward open "ah"
         this.tuneLip = 0.0;    // gyuto lip-aperture offset for F1
+        this.lastTuning = "none";
         this.peaks = new Float64Array(8);
         this.tuneCounter = seed % 4; // stagger the analysis across singers
         this.measuredF1 = 0.0;
@@ -325,6 +326,16 @@ export class Singer {
     // Articulation for this control block: vowel or posture or tuning path,
     // then vowel modification, then the hum.
     updateArticulation(dt) {
+        // Entering or leaving the Gyuto gesture continues from the current
+        // mouth instead of jumping to a new one.
+        if (this.tuning !== this.lastTuning) {
+            if (this.lastTuning === "gyuto") {
+                this.vowel = 0.5 * this.pathQ;
+            } else if (this.tuning === "gyuto") {
+                this.pathQ = clamp(2.0 * this.vowel, 0.0, 1.0);
+            }
+            this.lastTuning = this.tuning;
+        }
         const vg = 1.0 - Math.exp(-dt / Math.max(this.vowelGlide, 0.002));
         this.vowel = this.vowel + (this.vowelTarget - this.vowel) * vg;
         this.hum = this.hum + (this.humTarget - this.hum) * (1.0 - Math.exp(-dt / 0.05));
@@ -372,7 +383,8 @@ export class Singer {
             this.art.lipAperture = this.art.lipAperture + (OPEN_AH.lipAperture - this.art.lipAperture) * m;
             this.art.lipProtrusion = this.art.lipProtrusion + (OPEN_AH.lipProtrusion - this.art.lipProtrusion) * m;
         }
-        if (this.tuning === "gyuto") {
+        if (this.tuneLip !== 0.0) {
+            // applied in every mode so it fades out rather than vanishing
             this.art.lipAperture = clamp(this.art.lipAperture + this.tuneLip, 0.04, 1.0);
         }
         if (this.hum > 0.0) {

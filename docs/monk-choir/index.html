@@ -34,12 +34,18 @@
     <div class="song-head">
       <button id="song-play" class="power" disabled>Preparing…</button>
       <div>
-        <h2>Rol-mo at 140</h2>
-        <p class="lede">Monastic ritual music meets a bass drop. Every voice is a physical singer; the wobble is a monk’s throat orbiting through vowels at the tempo.</p>
+        <label class="preset">Piece
+          <select id="song-select">
+            <option value="fugue">Fugue in C minor for throats (5:07)</option>
+            <option value="rolmo">Rol-mo at 140 (3:02)</option>
+          </select>
+        </label>
+        <p class="lede" id="song-lede"></p>
       </div>
       <span id="song-time" class="song-time">0:00 / 3:03</span>
     </div>
-    <canvas id="score" aria-label="Score"></canvas>
+    <canvas id="score" aria-label="Score: every voice as a line, pitch upward, time to the right"></canvas>
+    <div id="roll-legend" class="roll-legend"></div>
     <ol id="song-sections" class="song-sections"></ol>
   </section>
 
@@ -108,6 +114,7 @@
         </ul>
         <p><strong>Vowel orbit.</strong> Each singer can circle through vowel space: one axis runs ooh–ow–ah–ayh–eeh, the other rounds the lips a quarter-cycle later, so the path is an ellipse. Every singer keeps its own period. They can move together, in small-integer ratios (1 : 3⁄2 : 2 : 5⁄4…), or freely with a chosen spread. Because the motion happens inside each tube, the resonances move physically; no filter is being swept.</p>
         <p><strong>The song (Rol-mo at 140).</strong> Monastic ritual music is not harmony led by a conductor. It is independent cycles layered together, and each has a cousin in a bass drop. Dungchen are played in pairs that overlap, so the drone never breaks: here they become the sub-bass and the brass stabs. Rolmo cymbal strokes accelerate into rolls and slow down like a bouncing ball: the build's snare roll is the same gesture forced onto a grid. Two gyaling play one melody with their own ornaments, which becomes the doubled lead. The free ritual pulse settles at 70 BPM, exactly the half-time feel of a 140 BPM drop. The drop's “wobble” is a basso's vocal tract running the vowel orbit at the tempo, growling with the ventricular half tone, while a sygyt singer whistles the hook on harmonics 8–12. The melodies and rhythms are original; the chanted syllables are the traditional <em>om mani padme hum</em>. The instruments are signal models of how each one sounds (lip buzz, double reed, cymbal and membrane modes), not waveguide physics like the voices.</p>
+        <p><strong>The fugue (Fugue in C minor for throats).</strong> Five minutes built from one original two-bar subject. It is answered at the fifth against a countersubject written for it, and slowed fourfold into a cantus firmus for the monks. It is walked around the circle of fifths in episodes, overlapped with itself one bar apart at the octave over dominant and tonic pedals (stretto), turned upside down, harmonized as four-part chorales by a search over chords and voice leading, and set in canon between the chant and a throat bass. The overtone singer carries two lines at once: for every note it picks a drone and a harmonic of that drone, preferring drones in the current chord. The drops borrow general bass-music technique (call and response, switching timbre within a bar, pitch dives, a short transient near 200 Hz at the head of each call, syncopated gaps) and play it on three throats instead of three synth patches. It ends with a Picardy third, and that major third is the overtone singer's 10th harmonic, the same overtone the Gyuto monks tune to. An audit counts the counterpoint: about 8% of voice pairs are dissonant on strong beats over the whole piece, mostly in the pedal-point builds. A few dozen parallel fifths and octaves remain across five minutes and seven voices.</p>
         <p class="small">Numbers checked by the test suite in this page's source: the closed-form tube response matches the time-domain waveguide to 10<sup>−13</sup>; scaling a body by 0.8 raises every resonance by exactly 1.25; Gyuto locking settles at 327/654 Hz for a 65.4 Hz fundamental; khöömei holds harmonics 8–12 of 110 Hz at 8–10 dB above their neighbours, and sygyt holds 10–12 at 17 dB.</p>
         <p class="small">Credits: the classic engine is ported from <a href="https://github.com/JonET/monksynth">MonkSynth</a> by Jonathan Taylor (MIT licence, notice in <code>engine/classic.js</code>), itself a reimplementation of AudioNerdz's 2002 freeware plugin. The physical engine, its anatomy and register models, and the drawings are original to this page. Research the presets draw on: Smith, Stevens &amp; Tomlinson (1967) on Gyuto chant; Lindestad et al. (2001) and Bailly, Henrich &amp; Pelorson (2010) on ventricular period doubling; Kob (2004) on sygyt.</p>
       </div>

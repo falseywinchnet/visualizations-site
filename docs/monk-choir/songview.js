@@ -1,13 +1,12 @@
 // Song view: the stage scene with the ritual instruments, and a scrolling
-// score built from the same event list the audio engine plays.
+// piano roll built from the same event list the audio engine plays, so the
+// counterpoint is visible: every voice is its own coloured line.
 
 import { makeAnatomy, makeArticulation, areaFunction, SECTIONS as TUBE_SECTIONS } from "./engine/anatomy.js";
-import { oscillatorWave } from "./engine/singer.js";
-import { GRID, BAR } from "./engine/song.js";
 
-const RATE = 20; // timeline samples per second
-const WINDOW = 16.0; // seconds of score on screen
-const PLAYHEAD = 0.3;
+const WINDOW = 14.0; // seconds of score on screen
+const PLAYHEAD = 0.28;
+const LENGTH_HOLDER = { length: 180 };
 
 export function songTimeText(t) {
     function mmss(x) {
@@ -18,125 +17,156 @@ export function songTimeText(t) {
     return mmss(Math.max(0, t)) + " / " + mmss(LENGTH_HOLDER.length);
 }
 
-const LENGTH_HOLDER = { length: 180 };
+// ------------------------------------------------------------------ roll data
 
-// ------------------------------------------------------------------ score data
+export const ROLL_VOICES = [
+    { key: "upper0", label: "Countertenor", color: "#9ab6e0", width: 3 },
+    { key: "upper1", label: "Tenor (head)", color: "#8fd1c3", width: 3 },
+    { key: "upper2", label: "Tenor (chest)", color: "#6fb59a", width: 3 },
+    { key: "monks", label: "Monks", color: "#e9a23b", width: 5 },
+    { key: "over", label: "Overtone", color: "#f2cf6b", width: 2.5 },
+    { key: "drone", label: "Its drone", color: "rgba(242,207,107,0.35)", width: 2 },
+    { key: "bass0", label: "Throat: growl", color: "#e05d8a", width: 3.5 },
+    { key: "bass1", label: "Throat: squeal", color: "#c58fd1", width: 3 },
+    { key: "bass2", label: "Throat: chop", color: "#d96a4f", width: 3 },
+    { key: "horn", label: "Dungchen", color: "rgba(217,140,43,0.55)", width: 6 },
+    { key: "gya", label: "Gyaling", color: "#b0573f", width: 2 }
+];
 
-function makeTimeline(length) {
-    const n = Math.ceil(length * RATE) + 1;
-    return {
-        n: n,
-        monksOn: new Float32Array(n), monksVowel: new Float32Array(n), monksHum: new Float32Array(n),
-        upperOn: new Float32Array(n), soloOn: new Float32Array(n), soloHarm: new Float32Array(n),
-        bassOn: new Float32Array(n), bassNote: new Float32Array(n), bassRate: new Float32Array(n), bassShape: new Array(n)
-    };
-}
-
-function sampleTimeline(events, length) {
-    const tl = makeTimeline(length);
-    const st = { monksOn: 0, monksVowel: 0.5, monksHum: 0, upperOn: 0, soloOn: 0, soloHarm: 6, bassOn: 0, bassNote: 36, bassRate: 0, bassShape: "sine" };
-    let k = 0;
-    for (let i = 0; i < tl.n; i = i + 1) {
-        const t = i / RATE;
-        while (k < events.length && events[k].t <= t) {
-            const e = events[k];
-            const a = e.a;
-            if (e.act === "note") {
-                if (a.part === "monks") { st.monksOn = 1; }
-                if (a.part === "upper") { st.upperOn = 1; }
-                if (a.part === "solo") { st.soloOn = 1; }
-                if (a.part === "bass") { st.bassOn = 1; st.bassNote = a.note; }
-            } else if (e.act === "off") {
-                if (a.part === "monks") { st.monksOn = 0; }
-                if (a.part === "upper") { st.upperOn = 0; }
-                if (a.part === "solo") { st.soloOn = 0; }
-                if (a.part === "bass") { st.bassOn = 0; }
-            } else if (e.act === "set") {
-                if (a.part === "monks" && a.name === "vowel") { st.monksVowel = a.value; }
-                if (a.part === "monks" && a.name === "hum") { st.monksHum = a.value; }
-                if (a.part === "solo" && a.name === "harmonic") { st.soloHarm = a.value; }
-                if (a.part === "bass" && a.name === "osc.rate") { st.bassRate = a.value; }
-                if (a.part === "bass" && a.name === "osc.shape") { st.bassShape = a.value; }
-            }
-            k = k + 1;
-        }
-        tl.monksOn[i] = st.monksOn; tl.monksVowel[i] = st.monksVowel; tl.monksHum[i] = st.monksHum;
-        tl.upperOn[i] = st.upperOn; tl.soloOn[i] = st.soloOn; tl.soloHarm[i] = st.soloHarm;
-        tl.bassOn[i] = st.bassOn; tl.bassNote[i] = st.bassNote; tl.bassRate[i] = st.bassRate; tl.bassShape[i] = st.bassShape;
+function voiceKeyIndex() {
+    const map = {};
+    for (let i = 0; i < ROLL_VOICES.length; i = i + 1) {
+        map[ROLL_VOICES[i].key] = i;
     }
-    return tl;
+    return map;
 }
 
-function collectSegments(events) {
-    const horns = [[], []];
-    const gyas = [];
+function harmonicPitch(drone, harmonic) {
+    return drone + 12.0 * Math.log2(harmonic);
+}
+
+// Turn the event list into note segments per voice and percussion hits.
+function collectRoll(events, length) {
+    const index = voiceKeyIndex();
+    const segs = [];
+    for (let i = 0; i < ROLL_VOICES.length; i = i + 1) {
+        segs.push([]);
+    }
+    const open = {};
     const hits = [];
-    const open = [null, null];
-    let gyaOpen = null;
+    let soloNote = -1;
+    let soloHarm = 8;
+    function close(key, t) {
+        if (open[key] !== undefined && open[key] !== null) {
+            open[key].t1 = t;
+            if (open[key].t1 > open[key].t0) {
+                segs[index[key]].push(open[key]);
+            }
+            open[key] = null;
+        }
+    }
+    function start(key, t, pitch) {
+        close(key, t);
+        open[key] = { t0: t, t1: t, pitch: pitch };
+    }
     for (let i = 0; i < events.length; i = i + 1) {
         const e = events[i];
         const a = e.a;
-        if (e.act === "horn") {
-            if (open[a.which] !== null) {
-                open[a.which].t1 = e.t;
-                horns[a.which].push(open[a.which]);
+        const t = e.t;
+        if (e.act === "voice" && (a.part === "upper" || a.part === "bass")) {
+            start(a.part + a.index, t, a.note);
+        } else if (e.act === "voiceOff" && (a.part === "upper" || a.part === "bass")) {
+            close(a.part + a.index, t);
+        } else if (e.act === "note" && a.part === "monks") {
+            start("monks", t, a.note);
+        } else if (e.act === "note" && a.part === "bass") {
+            start("bass0", t, a.note);
+        } else if (e.act === "note" && a.part === "solo") {
+            soloNote = a.note;
+            start("drone", t, a.note);
+            start("over", t, harmonicPitch(a.note, soloHarm));
+        } else if (e.act === "set" && a.part === "solo" && a.name === "harmonic") {
+            soloHarm = a.value;
+            if (soloNote >= 0 && open.over) {
+                start("over", t, harmonicPitch(soloNote, soloHarm));
             }
-            open[a.which] = { t0: e.t, t1: e.t, note: a.note, level: a.level };
-        } else if (e.act === "hornStop" && open[a.which] !== null) {
-            open[a.which].t1 = e.t;
-            horns[a.which].push(open[a.which]);
-            open[a.which] = null;
+        } else if (e.act === "overtone") {
+            soloNote = a.drone;
+            soloHarm = a.harmonic;
+            start("drone", t, a.drone);
+            start("over", t, harmonicPitch(a.drone, a.harmonic));
+        } else if (e.act === "off") {
+            if (a.part === "monks") {
+                close("monks", t);
+            } else if (a.part === "upper") {
+                close("upper0", t); close("upper1", t); close("upper2", t);
+            } else if (a.part === "solo") {
+                close("over", t); close("drone", t);
+                soloNote = -1;
+            } else if (a.part === "bass") {
+                close("bass0", t);
+            }
+        } else if (e.act === "horn") {
+            start("horn", t, a.note);
+        } else if (e.act === "hornStop") {
+            close("horn", t);
         } else if (e.act === "gya" && a.which === 0) {
-            if (gyaOpen !== null) {
-                gyaOpen.t1 = e.t;
-                gyas.push(gyaOpen);
-            }
-            gyaOpen = { t0: e.t, t1: e.t, note: a.note };
-        } else if (e.act === "gyaStop" && a.which === 0 && gyaOpen !== null) {
-            gyaOpen.t1 = e.t;
-            gyas.push(gyaOpen);
-            gyaOpen = null;
+            start("gya", t, a.note);
+        } else if (e.act === "gyaStop" && a.which === 0) {
+            close("gya", t);
         } else if (e.kind === "trigger") {
-            hits.push({ t: e.t, act: e.act, amp: a.amp !== undefined ? a.amp : 0.8, seconds: a.seconds, open: a.open });
+            hits.push({ t: t, act: e.act, amp: a.amp !== undefined ? a.amp : 0.8, seconds: a.seconds });
         }
     }
-    return { horns: horns, gyas: gyas, hits: hits };
+    const keys = Object.keys(open);
+    for (let i = 0; i < keys.length; i = i + 1) {
+        close(keys[i], length);
+    }
+    return { segs: segs, hits: hits };
 }
 
-export function buildSongPanel(events, sections, length, onSeek) {
-    LENGTH_HOLDER.length = length;
+export function buildSongPanel(def, onSeek) {
+    LENGTH_HOLDER.length = def.length;
     const view = {
-        events: events,
-        sections: sections,
-        length: length,
-        timeline: sampleTimeline(events, length),
-        segments: collectSegments(events),
+        def: def,
+        events: def.buildScore(),
+        sections: def.sections,
+        length: def.length,
         time: 0.0,
         playing: false,
         pendingPlay: false,
-        telemetry: null,
-        flash: 0.0
+        telemetry: null
     };
+    view.roll = collectRoll(view.events, view.length);
     const list = document.getElementById("song-sections");
-    for (let i = 0; i < sections.length; i = i + 1) {
+    list.innerHTML = "";
+    for (let i = 0; i < view.sections.length; i = i + 1) {
         const li = document.createElement("li");
         const strong = document.createElement("strong");
-        strong.textContent = songTimeText(sections[i].start).split(" / ")[0] + "  " + sections[i].name;
+        strong.textContent = songTimeText(view.sections[i].start).split(" / ")[0] + "  " + view.sections[i].name;
         li.appendChild(strong);
         const span = document.createElement("span");
-        span.textContent = sections[i].text;
+        span.textContent = view.sections[i].text;
         li.appendChild(span);
-        li.addEventListener("click", makeSeekHandler(onSeek, sections[i].start));
+        li.addEventListener("click", makeSeekHandler(onSeek, view.sections[i].start));
         list.appendChild(li);
     }
-    const score = document.getElementById("score");
-    function scoreClick(event) {
-        const r = score.getBoundingClientRect();
-        const x = (event.clientX - r.left) / r.width;
-        const t = view.time + (x - PLAYHEAD) * WINDOW;
-        onSeek(Math.min(length - 1, Math.max(0, t)));
+    const legend = document.getElementById("roll-legend");
+    if (legend !== null) {
+        legend.innerHTML = "";
+        for (let i = 0; i < ROLL_VOICES.length; i = i + 1) {
+            const v = ROLL_VOICES[i];
+            if (view.roll.segs[i].length === 0) {
+                continue;
+            }
+            const item = document.createElement("span");
+            const sw = document.createElement("i");
+            sw.style.background = v.color;
+            item.appendChild(sw);
+            item.appendChild(document.createTextNode(v.label));
+            legend.appendChild(item);
+        }
     }
-    score.addEventListener("click", scoreClick);
     return view;
 }
 
@@ -147,164 +177,118 @@ function makeSeekHandler(onSeek, t) {
     return seek;
 }
 
-// ------------------------------------------------------------------ score drawing
+export function scoreSeekTime(view, fraction) {
+    return Math.min(view.length - 1, Math.max(0, view.time + (fraction - PLAYHEAD) * WINDOW));
+}
 
-const LANES = ["Chant", "Overtones", "Dungchen", "Gyaling", "Rolmo · nga · bell", "Throat bass", "Kit"];
+// ------------------------------------------------------------------ roll drawing
+
+const PITCH_LOW = 28;
+const PITCH_HIGH = 98;
 
 export function drawScore(canvas, ctx, view) {
     const w = canvas.clientWidth;
     const h = canvas.clientHeight;
     ctx.clearRect(0, 0, w, h);
-    const left = 92;
-    const plotW = w - left - 8;
-    const laneH = (h - 8) / LANES.length;
+    const left = 34;
+    const plotW = w - left - 6;
+    const perc = 34;
+    const rollTop = 16;
+    const rollH = h - perc - rollTop - 4;
     const t0 = view.time - PLAYHEAD * WINDOW;
     function xOf(t) {
         return left + (t - t0) / WINDOW * plotW;
     }
+    function yOf(p) {
+        return rollTop + (1 - (p - PITCH_LOW) / (PITCH_HIGH - PITCH_LOW)) * rollH;
+    }
     // section bands
+    ctx.font = "11px Georgia, serif";
     for (let i = 0; i < view.sections.length; i = i + 1) {
         const a = view.sections[i].start;
         const b = i + 1 < view.sections.length ? view.sections[i + 1].start : view.length;
         if (b < t0 || a > t0 + WINDOW) {
             continue;
         }
-        ctx.fillStyle = i % 2 === 0 ? "rgba(239,228,207,0.025)" : "rgba(233,162,59,0.035)";
-        ctx.fillRect(Math.max(left, xOf(a)), 4, Math.min(xOf(b), w) - Math.max(left, xOf(a)), h - 8);
-        ctx.fillStyle = "rgba(242,207,107,0.6)";
-        ctx.font = "11px Georgia, serif";
-        if (xOf(a) > left) {
+        ctx.fillStyle = i % 2 === 0 ? "rgba(239,228,207,0.025)" : "rgba(233,162,59,0.04)";
+        const xa = Math.max(left, xOf(a));
+        ctx.fillRect(xa, 2, Math.min(xOf(b), w) - xa, h - 4);
+        if (xOf(a) >= left) {
+            ctx.fillStyle = "rgba(242,207,107,0.7)";
             ctx.fillText(view.sections[i].name, xOf(a) + 4, 12);
         }
     }
-    ctx.font = "12px Georgia, serif";
-    for (let l = 0; l < LANES.length; l = l + 1) {
-        const y = 4 + l * laneH;
-        ctx.fillStyle = "rgba(239,228,207,0.55)";
-        ctx.fillText(LANES[l], 6, y + laneH * 0.6);
-        ctx.strokeStyle = "rgba(239,228,207,0.06)";
+    // octave lines
+    for (let p = 36; p <= 96; p = p + 12) {
+        ctx.strokeStyle = "rgba(239,228,207,0.07)";
         ctx.beginPath();
-        ctx.moveTo(left, y + laneH);
-        ctx.lineTo(w, y + laneH);
+        ctx.moveTo(left, yOf(p));
+        ctx.lineTo(w, yOf(p));
         ctx.stroke();
+        ctx.fillStyle = "rgba(239,228,207,0.45)";
+        ctx.fillText("C" + (p / 12 - 1), 4, yOf(p) + 4);
     }
-    const tl = view.timeline;
-    const i0 = Math.max(0, Math.floor(t0 * RATE));
-    const i1 = Math.min(tl.n - 1, Math.ceil((t0 + WINDOW) * RATE));
-    // chant: vowel contour, thick when singing, dotted when the lips are closed
-    const yC = 4;
-    for (let i = i0 + 1; i <= i1; i = i + 1) {
-        if (tl.monksOn[i] < 0.5) {
-            continue;
-        }
-        const ya = yC + (1 - tl.monksVowel[i - 1]) * (laneH - 8) + 4;
-        const yb = yC + (1 - tl.monksVowel[i]) * (laneH - 8) + 4;
-        ctx.strokeStyle = tl.monksHum[i] > 0.5 ? "rgba(233,162,59,0.35)" : "#e9a23b";
-        ctx.lineWidth = tl.monksHum[i] > 0.5 ? 1.5 : 3.5;
-        ctx.beginPath();
-        ctx.moveTo(xOf((i - 1) / RATE), ya);
-        ctx.lineTo(xOf(i / RATE), yb);
-        ctx.stroke();
-        if (tl.upperOn[i] > 0.5) {
-            ctx.fillStyle = "rgba(154,182,224,0.25)";
-            ctx.fillRect(xOf((i - 1) / RATE), yC + 2, xOf(i / RATE) - xOf((i - 1) / RATE) + 0.5, 4);
-        }
-    }
-    // overtones: harmonic number
-    const yO = 4 + laneH;
-    for (let i = i0 + 1; i <= i1; i = i + 1) {
-        if (tl.soloOn[i] < 0.5) {
-            continue;
-        }
-        const y = yO + (1 - (tl.soloHarm[i] - 5) / 11) * (laneH - 6) + 3;
-        ctx.fillStyle = "#6fb59a";
-        ctx.fillRect(xOf((i - 1) / RATE), y - 1.5, xOf(i / RATE) - xOf((i - 1) / RATE) + 0.5, 3);
-    }
-    // dungchen pair
-    const yH = 4 + 2 * laneH;
-    for (let k = 0; k < 2; k = k + 1) {
-        const segs = view.segments.horns[k];
+    // voices, horns first so they sit behind
+    const order = [9, 5, 3, 6, 7, 8, 2, 1, 0, 10, 4];
+    for (let oi = 0; oi < order.length; oi = oi + 1) {
+        const vi = order[oi];
+        const v = ROLL_VOICES[vi];
+        const segs = view.roll.segs[vi];
+        ctx.strokeStyle = v.color;
+        ctx.lineWidth = v.width;
+        ctx.lineCap = "round";
         for (let i = 0; i < segs.length; i = i + 1) {
-            const s = segs[i];
-            if (s.t1 < t0 || s.t0 > t0 + WINDOW) {
+            const sg = segs[i];
+            if (sg.t1 < t0 || sg.t0 > t0 + WINDOW) {
                 continue;
             }
-            ctx.fillStyle = "rgba(217,140,43," + (0.25 + 0.6 * s.level).toFixed(2) + ")";
-            const y = yH + 4 + k * (laneH - 8) / 2;
-            ctx.fillRect(xOf(s.t0), y, Math.max(2, xOf(s.t1) - xOf(s.t0)), (laneH - 12) / 2);
+            const y = yOf(sg.pitch);
+            ctx.beginPath();
+            ctx.moveTo(xOf(sg.t0) + 1, y);
+            ctx.lineTo(Math.max(xOf(sg.t0) + 2, xOf(sg.t1) - 1), y);
+            ctx.stroke();
         }
     }
-    // gyaling melody
-    const yG = 4 + 3 * laneH;
-    const gy = view.segments.gyas;
-    for (let i = 0; i < gy.length; i = i + 1) {
-        const s = gy[i];
-        if (s.t1 < t0 || s.t0 > t0 + WINDOW) {
-            continue;
-        }
-        const y = yG + (1 - (s.note - 59) / 13) * (laneH - 6) + 3;
-        ctx.fillStyle = "#d96a4f";
-        ctx.fillRect(xOf(s.t0), y - 2, Math.max(2, xOf(s.t1) - xOf(s.t0) - 1), 4);
-    }
-    // ritual percussion and the drop kit
-    const yP = 4 + 4 * laneH;
-    const yK = 4 + 6 * laneH;
-    const hits = view.segments.hits;
+    ctx.lineCap = "butt";
+    // percussion strip
+    const py = h - perc;
+    ctx.strokeStyle = "rgba(239,228,207,0.08)";
+    ctx.beginPath();
+    ctx.moveTo(left, py);
+    ctx.lineTo(w, py);
+    ctx.stroke();
+    const hits = view.roll.hits;
     for (let i = 0; i < hits.length; i = i + 1) {
         const e = hits[i];
         if (e.t < t0 - 1 || e.t > t0 + WINDOW) {
             continue;
         }
         const x = xOf(e.t);
-        let y = 0;
+        let y = py + perc * 0.5;
         let r = 2;
         let color = "#efe4cf";
-        if (e.act === "rolmo") { y = yP + laneH * 0.45; r = 1.5 + 4 * e.amp; color = "#f2cf6b"; }
-        else if (e.act === "nga") { y = yP + laneH * 0.8; r = 2 + 3 * e.amp; color = "#8c2f22"; }
-        else if (e.act === "bell") { y = yP + laneH * 0.15; r = 3; color = "#9ab6e0"; }
-        else if (e.act === "conch" || e.act === "kang") { y = yP + laneH * 0.15; r = 4; color = "#c58fd1"; }
-        else if (e.act === "kick") { y = yK + laneH * 0.8; r = 3.5; color = "#e9a23b"; }
-        else if (e.act === "snare") { y = yK + laneH * 0.5; r = 1.5 + 2 * e.amp; color = "#efe4cf"; }
-        else if (e.act === "hat") { y = yK + laneH * 0.18; r = 1.2; color = "rgba(239,228,207,0.6)"; }
+        if (e.act === "rolmo") { y = py + perc * 0.3; r = 1.5 + 3.5 * e.amp; color = "#f2cf6b"; }
+        else if (e.act === "nga") { y = py + perc * 0.75; r = 2 + 3 * e.amp; color = "#c0503a"; }
+        else if (e.act === "bell") { y = py + perc * 0.15; r = 3; color = "#9ab6e0"; }
+        else if (e.act === "conch" || e.act === "kang") { y = py + perc * 0.15; r = 4; color = "#c58fd1"; }
+        else if (e.act === "kick") { y = py + perc * 0.85; r = 3; color = "#e9a23b"; }
+        else if (e.act === "snare") { y = py + perc * 0.55; r = 1.2 + 1.8 * e.amp; color = "#efe4cf"; }
+        else if (e.act === "hat") { y = py + perc * 0.35; r = 1; color = "rgba(239,228,207,0.5)"; }
+        else if (e.act === "dunk") { y = py + perc * 0.85; r = 2; color = "#e05d8a"; }
         else if (e.act === "riser") {
-            ctx.fillStyle = "rgba(111,181,154,0.18)";
+            ctx.fillStyle = "rgba(111,181,154,0.15)";
             ctx.beginPath();
-            ctx.moveTo(x, yK + laneH - 2);
-            ctx.lineTo(xOf(e.t + e.seconds), yK + 2);
-            ctx.lineTo(xOf(e.t + e.seconds), yK + laneH - 2);
+            ctx.moveTo(x, h - 2);
+            ctx.lineTo(xOf(e.t + e.seconds), py + 2);
+            ctx.lineTo(xOf(e.t + e.seconds), h - 2);
             ctx.fill();
             continue;
-        } else if (e.act === "impact") { y = yK + laneH * 0.5; r = 7; color = "#f2cf6b"; }
+        } else if (e.act === "impact") { y = py + perc * 0.5; r = 6; color = "#f2cf6b"; }
         ctx.fillStyle = color;
         ctx.beginPath();
         ctx.arc(x, y, r, 0, Math.PI * 2);
         ctx.fill();
     }
-    // throat bass: the vowel orbit drawn as its actual waveform
-    const yB = 4 + 5 * laneH;
-    ctx.strokeStyle = "#e05d8a";
-    ctx.lineWidth = 1.6;
-    let drawing = false;
-    ctx.beginPath();
-    for (let px = 0; px <= plotW; px = px + 2) {
-        const t = t0 + px / plotW * WINDOW;
-        const i = Math.floor(t * RATE);
-        if (i < 0 || i >= tl.n || tl.bassOn[i] < 0.5) {
-            drawing = false;
-            continue;
-        }
-        // the engine re-phases the orbit on every downbeat
-        const barStart = GRID + Math.floor((t - GRID) / BAR) * BAR;
-        const v = oscillatorWave(tl.bassShape[i], tl.bassRate[i] * (t - barStart));
-        const y = yB + laneH * 0.5 - v * (laneH * 0.38);
-        if (!drawing) {
-            ctx.moveTo(left + px, y);
-            drawing = true;
-        } else {
-            ctx.lineTo(left + px, y);
-        }
-    }
-    ctx.stroke();
     // playhead
     ctx.strokeStyle = "#f2cf6b";
     ctx.lineWidth = 1.5;
@@ -605,6 +589,12 @@ export function drawSongStage(ctx, w, h, view, drawMonk, smoothMouth, hues) {
     }
     // the throat bass along the floor
     if (parts !== null && parts.bass !== undefined) {
-        drawThroat(ctx, w, h, parts.bass[0], inst.sub);
+        let loud = parts.bass[0];
+        for (let i = 1; i < parts.bass.length; i = i + 1) {
+            if (parts.bass[i].env > loud.env) {
+                loud = parts.bass[i];
+            }
+        }
+        drawThroat(ctx, w, h, loud, Math.max(inst.sub, inst.dunk || 0));
     }
 }

@@ -8,8 +8,15 @@ import { radiationPole } from "./engine/tract.js";
 import { responseCurve, findFormants, makeFormantSlots } from "./engine/analysis.js";
 import { vowelArticulation, noteToHz } from "./engine/singer.js";
 import { VOWEL_SHAPES, CLASSIC_BODY } from "./engine/vowels.js";
-import { buildScore, SECTIONS as SONG_SECTIONS, SONG_LENGTH } from "./engine/song.js";
-import { drawSongStage, drawScore, buildSongPanel, songTimeText } from "./songview.js";
+import { ROLMO } from "./engine/song.js";
+import { FUGUE } from "./engine/songs/fugue.js";
+import { drawSongStage, drawScore, buildSongPanel, songTimeText, scoreSeekTime } from "./songview.js";
+
+const SONGS = { fugue: FUGUE, rolmo: ROLMO };
+const SONG_LEDES = {
+    fugue: "One original subject handled as a fugue for chant, overtones, upper voices and three throat basses: answer, countersubject, cantus firmus, stretto, inversion, chorale, canon, and two drops built on call and response between throats.",
+    rolmo: "Monastic ritual music meets a bass drop. Every voice is a physical singer; the wobble is a monk’s throat orbiting through vowels at the tempo."
+};
 
 // ------------------------------------------------------------------ state
 
@@ -34,6 +41,7 @@ const state = {
     inspectDirty: true,
     lastInspect: 0,
     song: null,
+    songId: "fugue",
     songReady: false
 };
 
@@ -122,6 +130,9 @@ function syncEngine() {
 function receiveTelemetry(event) {
     const m = event.data;
     if (m.type === "songReady") {
+        if (m.id !== state.songId) {
+            return;
+        }
         state.songReady = true;
         if (state.song.pendingPlay) {
             state.song.pendingPlay = false;
@@ -197,6 +208,9 @@ function setMode(mode) {
         }
     }
     post({ type: "mode", mode: mode });
+    if (mode === "song" && state.started && !state.songReady) {
+        post({ type: "songLoad", id: state.songId });
+    }
     updatePadLabels();
     clearKeys();
 }
@@ -229,7 +243,7 @@ function updateSongButton() {
 async function toggleSong() {
     await ensureAudio();
     if (!state.songReady) {
-        post({ type: "mode", mode: "song" });
+        post({ type: "songLoad", id: state.songId });
         updateSongButton();
         state.song.pendingPlay = true;
         return;
@@ -242,6 +256,31 @@ async function toggleSong() {
         state.song.playing = true;
     }
     updateSongButton();
+}
+
+function loadSongView(id) {
+    state.songId = id;
+    state.song = buildSongPanel(SONGS[id], seekSong);
+    $("song-lede").textContent = SONG_LEDES[id];
+    $("song-select").value = id;
+}
+
+function onSongSelect(event) {
+    const id = event.target.value;
+    if (state.song !== null && state.song.playing) {
+        post({ type: "songStop" });
+    }
+    loadSongView(id);
+    if (state.started) {
+        state.songReady = false;
+        updateSongButton();
+        post({ type: "songLoad", id: id });
+    }
+}
+
+function onScoreClick(event) {
+    const r = $("score").getBoundingClientRect();
+    seekSong(scoreSeekTime(state.song, (event.clientX - r.left) / r.width));
 }
 
 function seekSong(t) {
@@ -1163,7 +1202,7 @@ function drawStage() {
     stageLayout.length = 0;
     if (state.mode === "song") {
         drawSongStage(ctx, w, h, state.song, drawMonk, smoothMouth, HUES);
-        const sec = SONG_SECTIONS[state.song.telemetry !== null ? state.song.telemetry.section : 0];
+        const sec = state.song.sections[state.song.telemetry !== null ? state.song.telemetry.section : 0];
         $("stage-caption").textContent = sec.name + ". " + sec.text;
         return;
     }
@@ -1544,8 +1583,10 @@ function init() {
     $("mode-classic").addEventListener("click", selectClassic);
     $("mode-choir").addEventListener("click", selectChoir);
     $("mode-song").addEventListener("click", selectSong);
-    state.song = buildSongPanel(buildScore(), SONG_SECTIONS, SONG_LENGTH, seekSong);
+    loadSongView("fugue");
     $("song-play").addEventListener("click", toggleSong);
+    $("song-select").addEventListener("change", onSongSelect);
+    $("score").addEventListener("click", onScoreClick);
     $("power").addEventListener("click", startAudio);
     $("midi-button").addEventListener("click", enableMidi);
     $("add-singer").addEventListener("click", addSinger);
