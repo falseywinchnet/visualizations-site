@@ -576,3 +576,44 @@ figcaption {
 
 .room-bar input[type=range] { width: 120px; accent-color: var(--saffron); vertical-align: middle; }
 #room-info { color: var(--paper-dim); }
+
+.monk-panel {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--ink-3);
+}
+
+.monk-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.monk-head h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.monk-buttons button { padding: 4px 10px; }
+
+.own-control label input[type=checkbox] {
+  vertical-align: -2px;
+  accent-color: var(--saffron);
+}
+
+.own-control.following output { color: var(--paper-dim); }
+.own-control.following input[type=range] { opacity: 0.45; }
+
+.control.hidden { display: none; }
+
+.pitch-badge {
+  font-size: 12px;
+  color: var(--paper-dim);
+  white-space: nowrap;
+}
+
+.pitch-badge.own { color: var(--saffron); }

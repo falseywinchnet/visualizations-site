@@ -3,11 +3,11 @@
 // posted back for the drawing.
 
 import { ClassicMonk } from "./engine/classic.js?v=a0051c9211";
-import { Choir } from "./engine/choir.js?v=ee6ab9568f";
-import { SongEngine, ROLMO } from "./engine/song.js?v=4a9ca68930";
-import { FUGUE } from "./engine/songs/fugue.js?v=e2159e78b4";
-import { PASSACAGLIA } from "./engine/songs/passacaglia.js?v=84b254ba6a";
-import { HdrStage } from "./engine/hdrstage.js?v=bba375ad84";
+import { Choir } from "./engine/choir.js?v=a5cd9f934a";
+import { SongEngine, ROLMO } from "./engine/song.js?v=3fb80c49e8";
+import { FUGUE } from "./engine/songs/fugue.js?v=a033b57a45";
+import { PASSACAGLIA } from "./engine/songs/passacaglia.js?v=f30021bca9";
+import { HdrStage } from "./engine/hdrstage.js?v=c8e2e4f870";
 import { makeRoom, defaultRoomSettings } from "./engine/room.js?v=8963a58369";
 
 const SONGS = { rolmo: ROLMO, fugue: FUGUE, passacaglia: PASSACAGLIA };
@@ -112,6 +112,8 @@ class MonkProcessor extends AudioWorkletProcessor {
             this.receiveClassicParam(m.name, m.value);
         } else if (m.type === "choirConfig") {
             this.choir.configure(m.config);
+        } else if (m.type === "singerSet") {
+            this.choir.setSinger(m.index, m.field, m.value);
         } else if (m.type === "choirGlobal") {
             this.choir.setGlobal(m.name, m.value);
         } else if (m.type === "choirPad") {

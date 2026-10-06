@@ -24,7 +24,7 @@
 // drones in the current harmony.
 
 import * as M from "../music.js?v=74884be0cf";
-import { makeSingerConfig } from "../choir.js?v=ee6ab9568f";
+import { makeSingerConfig } from "../choir.js?v=a5cd9f934a";
 import {
     newTracks, append, chordSpan, chordAtBeat, harmonizeBeats, placeEntry, fillVoice,
     sortTrack, Score, MANTRA, orbitFor, rolmoPattern, horn, makeWriters, ORBITS

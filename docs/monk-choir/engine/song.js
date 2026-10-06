@@ -22,7 +22,7 @@
 // The melodies and rhythms are original. The mantra syllables are the
 // traditional "om mani padme hum".
 
-import { Choir, Hall, makeSingerConfig } from "./choir.js?v=ee6ab9568f";
+import { Choir, Hall, makeSingerConfig } from "./choir.js?v=a5cd9f934a";
 import {
     Dungchen, Gyaling, Conch, Rolmo, Nga, Drilbu, Kick, Snare, Hats, Sub, Riser, Dunk, softSaturate
 } from "./instruments.js?v=84dae2630a";

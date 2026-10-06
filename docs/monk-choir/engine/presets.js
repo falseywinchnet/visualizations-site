@@ -1,7 +1,7 @@
 // Ensemble presets. Each singer differs by body, register, key offset and
 // small personal habits; nothing is a transposed copy of another.
 
-import { makeSingerConfig } from "./choir.js?v=ee6ab9568f";
+import { makeSingerConfig } from "./choir.js?v=a5cd9f934a";
 
 function singer(type, register, interval, extra) {
     const c = makeSingerConfig(type, register, interval);

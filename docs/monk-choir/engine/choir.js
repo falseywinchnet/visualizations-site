@@ -12,6 +12,34 @@ import { CLASSIC_BODY } from "./vowels.js?v=260f005eba";
 
 export const MAX_SINGERS = 24;
 
+// Scales (pitch classes above the tonic) for a monk following in its own key.
+export const SCALES = {
+    major: [0, 2, 4, 5, 7, 9, 11],
+    minor: [0, 2, 3, 5, 7, 8, 10],
+    dorian: [0, 2, 3, 5, 7, 9, 10],
+    phrygian: [0, 1, 3, 5, 7, 8, 10],
+    mixolydian: [0, 2, 4, 5, 7, 9, 10],
+    "pentatonic major": [0, 2, 4, 7, 9],
+    "pentatonic minor": [0, 3, 5, 7, 10]
+};
+
+// Nearest note of the key (ties go down).
+export function snapToKey(note, tonic, mode) {
+    const scale = SCALES[mode] !== undefined ? SCALES[mode] : SCALES.minor;
+    const n = Math.round(note);
+    for (let d = 0; d <= 6; d = d + 1) {
+        const down = (((n - d - tonic) % 12) + 12) % 12;
+        if (scale.indexOf(down) >= 0) {
+            return n - d;
+        }
+        const up = (((n + d - tonic) % 12) + 12) % 12;
+        if (scale.indexOf(up) >= 0) {
+            return n + d;
+        }
+    }
+    return n;
+}
+
 // Rate multipliers for the "ratio" oscillator mode: small-integer
 // polyrhythms against the base rate.
 export const OSC_RATIOS = [1.0, 1.5, 2.0, 1.25, 4.0 / 3.0, 5.0 / 3.0, 3.0, 1.75, 2.5, 0.75, 0.5, 1.2];
@@ -41,7 +69,16 @@ export function makeSingerConfig(type, register, interval) {
         oscDepth: null,
         oscRound: null,
         oscPhase: null,
-        oscShape: null
+        oscShape: null,
+        // per-monk overrides of the ensemble controls (null: follow the ensemble)
+        own: { vowel: null, hum: null, halftone: null, effort: null, vibrato: null, orbitDepth: null, orbitRate: null },
+        // pitch: "follow" (played note + interval), "lock" (its own note),
+        // "key" (follows, snapped into its own key)
+        pitchMode: "follow",
+        lockNote: 36,
+        drone: false,
+        keyTonic: 0,
+        keyMode: "minor"
     };
 }
 
@@ -189,6 +226,8 @@ export class Choir {
         this.padNote = 48.0;
         this.room = null;
         this.seatOf = [];
+        this.seatSignature = "";
+        this.droneOn = true;
         this.voiceL = new Float32Array(CONTROL_BLOCK);
         this.voiceR = new Float32Array(CONTROL_BLOCK);
         this.seedCounter = 1;
@@ -198,15 +237,32 @@ export class Choir {
     // row for the second half of a large choir, seated or standing.
     setRoom(room) {
         this.room = room;
+        this.seatSignature = "";
         this.layoutSeats();
+    }
+
+    seatKey() {
+        let key = this.members.length + ":";
+        for (let i = 0; i < this.members.length; i = i + 1) {
+            key = key + this.members[i].cfg.pan.toFixed(2) + ",";
+        }
+        return key;
     }
 
     layoutSeats() {
         const room = this.room;
-        this.seatOf = [];
         if (room === null) {
+            this.seatOf = [];
             return;
         }
+        // Rebuilding seats recomputes every image source; skip it unless the
+        // number of singers or their places changed.
+        const key = this.seatKey();
+        if (key === this.seatSignature && this.seatOf.length === this.members.length) {
+            return;
+        }
+        this.seatSignature = key;
+        this.seatOf = [];
         room.clearSeats();
         const n = this.members.length;
         const seatCount = Math.max(1, Math.min(6, n));
@@ -226,11 +282,30 @@ export class Choir {
         this.roomGain = room.loudnessScale();
     }
 
+    // Change one field of one monk without re-sending the whole ensemble.
+    // field: "own.vowel" etc., or a config field (pitchMode, lockNote, ...).
+    setSinger(index, field, value) {
+        const m = this.members[index];
+        if (m === undefined) {
+            return;
+        }
+        if (field.indexOf("own.") === 0) {
+            m.cfg.own[field.substring(4)] = value;
+        } else {
+            m.cfg[field] = value;
+        }
+        this.applyGlobals(m.singer, m.cfg);
+        if (field === "pitchMode" || field === "lockNote" || field === "drone" || field === "keyTonic" || field === "keyMode") {
+            this.retarget(false);
+        }
+    }
+
     configure(config) {
         const keep = this.members;
         this.members = [];
         for (let i = 0; i < config.singers.length && i < MAX_SINGERS; i = i + 1) {
             const cfg = Object.assign(makeSingerConfig("baritone", "chest", 0), config.singers[i]);
+            cfg.own = Object.assign(makeSingerConfig("baritone", "chest", 0).own, config.singers[i].own || {});
             let singer = null;
             if (i < keep.length && keep[i].cfg.type === cfg.type && keep[i].cfg.lengthScale === cfg.lengthScale) {
                 singer = keep[i].singer;
@@ -275,8 +350,9 @@ export class Choir {
     }
 
     applyGlobals(singer, cfg) {
-        singer.vowelTarget = this.vowel;
-        singer.humTarget = this.hum;
+        const own = cfg.own !== undefined && cfg.own !== null ? cfg.own : {};
+        singer.vowelTarget = own.vowel !== null && own.vowel !== undefined ? own.vowel : this.vowel;
+        singer.humTarget = own.hum !== null && own.hum !== undefined ? own.hum : this.hum;
         singer.stopLipTarget = this.stopLip;
         singer.stopTipTarget = this.stopTip;
         singer.velumOpenTarget = this.velumOpen;
@@ -288,8 +364,15 @@ export class Choir {
             singer.harmonic = this.harmonic;
         }
         const base = REGISTERS[cfg.register].vent;
-        singer.sourceTarget.vent = Math.max(base, this.halftone);
-        singer.effort = Math.min(1.0, cfg.effort * this.effortScale);
+        const half = own.halftone !== null && own.halftone !== undefined ? own.halftone : this.halftone;
+        singer.sourceTarget.vent = Math.max(base, half);
+        const effort = own.effort !== null && own.effort !== undefined ? own.effort : cfg.effort * this.effortScale;
+        singer.effort = Math.min(1.0, effort);
+        if (own.vibrato !== null && own.vibrato !== undefined) {
+            singer.vibratoDepth = own.vibrato;
+        } else {
+            singer.vibratoDepth = cfg.vibratoDepth;
+        }
     }
 
     singerIndex(singer) {
@@ -315,8 +398,15 @@ export class Choir {
             mult = Math.exp(o.spread * (u - 0.5) * 2.0 * Math.log(3.0));
             phase = (i * 0.7548776662) % 1.0;
         }
-        const rate = cfg.oscRate !== null && cfg.oscRate !== undefined ? cfg.oscRate : o.rate * mult;
-        const depth = cfg.oscDepth !== null && cfg.oscDepth !== undefined ? cfg.oscDepth : o.depth;
+        const own = cfg.own !== undefined && cfg.own !== null ? cfg.own : {};
+        let rate = cfg.oscRate !== null && cfg.oscRate !== undefined ? cfg.oscRate : o.rate * mult;
+        let depth = cfg.oscDepth !== null && cfg.oscDepth !== undefined ? cfg.oscDepth : o.depth;
+        if (own.orbitRate !== null && own.orbitRate !== undefined) {
+            rate = own.orbitRate;
+        }
+        if (own.orbitDepth !== null && own.orbitDepth !== undefined) {
+            depth = own.orbitDepth;
+        }
         const round = cfg.oscRound !== null && cfg.oscRound !== undefined ? cfg.oscRound : o.round;
         const shape = cfg.oscShape !== null && cfg.oscShape !== undefined ? cfg.oscShape : o.shape;
         const wasRunning = singer.oscRate > 0.0;
@@ -384,11 +474,24 @@ export class Choir {
 
     noteFor(member, note) {
         const cfg = member.cfg;
-        const n = note + cfg.interval;
-        if (cfg.octave === "auto") {
-            return foldIntoRange(n, cfg.type);
+        if (cfg.pitchMode === "lock") {
+            return cfg.lockNote;
         }
-        return n + 12.0 * cfg.octave;
+        let n = note + cfg.interval;
+        if (cfg.octave === "auto") {
+            n = foldIntoRange(n, cfg.type);
+        } else {
+            n = n + 12.0 * cfg.octave;
+        }
+        if (cfg.pitchMode === "key") {
+            n = snapToKey(n, cfg.keyTonic, cfg.keyMode);
+        }
+        return n;
+    }
+
+    // Locked monks set to drone keep singing when no key is held.
+    isDrone(member) {
+        return member.cfg.pitchMode === "lock" && member.cfg.drone === true;
     }
 
     // Recompute every singer's target from the held notes (or the pad).
@@ -403,7 +506,12 @@ export class Choir {
         }
         if (notes.length === 0) {
             for (let i = 0; i < this.members.length; i = i + 1) {
-                this.members[i].singer.noteOff();
+                const m = this.members[i];
+                if (this.isDrone(m) && this.droneOn) {
+                    this.sing(m, m.cfg.lockNote);
+                } else {
+                    m.singer.noteOff();
+                }
             }
             return;
         }
@@ -411,7 +519,11 @@ export class Choir {
             const sorted = notes.slice().sort(compareNumbers);
             const order = [];
             for (let i = 0; i < this.members.length; i = i + 1) {
-                order.push(i);
+                if (this.members[i].cfg.pitchMode === "lock") {
+                    this.sing(this.members[i], this.members[i].cfg.lockNote);
+                } else {
+                    order.push(i);
+                }
             }
             const members = this.members;
             order.sort(function compareRange(a, b) {
@@ -420,7 +532,11 @@ export class Choir {
             for (let k = 0; k < order.length; k = k + 1) {
                 const idx = Math.min(sorted.length - 1, Math.floor(k * sorted.length / order.length));
                 const m = this.members[order[k]];
-                this.sing(m, foldIntoRange(sorted[idx], m.cfg.type));
+                let note = foldIntoRange(sorted[idx], m.cfg.type);
+                if (m.cfg.pitchMode === "key") {
+                    note = snapToKey(note, m.cfg.keyTonic, m.cfg.keyMode);
+                }
+                this.sing(m, note);
             }
             return;
         }
@@ -587,7 +703,7 @@ export class Choir {
                 vent: s.source.vent, oq: s.source.oq, gate: s.gate,
                 tipPos: s.art.tipPos, tipClose: s.art.tipClose, epilarynx: s.art.epilarynx, larynx: s.art.larynx,
                 tuning: s.tuning, harmonic: s.harmonic,
-                vowel: s.vowelEff, oscRate: s.oscRate, oscValue: s.oscValue
+                vowel: s.vowelEff, oscRate: s.oscRate, oscValue: s.oscValue, hum: s.hum
             });
         }
         return out;

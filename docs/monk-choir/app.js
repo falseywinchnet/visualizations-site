@@ -1,16 +1,16 @@
 // Page: audio start-up, pad, keyboard, MIDI, controls, stage and inspector.
 
-import { PRESETS, presetById } from "./engine/presets.js?v=b050e15f5f";
-import { makeSingerConfig, anatomyFor, foldIntoRange } from "./engine/choir.js?v=ee6ab9568f";
+import { PRESETS, presetById } from "./engine/presets.js?v=f018fb38c9";
+import { makeSingerConfig, anatomyFor, foldIntoRange } from "./engine/choir.js?v=a5cd9f934a";
 import { VOICE_TYPES, SECTIONS, SPEED_OF_SOUND, makeArticulation, areaFunction, lipRadius, segmentLengths } from "./engine/anatomy.js?v=9500908dbe";
 import { REGISTERS } from "./engine/glottis.js?v=e11d9ec07d";
 import { radiationPole } from "./engine/tract.js?v=711fe62fc7";
 import { responseCurve, findFormants, makeFormantSlots } from "./engine/analysis.js?v=887637021b";
 import { vowelArticulation, noteToHz } from "./engine/singer.js?v=7c9b69f214";
 import { VOWEL_SHAPES, CLASSIC_BODY } from "./engine/vowels.js?v=260f005eba";
-import { ROLMO } from "./engine/song.js?v=4a9ca68930";
-import { FUGUE } from "./engine/songs/fugue.js?v=e2159e78b4";
-import { PASSACAGLIA } from "./engine/songs/passacaglia.js?v=84b254ba6a";
+import { ROLMO } from "./engine/song.js?v=3fb80c49e8";
+import { FUGUE } from "./engine/songs/fugue.js?v=a033b57a45";
+import { PASSACAGLIA } from "./engine/songs/passacaglia.js?v=f30021bca9";
 import { drawSongStage, drawScore, buildSongPanel, songTimeText, scoreSeekTime } from "./songview.js?v=cb255e5fee";
 import { buildHdrPanel, drawHdrMeters, makeSpectrogram, drawSpectrogram } from "./hdrview.js?v=15e79ed03c";
 import { ROOMS, MATERIALS, eyring, defaultRoomSettings } from "./engine/room.js?v=8963a58369";
@@ -101,7 +101,7 @@ async function startAudio() {
         return;
     }
     const ctx = new AudioContext({ latencyHint: "interactive" });
-    await ctx.audioWorklet.addModule("./worklet.js?v=a45153451f");
+    await ctx.audioWorklet.addModule("./worklet.js?v=2bd43b1a08");
     const node = new AudioWorkletNode(ctx, "monk-processor", { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2] });
     const limiter = ctx.createDynamicsCompressor();
     limiter.threshold.value = -6;
@@ -200,6 +200,7 @@ async function ensureAudio() {
 
 function noteOn(note, velocity) {
     ensureAudio();
+    state.lastNote = note;
     post({ type: "noteOn", note: note, velocity: velocity });
     markKey(note, true);
 }
@@ -502,6 +503,7 @@ function choirSetter(name) {
     function set(value) {
         state.globals[name] = value;
         post({ type: "choirGlobal", name: name, value: value });
+        refreshMonkPanel();
         if (name === "vowel") {
             state.padPoint.y = value;
         }
@@ -565,6 +567,7 @@ function setOscRate(u) {
     state.globals["osc.rateUi"] = u;
     state.globals["osc.rate"] = oscRateFromUi(u);
     post({ type: "choirGlobal", name: "osc.rate", value: oscRateFromUi(u) });
+    refreshMonkPanel();
 }
 
 function setGlobalInput(name, value) {
@@ -582,7 +585,7 @@ function loadPreset(id) {
     state.preset = p;
     const singers = [];
     for (let i = 0; i < p.singers.length; i = i + 1) {
-        singers.push(Object.assign({}, p.singers[i]));
+        singers.push(copySinger(p.singers[i]));
     }
     state.config = { singers: singers, voicing: p.voicing, hall: p.hall };
     $("preset-note").textContent = p.note;
@@ -596,6 +599,13 @@ function loadPreset(id) {
     buildSingerTable();
     updatePadLabels();
     state.inspectDirty = true;
+}
+
+// The preset's "own" overrides are an object: copy it so edits stay per monk.
+function copySinger(src) {
+    const s = Object.assign({}, src);
+    s.own = Object.assign({}, makeSingerConfig("baritone", "chest", 0).own, src.own || {});
+    return s;
 }
 
 function onPresetChange(event) {
@@ -726,7 +736,7 @@ function buildSingerTable() {
     const table = $("singer-table");
     table.innerHTML = "";
     const head = document.createElement("tr");
-    const titles = ["", "Body", "Register", "Interval", "Octave", "Tuning", "Level", "Pan", ""];
+    const titles = ["", "Body", "Register", "Interval", "Octave", "Tuning", "Level", "Pan", "Pitch", ""];
     for (let i = 0; i < titles.length; i = i + 1) {
         const th = document.createElement("th");
         th.textContent = titles[i];
@@ -784,6 +794,13 @@ function buildSingerTable() {
         pv.addEventListener("input", makeRowHandler(i, "pan", "number"));
         t7.appendChild(pv);
         tr.appendChild(t7);
+        const tp = document.createElement("td");
+        tp.className = "pitch-badge";
+        tp.textContent = pitchBadge(s);
+        if (s.pitchMode !== undefined && s.pitchMode !== "follow") {
+            tp.classList.add("own");
+        }
+        tr.appendChild(tp);
         const t8 = document.createElement("td");
         const rm = document.createElement("button");
         rm.className = "remove";
@@ -804,6 +821,243 @@ function highlightRow() {
         rows[i].classList.toggle("selected", i - 1 === state.selected);
     }
     $("inspect-name").textContent = "singer " + (state.selected + 1);
+    refreshMonkPanel();
+}
+
+// ------------------------------------------------------------------ the selected monk's own controls
+
+const KEY_MODES = [["major", "major"], ["minor", "minor"], ["dorian", "dorian"], ["phrygian", "phrygian"], ["mixolydian", "mixolydian"], ["pentatonic major", "pentatonic major"], ["pentatonic minor", "pentatonic minor"]];
+const KEY_MODE_SHORT = { major: "maj", minor: "min", dorian: "dor", phrygian: "phr", mixolydian: "mix", "pentatonic major": "pent maj", "pentatonic minor": "pent min" };
+
+function orbitRateToUi(r) {
+    return Math.max(0, Math.min(1, Math.log(r / 0.05) / Math.log(160.0)));
+}
+
+// What the monk does when it follows the ensemble, for each own control.
+const OWN_CONTROLS = [
+    { key: "vowel", label: "Vowel", min: 0, max: 1, step: 0.005, format: formatVowel, ensemble: function (cfg) { return state.globals.vowel; } },
+    { key: "hum", label: "Om (close to hum)", min: 0, max: 1, step: 0.01, format: fmtPercent, ensemble: function (cfg) { return state.globals.hum; } },
+    { key: "halftone", label: "Half tone", min: 0, max: 1, step: 0.01, format: fmtPercent, ensemble: function (cfg) { return state.globals.halftone; } },
+    { key: "effort", label: "Effort", min: 0.2, max: 1, step: 0.01, format: fmtFixed2, ensemble: function (cfg) { return Math.min(1, cfg.effort * state.globals.effort); } },
+    { key: "vibrato", label: "Vibrato (semitones)", min: 0, max: 1, step: 0.01, format: fmtFixed2, ensemble: function (cfg) { return cfg.vibratoDepth; } },
+    { key: "orbitDepth", label: "Orbit size", min: 0, max: 0.5, step: 0.01, format: fmtFixed2, ensemble: function (cfg) { return cfg.oscDepth !== null && cfg.oscDepth !== undefined ? cfg.oscDepth : state.globals["osc.depth"]; } },
+    { key: "orbitRate", label: "Orbit speed", min: 0, max: 1, step: 0.005, format: formatOscRate, ui: true, ensemble: function (cfg) { return state.globals["osc.rate"]; } }
+];
+
+const monkInputs = {};
+
+function pitchBadge(cfg) {
+    if (cfg.pitchMode === "lock") {
+        return "🔒 " + noteName(cfg.lockNote) + (cfg.drone ? " drone" : "");
+    }
+    if (cfg.pitchMode === "key") {
+        return NOTE_NAMES[cfg.keyTonic] + " " + KEY_MODE_SHORT[cfg.keyMode];
+    }
+    return "follows";
+}
+
+function selectedSinger() {
+    return state.config.singers[state.selected];
+}
+
+function sendSinger(field, value) {
+    post({ type: "singerSet", index: state.selected, field: field, value: value });
+}
+
+function noteOptions() {
+    const out = [];
+    for (let n = 24; n <= 84; n = n + 1) {
+        out.push([String(n), noteName(n)]);
+    }
+    return out;
+}
+
+function tonicOptions() {
+    const out = [];
+    for (let k = 0; k < 12; k = k + 1) {
+        out.push([String(k), NOTE_NAMES[k]]);
+    }
+    return out;
+}
+
+function makeOwnControl(container, spec) {
+    const wrap = document.createElement("div");
+    wrap.className = "control own-control";
+    const label = document.createElement("label");
+    const name = document.createElement("span");
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.title = "Give this monk its own value; unticked, it follows the ensemble";
+    name.appendChild(box);
+    name.appendChild(document.createTextNode(" " + spec.label));
+    const out = document.createElement("output");
+    label.appendChild(name);
+    label.appendChild(out);
+    const input = document.createElement("input");
+    input.type = "range";
+    input.min = String(spec.min);
+    input.max = String(spec.max);
+    input.step = String(spec.step);
+    input.setAttribute("aria-label", spec.label + " (this monk)");
+    function engineValue(v) {
+        if (spec.ui) {
+            return oscRateFromUi(v);
+        }
+        return v;
+    }
+    function moved() {
+        out.textContent = spec.format(Number(input.value));
+        const cfg = selectedSinger();
+        if (cfg === undefined || !box.checked) {
+            return;
+        }
+        cfg.own[spec.key] = engineValue(Number(input.value));
+        sendSinger("own." + spec.key, cfg.own[spec.key]);
+    }
+    function toggled() {
+        const cfg = selectedSinger();
+        if (cfg === undefined) {
+            return;
+        }
+        input.disabled = !box.checked;
+        wrap.classList.toggle("following", !box.checked);
+        if (box.checked) {
+            moved();
+        } else {
+            cfg.own[spec.key] = null;
+            sendSinger("own." + spec.key, null);
+            refreshMonkPanel();
+        }
+        buildSingerTable();
+    }
+    input.addEventListener("input", moved);
+    box.addEventListener("change", toggled);
+    wrap.appendChild(label);
+    wrap.appendChild(input);
+    container.appendChild(wrap);
+    monkInputs[spec.key] = { box: box, input: input, out: out, wrap: wrap, spec: spec };
+}
+
+function setPitchField(field, value) {
+    const cfg = selectedSinger();
+    if (cfg === undefined) {
+        return;
+    }
+    cfg[field] = value;
+    sendSinger(field, value);
+    refreshMonkPanel();
+    buildSingerTable();
+}
+
+function onPitchMode(mode) {
+    const cfg = selectedSinger();
+    if (cfg === undefined) {
+        return;
+    }
+    if (mode === "lock" && cfg.pitchMode !== "lock") {
+        // lock onto what it is singing now, or the last played note
+        let n = state.lastNote !== undefined ? state.lastNote : 48;
+        const t = state.telemetry !== null ? state.telemetry[state.selected] : undefined;
+        if (t !== undefined && t.env > 0.05) {
+            n = Math.round(69 + 12 * Math.log2(t.f0 / 440));
+        }
+        cfg.lockNote = Math.max(24, Math.min(84, n));
+        sendSinger("lockNote", cfg.lockNote);
+    }
+    if (mode === "key" && cfg.pitchMode !== "key" && state.lastNote !== undefined) {
+        cfg.keyTonic = ((state.lastNote % 12) + 12) % 12;
+        sendSinger("keyTonic", cfg.keyTonic);
+    }
+    setPitchField("pitchMode", mode);
+}
+
+function buildMonkPanel() {
+    const c = $("monk-controls");
+    monkInputs.pitchMode = makeSelect(c, { label: "Pitch", options: [["follow", "follows the keys"], ["lock", "locked on a note"], ["key", "follows, in its own key"]], value: "follow", onInput: onPitchMode });
+    monkInputs.lockNote = makeSelect(c, { label: "Locked note", options: noteOptions(), value: "48", onInput: function (v) { setPitchField("lockNote", Number(v)); } });
+    const droneWrap = document.createElement("div");
+    droneWrap.className = "control check";
+    const droneLabel = document.createElement("label");
+    const drone = document.createElement("input");
+    drone.type = "checkbox";
+    droneLabel.appendChild(drone);
+    droneLabel.appendChild(document.createTextNode("Drone: keep singing with no key held"));
+    droneWrap.appendChild(droneLabel);
+    c.appendChild(droneWrap);
+    drone.addEventListener("change", function () { setPitchField("drone", drone.checked); });
+    monkInputs.drone = drone;
+    monkInputs.droneWrap = droneWrap;
+    monkInputs.keyTonic = makeSelect(c, { label: "Key", options: tonicOptions(), value: "0", onInput: function (v) { setPitchField("keyTonic", Number(v)); } });
+    monkInputs.keyMode = makeSelect(c, { label: "Scale", options: KEY_MODES, value: "minor", onInput: function (v) { setPitchField("keyMode", v); } });
+    for (let i = 0; i < OWN_CONTROLS.length; i = i + 1) {
+        makeOwnControl(c, OWN_CONTROLS[i]);
+    }
+    $("monk-reset").addEventListener("click", resetMonk);
+    $("monk-all-follow").addEventListener("click", allFollow);
+}
+
+function resetMonk() {
+    const cfg = selectedSinger();
+    if (cfg === undefined) {
+        return;
+    }
+    const keys = Object.keys(cfg.own);
+    for (let i = 0; i < keys.length; i = i + 1) {
+        cfg.own[keys[i]] = null;
+    }
+    cfg.pitchMode = "follow";
+    cfg.drone = false;
+    pushConfig();
+    refreshMonkPanel();
+    buildSingerTable();
+}
+
+function allFollow() {
+    const singers = state.config.singers;
+    for (let s = 0; s < singers.length; s = s + 1) {
+        const keys = Object.keys(singers[s].own);
+        for (let i = 0; i < keys.length; i = i + 1) {
+            singers[s].own[keys[i]] = null;
+        }
+        singers[s].pitchMode = "follow";
+        singers[s].drone = false;
+    }
+    pushConfig();
+    refreshMonkPanel();
+    buildSingerTable();
+}
+
+// Show the selected monk's settings; following controls show the ensemble's value.
+function refreshMonkPanel() {
+    const cfg = selectedSinger();
+    if (cfg === undefined || monkInputs.pitchMode === undefined) {
+        return;
+    }
+    $("monk-name").textContent = "monk " + (state.selected + 1) + " (" + cfg.type + ", " + cfg.register + ")";
+    monkInputs.pitchMode.value = cfg.pitchMode;
+    monkInputs.lockNote.value = String(Math.round(cfg.lockNote));
+    monkInputs.drone.checked = cfg.drone === true;
+    monkInputs.keyTonic.value = String(cfg.keyTonic);
+    monkInputs.keyMode.value = cfg.keyMode;
+    monkInputs.lockNote.parentElement.classList.toggle("hidden", cfg.pitchMode !== "lock");
+    monkInputs.droneWrap.classList.toggle("hidden", cfg.pitchMode !== "lock");
+    monkInputs.keyTonic.parentElement.classList.toggle("hidden", cfg.pitchMode !== "key");
+    monkInputs.keyMode.parentElement.classList.toggle("hidden", cfg.pitchMode !== "key");
+    for (let i = 0; i < OWN_CONTROLS.length; i = i + 1) {
+        const spec = OWN_CONTROLS[i];
+        const c = monkInputs[spec.key];
+        const own = cfg.own[spec.key];
+        const mine = own !== null && own !== undefined;
+        let v = mine ? own : spec.ensemble(cfg);
+        if (spec.ui) {
+            v = orbitRateToUi(v);
+        }
+        c.box.checked = mine;
+        c.input.disabled = !mine;
+        c.wrap.classList.toggle("following", !mine);
+        c.input.value = String(v);
+        c.out.textContent = spec.format(Number(c.input.value));
+    }
 }
 
 // ------------------------------------------------------------------ pad
@@ -1404,6 +1658,14 @@ function drawStage() {
             const mouth = smoothMouth(i, target);
             drawMonk(ctx, x, ground, size, mouth, mouth.active, i === state.selected, HUES[i % HUES.length]);
             stageLayout[i] = { x: x, y: ground - size, r: size };
+            const cfg = state.config.singers[i];
+            if (cfg !== undefined && cfg.pitchMode !== undefined && cfg.pitchMode !== "follow") {
+                ctx.font = "11px system-ui, sans-serif";
+                ctx.textAlign = "center";
+                ctx.fillStyle = cfg.pitchMode === "lock" ? "#f2cf6b" : "#9ab6e0";
+                ctx.fillText(pitchBadge(cfg), x, ground - 1.95 * size - 6);
+                ctx.textAlign = "start";
+            }
         }
     }
     let caption = n + " singers. Click one to look inside.";
@@ -1710,6 +1972,7 @@ function frame() {
 function init() {
     buildClassicControls();
     buildChoirControls();
+    buildMonkPanel();
     buildPresetSelect();
     buildKeyboard();
     buildFitTable();

@@ -5,7 +5,7 @@ import { Singer, CONTROL_BLOCK } from "./singer.js?v=7c9b69f214";
 import { HdrVoice, LAYERS } from "./hdr.js?v=2a2db22a1b";
 import { makeAnatomy } from "./anatomy.js?v=9500908dbe";
 import { makeVoiceSource } from "./glottis.js?v=e11d9ec07d";
-import { Hall } from "./choir.js?v=ee6ab9568f";
+import { Hall } from "./choir.js?v=a5cd9f934a";
 
 function probeRms(voice) {
     const t = voice.anatomy.type;

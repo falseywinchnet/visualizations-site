@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sangha monk choir</title>
 <meta name="description" content="A singing-monk synthesizer: the classic 2002 monk voice reproduced sample for sample, then rebuilt as physical singers with their own throats, mouths and registers — choirs, sopranos, falsetto, Gyuto chord chant, ventricular half tones, khöömei and sygyt.">
-<link rel="stylesheet" href="./style.css?v=c3fc38f592">
+<link rel="stylesheet" href="./style.css?v=d51e3a7085">
 </head>
 <body>
 <header class="top">
@@ -112,6 +112,17 @@
       <div class="table-wrap"><table id="singer-table"></table></div>
       <button id="add-singer" class="ghost">Add singer</button>
     </details>
+    <div class="monk-panel">
+      <div class="monk-head">
+        <h3>Selected: <span id="monk-name">monk 1</span></h3>
+        <span class="monk-buttons">
+          <button id="monk-reset" class="ghost" title="This monk follows the ensemble again">Follow ensemble</button>
+          <button id="monk-all-follow" class="ghost" title="Every monk follows the ensemble again">All follow</button>
+        </span>
+      </div>
+      <p class="small">Click a monk on the stage or a row above. Tick a control to give this monk its own value; unticked controls follow the ensemble sliders. Lock a monk on a note, or let it follow the keys inside its own key: each monk can have a different one.</p>
+      <div class="controls" id="monk-controls"></div>
+    </div>
   </section>
 
   <section id="inspector" class="panel hidden">
@@ -158,6 +169,6 @@
   </section>
 </main>
 
-<script type="module" src="./app.js?v=07ba100333"></script>
+<script type="module" src="./app.js?v=be98922e9d"></script>
 </body>
 </html>
