@@ -22,10 +22,10 @@
 // The melodies and rhythms are original. The mantra syllables are the
 // traditional "om mani padme hum".
 
-import { Choir, Hall, makeSingerConfig } from "./choir.js?v=1a24f9b503";
+import { Choir, Hall, makeSingerConfig } from "./choir.js?v=4bc8bf7bb1";
 import {
-    Dungchen, Gyaling, Conch, Rolmo, Nga, Drilbu, Kick, Snare, Hats, Sub, Riser, Dunk, softSaturate
-} from "./instruments.js?v=84dae2630a";
+    Dungchen, Gyaling, Conch, Rolmo, Nga, Drilbu, Kick, Snare, Hats, Sub, Riser, Dunk, Tungur, Lute, softSaturate
+} from "./instruments.js?v=405e1cddbf";
 
 export const TEMPO = 140.0;
 export const BEAT = 60.0 / TEMPO;
@@ -504,6 +504,8 @@ export class SongEngine {
         this.rolmo = new Rolmo(sr, 77);
         this.nga = new Nga(sr, 68.0);
         this.bell = new Drilbu(sr, 1320.0);
+        this.tungur = new Tungur(sr, 82.0, 23);
+        this.lute = new Lute(sr, 47);
         this.kick = new Kick(sr, 5);
         this.snare = new Snare(sr, 9);
         this.hats = new Hats(sr);
@@ -555,7 +557,8 @@ export class SongEngine {
         const places = [
             [0.0, 0.0, h], [0.0, -1.5, 1.6], [0.0, -0.8, h],
             [-3.5, -0.5, 1.2], [3.5, -0.5, 1.2], [-1.5, 0.3, 1.3], [1.5, 0.3, 1.3],
-            [-2.5, -0.3, 1.4], [2.8, -0.3, 1.0], [-1.0, 0.0, 1.2]
+            [-2.5, -0.3, 1.4], [2.8, -0.3, 1.0], [-1.0, 0.0, 1.2],
+            [-2.0, 0.6, 1.0], [2.2, 0.6, 0.9]
         ];
         for (let i = 0; i < places.length; i = i + 1) {
             const seat = room.addSeat(places[i][0], places[i][1], places[i][2], i === 0 || i === 2 || i === 8);
@@ -681,6 +684,14 @@ export class SongEngine {
             const singer = c.members[0].singer;
             singer.harmonic = a.harmonic;
             singer.noteOn(a.drone, 0.85);
+        } else if (act === "singerSet") {
+            // any per-monk setting of one singer (choir.js setSinger):
+            // "own.harmonic", tuning, melody, ornament, pattern, larynxModel...
+            this.parts[a.part].setSinger(a.index, a.field, a.value);
+        } else if (act === "tungur") {
+            this.tungur.strike(a.amp, a.bright === undefined ? 0.4 : a.bright, delay);
+        } else if (act === "pluck") {
+            this.lute.pluck(a.note, a.amp, delay, a.pan);
         } else if (act === "kickTune") {
             this.kick.tailHz = a.hz;
         } else if (act === "dunk") {
@@ -742,6 +753,9 @@ export class SongEngine {
 
         this.parts.upper.renderDry(rl, rr, 0, m);
         this.parts.solo.renderDry(rl, rr, 0, m);
+        if (this.def.bassInRoom === true) {
+            this.parts.bass.renderDry(rl, rr, 0, m);
+        }
         this.horns[0].render(rl, rr, 0, m, 0.9, 0.55);
         this.horns[1].render(rl, rr, 0, m, 0.55, 0.9);
         this.gyas[0].render(rl, rr, 0, m, 0.85, 0.5);
@@ -751,6 +765,8 @@ export class SongEngine {
         this.rolmo.render(rl, rr, 0, m);
         this.nga.render(rl, rr, 0, m);
         this.bell.render(rl, rr, 0, m);
+        this.tungur.render(rl, rr, 0, m);
+        this.lute.render(rl, rr, 0, m);
         for (let i = 0; i < m; i = i + 1) {
             rl[i] = rl[i] * 0.28;
             rr[i] = rr[i] * 0.28;
@@ -772,6 +788,9 @@ export class SongEngine {
         this.parts.monks.renderDry(l, r, 0, m); this.toSeat(0, m, g);
         this.parts.upper.renderDry(l, r, 0, m); this.toSeat(1, m, g);
         this.parts.solo.renderDry(l, r, 0, m); this.toSeat(2, m, g);
+        if (this.def.bassInRoom === true) {
+            this.parts.bass.renderDry(l, r, 0, m); this.toSeat(0, m, g);
+        }
         this.horns[0].render(l, r, 0, m, 1.0, 1.0); this.toSeat(3, m, g);
         this.horns[1].render(l, r, 0, m, 1.0, 1.0); this.toSeat(4, m, g);
         this.gyas[0].render(l, r, 0, m, 1.0, 1.0); this.toSeat(5, m, g);
@@ -782,6 +801,8 @@ export class SongEngine {
         this.conch.render(l, r, 0, m, 1.0, 1.0);
         this.kangling.render(l, r, 0, m, 1.0, 1.0);
         this.toSeat(9, m, g);
+        this.tungur.render(l, r, 0, m); this.toSeat(10, m, g);
+        this.lute.render(l, r, 0, m); this.toSeat(11, m, g);
         this.room.process(rl, rr, m, 0);
     }
 
@@ -835,8 +856,11 @@ export class SongEngine {
         } else {
             this.ritualInHall(rl, rr, m);
         }
-        // drop bus: throat bass (saturated, ducked), sub, kit, riser
-        this.parts.bass.renderDry(bl, br, 0, m);
+        // drop bus: throat bass (saturated, ducked), sub, kit, riser.
+        // A song may seat its bass part in the room instead (bassInRoom).
+        if (this.def.bassInRoom !== true) {
+            this.parts.bass.renderDry(bl, br, 0, m);
+        }
         for (let i = 0; i < m; i = i + 1) {
             const x = 0.5 * (bl[i] + br[i]) * 0.35;
             const y = (0.55 * x + 0.45 * softSaturate(x, 3.5)) * this.duck[i];
@@ -888,7 +912,8 @@ export class SongEngine {
                 conch: this.conch.level, kang: this.kangling.level,
                 rolmo: this.rolmo.level, nga: this.nga.level, bell: this.bell.level,
                 kick: this.kick.level, snare: this.snare.level, hat: this.hats.level,
-                sub: this.sub.level, riser: this.riser.level, dunk: this.dunk.level
+                sub: this.sub.level, riser: this.riser.level, dunk: this.dunk.level,
+                tungur: this.tungur.level, lute: this.lute.level
             }
         };
     }

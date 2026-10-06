@@ -3,14 +3,17 @@
 // posted back for the drawing.
 
 import { ClassicMonk } from "./engine/classic.js?v=a0051c9211";
-import { Choir } from "./engine/choir.js?v=1a24f9b503";
-import { SongEngine, ROLMO } from "./engine/song.js?v=e324200d9e";
-import { FUGUE } from "./engine/songs/fugue.js?v=779c031a57";
-import { PASSACAGLIA } from "./engine/songs/passacaglia.js?v=d21e508928";
-import { HdrStage } from "./engine/hdrstage.js?v=ba03f1cb2b";
+import { Choir } from "./engine/choir.js?v=4bc8bf7bb1";
+import { SongEngine, ROLMO } from "./engine/song.js?v=e49e4b97a0";
+import { FUGUE } from "./engine/songs/fugue.js?v=b5027baa3f";
+import { PASSACAGLIA } from "./engine/songs/passacaglia.js?v=8df5d5be15";
+import { STEPPE } from "./engine/songs/steppe.js?v=8a12da2d87";
+import { TENORE } from "./engine/songs/tenore.js?v=8ae6bf56eb";
+import { OM } from "./engine/songs/om.js?v=873747865d";
+import { HdrStage } from "./engine/hdrstage.js?v=513a6d1d0a";
 import { makeRoom, defaultRoomSettings } from "./engine/room.js?v=8963a58369";
 
-const SONGS = { rolmo: ROLMO, fugue: FUGUE, passacaglia: PASSACAGLIA };
+const SONGS = { rolmo: ROLMO, fugue: FUGUE, passacaglia: PASSACAGLIA, steppe: STEPPE, tenore: TENORE, om: OM };
 
 class MonkProcessor extends AudioWorkletProcessor {
     constructor() {

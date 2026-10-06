@@ -1,7 +1,7 @@
 // HDR tab: controls, layer meters and a 120 dB scrolling spectrogram.
 
 import { VOICE_TYPES } from "./engine/anatomy.js?v=9500908dbe";
-import { REGISTERS } from "./engine/glottis.js?v=44e6be78ce";
+import { REGISTERS } from "./engine/glottis.js?v=0fdd116a83";
 
 const LAYER_INFO = [
     ["interaction", "Glottis hears its tube", "Flow follows the pressure across the folds; skew and open-phase damping emerge.", null],

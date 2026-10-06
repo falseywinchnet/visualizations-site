@@ -5,11 +5,11 @@
 // independent glottal jitter, vibrato, pitch wander and onsets, whose small
 // disagreements are what a real choir sounds like.
 
-import { Singer, CONTROL_BLOCK, hzToNote } from "./singer.js?v=b3facbb137";
+import { Singer, CONTROL_BLOCK, hzToNote } from "./singer.js?v=9b9f347a8e";
 import { makeAnatomy, VOICE_TYPES } from "./anatomy.js?v=9500908dbe";
-import { REGISTERS } from "./glottis.js?v=44e6be78ce";
+import { REGISTERS } from "./glottis.js?v=0fdd116a83";
 import { CLASSIC_BODY } from "./vowels.js?v=260f005eba";
-import { parseMelody, PATTERNS, isHarmonicTuning } from "./throat.js?v=cd983914d8";
+import { parseMelody, PATTERNS, isHarmonicTuning } from "./throat.js?v=fe3040c8de";
 
 export const MAX_SINGERS = 24;
 
@@ -319,6 +319,12 @@ export class Choir {
             m.singer.larynxTarget = value;
         } else if (field === "epilarynx") {
             m.singer.epilarynx = value;
+        } else if (field === "level") {
+            m.singer.level = value;
+        } else if (field === "ornament" || field === "ornRate") {
+            // an ornament starts its cycle when it is asked for (a score can
+            // then put a gallop on the drum's beat)
+            m.singer.ornPhase = 0.0;
         }
         this.applyGlobals(m.singer, m.cfg);
         if (field === "pitchMode" || field === "lockNote" || field === "drone" || field === "keyTonic" || field === "keyMode") {
@@ -447,8 +453,13 @@ export class Choir {
         singer.ornDepth = cfg.ornDepth;
         singer.phrase = cfg.phrase;
         singer.breathGap = cfg.breathGap;
-        const pattern = PATTERNS[cfg.pattern];
-        singer.pattern = pattern !== undefined ? pattern.steps : PATTERNS.none.steps;
+        // a named motif (PATTERNS), or a song's own list of steps
+        if (Array.isArray(cfg.pattern)) {
+            singer.pattern = cfg.pattern;
+        } else {
+            const pattern = PATTERNS[cfg.pattern];
+            singer.pattern = pattern !== undefined ? pattern.steps : PATTERNS.none.steps;
+        }
         singer.patternRate = cfg.patternRate;
         singer.patternOffset = cfg.patternOffset;
         singer.larynxModel = cfg.larynxModel === "folds" ? "folds" : "pulse";

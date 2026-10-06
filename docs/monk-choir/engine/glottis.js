@@ -40,7 +40,11 @@ export const REGISTERS = {
     falsetto: { label: "Falsetto", oq: 0.85, skew: 0.58, qa: 0.3, leak: 0.16, breath: 0.09, jitter: 0.005, shimmer: 0.035, vent: 0.0 },
     breathy: { label: "Breathy", oq: 0.78, skew: 0.62, qa: 0.25, leak: 0.28, breath: 0.2, jitter: 0.006, shimmer: 0.04, vent: 0.0 },
     ventricular: { label: "Ventricular (dzo-ke / kargyraa)", oq: 0.42, skew: 0.75, qa: 0.035, leak: 0.01, breath: 0.03, jitter: 0.005, shimmer: 0.04, vent: 0.75 },
-    fry: { label: "Strohbass / fry", oq: 0.28, skew: 0.8, qa: 0.03, leak: 0.0, breath: 0.02, jitter: 0.04, shimmer: 0.15, vent: 0.3 }
+    fry: { label: "Strohbass / fry", oq: 0.28, skew: 0.8, qa: 0.03, leak: 0.0, breath: 0.02, jitter: 0.04, shimmer: 0.15, vent: 0.3 },
+    // Not a voice: the steel reed of a jaw harp (khomus), plucked in front
+    // of the mouth. A narrow, abrupt, very steady pulse; the player's mouth
+    // chooses its harmonics exactly as a throat singer's does.
+    reed: { label: "Jaw-harp reed (khomus)", oq: 0.1, skew: 0.5, qa: 0.004, leak: 0.0, breath: 0.001, jitter: 0.0005, shimmer: 0.004, vent: 0.0 }
 };
 
 // Extra turbulence when the folds stand apart (breath-only steps).

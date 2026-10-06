@@ -18,13 +18,14 @@
 // changes, so building it never stalls the audio.
 
 import { SECTIONS, SPEED_OF_SOUND, makeArticulation, areaFunction, nasalAreas, velumJunction, velumArea, lipRadius, MAX_NASAL_SECTIONS } from "./anatomy.js?v=9500908dbe";
-import { radiationPole } from "./tract.js?v=44afeabdc1";
-import { makeBranchShape, prepareBranch, branchResponseAt } from "./branch.js?v=858edf769a";
+import { radiationPole } from "./tract.js?v=dcd3b7ef73";
+import { makeBranchShape, prepareBranch, branchResponseAt } from "./branch.js?v=0f96a77061";
 
 export const MAP_STEPS = 25;    // along gesture a
 export const MAP_STEPS_B = 6;   // along gesture b (1 for a single line)
 export const MAP_STEPS_FOCUS = 9;  // along the focus gesture's fine-tuning axis
 const MAP_ROWS_MAX = MAP_STEPS * MAP_STEPS_FOCUS;
+const MAP_CACHE = new Map();
 export const MAP_BINS = 320;
 export const MAP_LOW_HZ = 60.0;
 export const MAP_HIGH_HZ = 5000.0;
@@ -195,6 +196,25 @@ export class MouthMap {
         this.art = makeArticulation();
         this.shape = makeBranchShape();
         this.lastScore = 0.0;
+    }
+
+    // A map learned once for a body, gesture and throat setting is kept and
+    // reused (a song rebuilds its singers whenever it seeks).
+    remember(key) {
+        if (MAP_CACHE.size > 48) {
+            MAP_CACHE.clear();
+        }
+        MAP_CACHE.set(key, { table: Float32Array.from(this.table.subarray(0, this.rows * MAP_BINS)), rows: this.rows });
+    }
+
+    restore(key) {
+        const known = MAP_CACHE.get(key);
+        if (known === undefined || known.rows !== this.rows) {
+            return false;
+        }
+        this.table.set(known.table);
+        this.built = this.rows;
+        return true;
     }
 
     // Start again for a gesture plane with nb steps along b.

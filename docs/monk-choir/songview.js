@@ -30,8 +30,15 @@ export const ROLL_VOICES = [
     { key: "bass1", label: "Throat: squeal", color: "#c58fd1", width: 3 },
     { key: "bass2", label: "Throat: chop", color: "#d96a4f", width: 3 },
     { key: "horn", label: "Dungchen", color: "rgba(217,140,43,0.55)", width: 6 },
-    { key: "gya", label: "Gyaling", color: "#b0573f", width: 2 }
+    { key: "gya", label: "Gyaling", color: "#b0573f", width: 2 },
+    { key: "over1", label: "Overtone 2", color: "#8fd1c3", width: 2.5 },
+    { key: "over2", label: "Overtone 3", color: "#c58fd1", width: 2.5 },
+    { key: "lute", label: "Lute", color: "#d9b38c", width: 2 }
 ];
+
+// Roll keys for a song's overtone voices: solo singer i draws its sung
+// harmonic on over / over1 / over2.
+const OVER_KEYS = ["over", "over1", "over2"];
 
 function voiceKeyIndex() {
     const map = {};
@@ -56,6 +63,9 @@ function collectRoll(events, length) {
     const hits = [];
     let soloNote = -1;
     let soloHarm = 8;
+    // per singer: the note it is sounding and the harmonic it puts forward
+    const voiceNote = {};
+    const voiceHarm = {};
     function close(key, t) {
         if (open[key] !== undefined && open[key] !== null) {
             open[key].t1 = t;
@@ -74,9 +84,49 @@ function collectRoll(events, length) {
         const a = e.a;
         const t = e.t;
         if (e.act === "voice" && (a.part === "upper" || a.part === "bass")) {
-            start(a.part + a.index, t, a.note);
+            const id = a.part + a.index;
+            voiceNote[id] = a.note;
+            if (a.part === "upper" && voiceHarm[id] !== undefined && voiceHarm[id] !== null) {
+                start(id, t, harmonicPitch(a.note, voiceHarm[id]));
+            } else {
+                start(id, t, a.note);
+            }
         } else if (e.act === "voiceOff" && (a.part === "upper" || a.part === "bass")) {
+            voiceNote[a.part + a.index] = undefined;
             close(a.part + a.index, t);
+        } else if (e.act === "voice" && a.part === "solo" && a.index < 3) {
+            voiceNote["solo" + a.index] = a.note;
+            start("drone", t, a.note);
+            if (voiceHarm["solo" + a.index] !== undefined && voiceHarm["solo" + a.index] !== null) {
+                start(OVER_KEYS[a.index], t, harmonicPitch(a.note, voiceHarm["solo" + a.index]));
+            }
+        } else if (e.act === "voiceOff" && a.part === "solo" && a.index < 3) {
+            voiceNote["solo" + a.index] = undefined;
+            close(OVER_KEYS[a.index], t);
+            let any = false;
+            for (let k = 0; k < 3; k = k + 1) {
+                if (voiceNote["solo" + k] !== undefined) {
+                    any = true;
+                }
+            }
+            if (!any) {
+                close("drone", t);
+            }
+        } else if (e.act === "singerSet" && a.field === "own.harmonic") {
+            const id = a.part + a.index;
+            voiceHarm[id] = a.value;
+            const n0 = voiceNote[id];
+            if (n0 !== undefined && a.value !== null) {
+                if (a.part === "solo" && a.index < 3) {
+                    start(OVER_KEYS[a.index], t, harmonicPitch(n0, a.value));
+                } else if (a.part === "upper") {
+                    // (a bass's harmonics may be of its sub-octave: its line
+                    // stays on the sung note)
+                    start(id, t, harmonicPitch(n0, a.value));
+                }
+            }
+        } else if (e.act === "pluck") {
+            segs[index.lute].push({ t0: t, t1: t + 0.35, pitch: a.note });
         } else if (e.act === "note" && a.part === "monks") {
             start("monks", t, a.note);
         } else if (e.act === "note" && a.part === "bass") {
@@ -101,7 +151,7 @@ function collectRoll(events, length) {
             } else if (a.part === "upper") {
                 close("upper0", t); close("upper1", t); close("upper2", t);
             } else if (a.part === "solo") {
-                close("over", t); close("drone", t);
+                close("over", t); close("over1", t); close("over2", t); close("drone", t);
                 soloNote = -1;
             } else if (a.part === "bass") {
                 close("bass0", t);
@@ -163,7 +213,11 @@ export function buildSongPanel(def, onSeek) {
             const sw = document.createElement("i");
             sw.style.background = v.color;
             item.appendChild(sw);
-            item.appendChild(document.createTextNode(v.label));
+            let label = v.label;
+            if (def.rollLabels !== undefined && def.rollLabels[v.key] !== undefined) {
+                label = def.rollLabels[v.key];
+            }
+            item.appendChild(document.createTextNode(label));
             legend.appendChild(item);
         }
     }
@@ -540,7 +594,7 @@ function partMouth(parts, name, i) {
 export function drawSongStage(ctx, w, h, view, drawMonk, smoothMouth, hues) {
     const tel = view.telemetry;
     const parts = tel !== null ? tel.parts : null;
-    const inst = tel !== null ? tel.inst : { horn0: 0, horn1: 0, gya0: 0, gya1: 0, conch: 0, kang: 0, rolmo: 0, nga: 0, bell: 0, kick: 0, snare: 0, hat: 0, sub: 0, riser: 0 };
+    const inst = tel !== null ? tel.inst : { horn0: 0, horn1: 0, gya0: 0, gya1: 0, conch: 0, kang: 0, rolmo: 0, nga: 0, bell: 0, kick: 0, snare: 0, hat: 0, sub: 0, riser: 0, tungur: 0, lute: 0 };
     // drop light: kick glows the floor, snare flashes the room
     if (inst.kick > 0.02) {
         const g = ctx.createLinearGradient(0, h, 0, h * 0.4);
@@ -557,32 +611,66 @@ export function drawSongStage(ctx, w, h, view, drawMonk, smoothMouth, hues) {
         ctx.fillStyle = "rgba(111,181,154," + (0.12 * inst.riser).toFixed(3) + ")";
         ctx.fillRect(0, 0, w, h * inst.riser);
     }
-    // horns
-    drawHorn(ctx, w * 0.22, h - 46, w * 0.025, h * 0.2, inst.horn0);
-    drawHorn(ctx, w * 0.78, h - 46, w * 0.975, h * 0.2, inst.horn1);
-    // ritual instruments above and beside the monks
-    drawCymbals(ctx, w * 0.2, h * 0.28, Math.min(34, w * 0.035), inst.rolmo);
-    drawDrum(ctx, w * 0.86, h * 0.42, Math.min(46, h * 0.18), inst.nga);
-    drawBell(ctx, w * 0.12, h * 0.62, 10, inst.bell);
-    drawPipe(ctx, w * 0.43, h * 0.2, -2.4, 30, inst.gya0, "#b0573f");
-    drawPipe(ctx, w * 0.57, h * 0.2, -0.74, 30, inst.gya1, "#b0573f");
-    drawShell(ctx, w * 0.5, h * 0.11, 9, Math.max(inst.conch, inst.kang), inst.kang > inst.conch ? "#e3c896" : "#f3ead8");
-    // back row: upper voices and the overtone singer (in the middle)
-    const back = [["upper", 0], ["upper", 1], ["solo", 0], ["upper", 2]];
+    // the instruments this piece uses (all of the ritual ones by default)
+    const shown = view.def.stageInstruments !== undefined ? view.def.stageInstruments : ["horns", "rolmo", "nga", "bell", "gyaling", "conch"];
+    if (shown.indexOf("horns") >= 0) {
+        drawHorn(ctx, w * 0.22, h - 46, w * 0.025, h * 0.2, inst.horn0);
+        drawHorn(ctx, w * 0.78, h - 46, w * 0.975, h * 0.2, inst.horn1);
+    }
+    if (shown.indexOf("rolmo") >= 0) {
+        drawCymbals(ctx, w * 0.2, h * 0.28, Math.min(34, w * 0.035), inst.rolmo);
+    }
+    if (shown.indexOf("nga") >= 0) {
+        drawDrum(ctx, w * 0.86, h * 0.42, Math.min(46, h * 0.18), inst.nga);
+    }
+    if (shown.indexOf("bell") >= 0) {
+        drawBell(ctx, w * 0.12, h * 0.62, 10, inst.bell);
+    }
+    if (shown.indexOf("gyaling") >= 0) {
+        drawPipe(ctx, w * 0.43, h * 0.2, -2.4, 30, inst.gya0, "#b0573f");
+        drawPipe(ctx, w * 0.57, h * 0.2, -0.74, 30, inst.gya1, "#b0573f");
+    }
+    if (shown.indexOf("conch") >= 0) {
+        drawShell(ctx, w * 0.5, h * 0.11, 9, Math.max(inst.conch, inst.kang), inst.kang > inst.conch ? "#e3c896" : "#f3ead8");
+    }
+    if (shown.indexOf("tungur") >= 0) {
+        drawDrum(ctx, w * 0.82, h * 0.4, Math.min(40, h * 0.16), inst.tungur || 0);
+    }
+    if (shown.indexOf("lute") >= 0) {
+        drawPipe(ctx, w * 0.2, h * 0.62, -2.5, 46, inst.lute || 0, "#d9b38c");
+    }
+    // back row: upper voices with the overtone singers in the middle
+    const back = [];
+    const nUpper = parts !== null && parts.upper !== undefined ? Math.min(3, parts.upper.length) : 3;
+    const nSolo = parts !== null && parts.solo !== undefined ? Math.min(3, parts.solo.length) : 1;
+    for (let k = 0; k < nUpper; k = k + 1) {
+        if (k === Math.ceil(nUpper / 2)) {
+            for (let j = 0; j < nSolo; j = j + 1) {
+                back.push(["solo", j]);
+            }
+        }
+        back.push(["upper", k]);
+    }
+    if (nUpper <= 1) {
+        for (let j = 0; j < nSolo; j = j + 1) {
+            back.push(["solo", j]);
+        }
+    }
     const baseSize = Math.min(w * 0.05, h * 0.26);
     for (let k = 0; k < back.length; k = k + 1) {
         const name = back[k][0];
         const idx = back[k][1];
-        const x = w * (0.38 + 0.08 * k);
+        const x = w * (0.5 + 0.08 * (k - 0.5 * (back.length - 1)));
         const mouth = smoothMouth(10 + k, partMouth(parts, name, idx));
         const size = baseSize * 0.78 * Math.pow(partLength(parts, name, idx) / 17.0, 1.3);
         ctx.globalAlpha = 0.35 + 0.65 * Math.min(1, mouth.active * 3);
         drawMonk(ctx, x, h - 18 - baseSize * 0.75, size, mouth, mouth.active, false, hues[(k + 2) % hues.length]);
         ctx.globalAlpha = 1.0;
     }
-    // front row: the five chant monks
-    for (let k = 0; k < 5; k = k + 1) {
-        const x = w * (0.3 + 0.1 * k);
+    // front row: the chant monks
+    const nMonks = parts !== null && parts.monks !== undefined ? Math.min(6, parts.monks.length) : 5;
+    for (let k = 0; k < nMonks; k = k + 1) {
+        const x = w * (0.5 + 0.1 * (k - 0.5 * (nMonks - 1)));
         const mouth = smoothMouth(k, partMouth(parts, "monks", k));
         const size = baseSize * Math.pow(partLength(parts, "monks", k) / 17.0, 1.3);
         drawMonk(ctx, x, h - 18, size, mouth, mouth.active, false, hues[k % hues.length]);

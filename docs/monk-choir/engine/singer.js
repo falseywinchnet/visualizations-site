@@ -29,14 +29,18 @@ import {
     SECTIONS, SPEED_OF_SOUND, MAX_NASAL_SECTIONS, makeArticulation, copyArticulation,
     areaFunction, nasalAreas, velumJunction, velumArea, lipRadius, ARTICULATION_KEYS, VOICE_TYPES
 } from "./anatomy.js?v=9500908dbe";
-import { Tract, radiationPole, SECTION_LOSS } from "./tract.js?v=44afeabdc1";
-import { Glottis, makeVoiceSource, copyVoiceSource } from "./glottis.js?v=44e6be78ce";
-import { scanPeaks } from "./analysis.js?v=2458f8cf6f";
+import { Tract, radiationPole, SECTION_LOSS } from "./tract.js?v=dcd3b7ef73";
+import { Glottis, makeVoiceSource, copyVoiceSource } from "./glottis.js?v=0fdd116a83";
+import { scanPeaks } from "./analysis.js?v=0ada426f71";
 import { VOWEL_SHAPES } from "./vowels.js?v=260f005eba";
 import { Larynx } from "./larynx.js?v=faa93613b0";
-import { MouthMap, LABIAL_PLANE, NASAL_PLANE, THROAT_PLANE, stepsB, isMapTuning, isHarmonicTuning, focusArticulation } from "./throat.js?v=cd983914d8";
+import { MouthMap, LABIAL_PLANE, NASAL_PLANE, THROAT_PLANE, stepsB, isMapTuning, isHarmonicTuning, focusArticulation } from "./throat.js?v=fe3040c8de";
 
 export const CONTROL_BLOCK = 64;
+
+// Calibrations of the self-oscillating larynx, by body and register (a
+// calibration simulates 0.3 s of singing: done once, then reused).
+const FOLDS_CALIBRATION = new Map();
 
 // Vocal-fold rest opening by register for the self-oscillating larynx, m^2
 // (negative: the folds are pressed together at rest).
@@ -98,6 +102,13 @@ function approachAsym(x, target, dt, riseTau, fallTau) {
         tau = riseTau;
     }
     return x + (target - x) * (1.0 - Math.exp(-dt / tau));
+}
+
+function settle(x, target) {
+    if (Math.abs(x - target) < 1e-4) {
+        return target;
+    }
+    return x;
 }
 
 function catmullRom(p0, p1, p2, p3, t) {
@@ -249,6 +260,7 @@ export class Singer {
         this.mapAnatomy = null;
         this.mapLarynx = 0.0;
         this.mapEpilarynx = 0.0;
+        this.mapCacheKey = "";
         this.tongueTau = 0.045;
         // the shape the tuners listen to (before ornaments are added)
         this.artTune = makeArticulation();
@@ -411,6 +423,16 @@ export class Singer {
     // train on "ah" peaks at 200 Pa), and an output gain so the folds sing as
     // loud as the drawn pulse they replace (same "ah", same radiation path).
     calibrateFolds() {
+        // The same body and register always calibrate the same way: reuse.
+        const key = this.sampleRate + "|" + this.anatomy.pharynx.toFixed(4) + "|" + this.anatomy.oral.toFixed(4) + "|" + this.anatomy.areaScale.toFixed(4) + "|" + this.anatomy.nasal.toFixed(4) + "|" + this.registerKey + "|" + this.calibration.toFixed(6);
+        const known = FOLDS_CALIBRATION.get(key);
+        if (known !== undefined) {
+            this.foldsKappa = known.kappa;
+            this.foldsGain = known.gain;
+            this.foldsAnatomy = this.anatomy;
+            this.foldsRegister = this.registerKey;
+            return;
+        }
         const art = makeArticulation();
         vowelArticulation(0.5, art);
         const areas = new Float64Array(SECTIONS);
@@ -471,6 +493,7 @@ export class Singer {
         const rms = Math.sqrt(sum / (ticks - skip));
         // the pulse path reaches 0.25 / calibration on the same "ah"
         this.foldsGain = (0.25 / this.calibration) / Math.max(rms, 1e-12);
+        FOLDS_CALIBRATION.set(key, { kappa: this.foldsKappa, gain: this.foldsGain });
         this.foldsAnatomy = this.anatomy;
         this.foldsRegister = this.registerKey;
     }
@@ -608,6 +631,12 @@ export class Singer {
         this.stopLip = approachAsym(this.stopLip, this.stopLipTarget, dt, 0.01, 0.03);
         this.stopTip = approachAsym(this.stopTip, this.stopTipTarget, dt, 0.01, 0.03);
         this.velumOpen = approachAsym(this.velumOpen, this.velumOpenTarget, dt, 0.015, 0.04);
+        // settle exactly onto a target once within reach (an exponential
+        // approach never arrives: a hum left the velum at 1e-30)
+        this.hum = settle(this.hum, this.humTarget);
+        this.stopLip = settle(this.stopLip, this.stopLipTarget);
+        this.stopTip = settle(this.stopTip, this.stopTipTarget);
+        this.velumOpen = settle(this.velumOpen, this.velumOpenTarget);
         const lk = 1.0 - Math.exp(-dt / Math.max(this.larynxGlide, 0.005));
         this.larynx = this.larynx + (this.larynxTarget - this.larynx) * lk;
         this.protrusionAdd = this.protrusionAdd + (this.protrusionTarget - this.protrusionAdd) * lk;
@@ -863,9 +892,14 @@ export class Singer {
             this.mapLarynx = this.larynxTarget;
             this.mapEpilarynx = this.epilarynx;
             this.map.restart(this.tuning, stepsB(this.tuning));
+            this.mapCacheKey = this.tuning + "|" + this.anatomy.pharynx.toFixed(4) + "|" + this.anatomy.oral.toFixed(4) + "|" + this.anatomy.areaScale.toFixed(4) + "|" + this.anatomy.nasal.toFixed(4) + "|" + this.larynxTarget.toFixed(2) + "|" + this.epilarynx.toFixed(2);
+            this.map.restore(this.mapCacheKey);
         }
         if (!this.map.ready()) {
             this.map.buildRow(this);
+            if (this.map.ready()) {
+                this.map.remember(this.mapCacheKey);
+            }
         }
     }
 

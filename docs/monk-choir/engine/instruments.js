@@ -15,6 +15,14 @@
 //             modes (Bessel ratios) with a falling-pitch thump.
 //   Drilbu    hand bell: a few long-ringing inharmonic modes with beating.
 //   Dungkar   conch: a single lip-buzzed tone that scoops up into pitch.
+// Tuvan ensemble (for the steppe pieces):
+//   Tungur    shaman's frame drum: a wide, slack membrane (low Bessel modes,
+//             short ring) and the slap of a soft beater; played in the
+//             galloping rhythm.
+//   Lute      two-course plucked lute (doshpuluur): plucked strings as
+//             delay-line loops whose loss rises with frequency (the string
+//             forgets its brightness first), through a small wooden body
+//             (two resonances).
 // Drop: kick, snare, hats, sub, riser, impact.
 
 function clamp(x, lo, hi) {
@@ -526,6 +534,153 @@ export class Nga {
             outR[offset + i] = outR[offset + i] + y;
         }
         this.level = this.level * 0.93;
+    }
+}
+
+export class Tungur {
+    constructor(sr, f0, seed) {
+        this.sr = sr;
+        const ratios = [1.0, 1.59, 2.14, 2.3, 2.65, 2.92, 3.16];
+        const freqs = [];
+        const t60 = [];
+        const gains = [];
+        for (let k = 0; k < ratios.length; k = k + 1) {
+            freqs.push(f0 * ratios[k]);
+            t60.push(0.45 / Math.pow(ratios[k], 1.1));
+            gains.push(1.0 / (1.0 + k * 0.6));
+        }
+        this.bank = new ModalBank(sr, freqs, t60, gains);
+        this.noise = new Noise(seed);
+        this.slap = new Biquad();
+        this.slap.bandpass(1800.0, 0.9, sr);
+        this.slapT = 1e9;
+        this.slapAmp = 0.0;
+        this.level = 0.0;
+        this.pending = [];
+    }
+
+    // bright 0..1: where the beater lands (rim: more slap, centre: more boom)
+    strike(amp, bright, delaySamples) {
+        this.pending.push({ at: delaySamples, amp: amp, bright: bright });
+    }
+
+    render(outL, outR, offset, n) {
+        const sr = this.sr;
+        for (let i = 0; i < n; i = i + 1) {
+            for (let k = this.pending.length - 1; k >= 0; k = k - 1) {
+                const p = this.pending[k];
+                if (p.at <= 0) {
+                    this.bank.strike(p.amp * (1.0 - 0.5 * p.bright), 0.2 + 0.6 * p.bright);
+                    this.slapT = 0.0;
+                    this.slapAmp = p.amp * (0.2 + 0.8 * p.bright);
+                    this.level = Math.max(this.level, p.amp);
+                    this.pending.splice(k, 1);
+                } else {
+                    p.at = p.at - 1;
+                }
+            }
+            let y = this.bank.tick() * 0.3;
+            if (this.slapT < 0.05) {
+                y = y + this.slap.process(this.noise.next()) * this.slapAmp * 0.6 * Math.exp(-this.slapT / 0.008);
+                this.slapT = this.slapT + 1.0 / sr;
+            }
+            outL[offset + i] = outL[offset + i] + y * 0.95;
+            outR[offset + i] = outR[offset + i] + y;
+        }
+        this.level = this.level * 0.9;
+    }
+}
+
+const LUTE_VOICES = 6;
+
+export class Lute {
+    constructor(sr, seed) {
+        this.sr = sr;
+        this.noise = new Noise(seed);
+        this.lines = [];
+        for (let v = 0; v < LUTE_VOICES; v = v + 1) {
+            this.lines.push({ buf: new Float64Array(Math.ceil(sr / 30.0) + 4), len: 100, frac: 0.0, pos: 0, last: 0.0, loss: 0.996, bright: 0.5, active: false, pan: 0.5, age: 0 });
+        }
+        this.body1 = new Biquad();
+        this.body1.bandpass(240.0, 2.0, sr);
+        this.body2 = new Biquad();
+        this.body2.bandpass(980.0, 1.6, sr);
+        this.level = 0.0;
+        this.pending = [];
+        this.next = 0;
+    }
+
+    pluck(note, amp, delaySamples, pan) {
+        this.pending.push({ at: delaySamples, note: note, amp: amp, pan: pan === undefined ? 0.5 : pan });
+    }
+
+    start(p) {
+        const v = this.lines[this.next];
+        this.next = (this.next + 1) % LUTE_VOICES;
+        // loop delay = (len + 1) - frac samples, plus half a sample for
+        // the averaging filter
+        const loop = this.sr / midiToHz(p.note) - 0.5;
+        v.len = Math.ceil(loop) - 1;
+        v.frac = v.len + 1 - loop;
+        v.pos = 0;
+        v.last = 0.0;
+        // a pluck: a short burst, brighter for a harder pluck
+        let lp = 0.0;
+        const k = 0.35 + 0.5 * Math.min(1.0, p.amp);
+        for (let i = 0; i < v.len + 2; i = i + 1) {
+            lp = lp + (this.noise.next() - lp) * k;
+            v.buf[i] = lp * p.amp;
+        }
+        v.loss = 0.9975;
+        v.active = true;
+        v.pan = p.pan;
+        v.age = 0;
+        this.level = Math.max(this.level, p.amp);
+    }
+
+    render(outL, outR, offset, n) {
+        for (let i = 0; i < n; i = i + 1) {
+            for (let k = this.pending.length - 1; k >= 0; k = k - 1) {
+                const p = this.pending[k];
+                if (p.at <= 0) {
+                    this.start(p);
+                    this.pending.splice(k, 1);
+                } else {
+                    p.at = p.at - 1;
+                }
+            }
+            let l = 0.0;
+            let r = 0.0;
+            for (let v = 0; v < LUTE_VOICES; v = v + 1) {
+                const s = this.lines[v];
+                if (!s.active) {
+                    continue;
+                }
+                // read with linear interpolation for the fractional period,
+                // average neighbours (high frequencies decay first)
+                const a = s.buf[s.pos];
+                const b = s.buf[(s.pos + 1) % (s.len + 1)];
+                const x = a + (b - a) * s.frac;
+                const y = s.loss * 0.5 * (x + s.last);
+                s.last = x;
+                s.buf[s.pos] = y;
+                s.pos = s.pos + 1;
+                if (s.pos > s.len) {
+                    s.pos = 0;
+                }
+                s.age = s.age + 1;
+                if (s.age > this.sr * 4) {
+                    s.active = false;
+                }
+                l = l + y * (1.0 - s.pan);
+                r = r + y * s.pan;
+            }
+            const mono = 0.5 * (l + r);
+            const body = this.body1.process(mono) * 0.6 + this.body2.process(mono) * 0.35;
+            outL[offset + i] = outL[offset + i] + (l * 0.5 + body) * 0.5;
+            outR[offset + i] = outR[offset + i] + (r * 0.5 + body) * 0.5;
+        }
+        this.level = this.level * 0.95;
     }
 }
 

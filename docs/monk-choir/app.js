@@ -1,23 +1,26 @@
 // Page: audio start-up, pad, keyboard, MIDI, controls, stage and inspector.
 
-import { PRESETS, presetById } from "./engine/presets.js?v=59e715d054";
-import { makeSingerConfig, anatomyFor, foldIntoRange } from "./engine/choir.js?v=1a24f9b503";
+import { PRESETS, presetById } from "./engine/presets.js?v=b361b40e76";
+import { makeSingerConfig, anatomyFor, foldIntoRange } from "./engine/choir.js?v=4bc8bf7bb1";
 import { VOICE_TYPES, SECTIONS, SPEED_OF_SOUND, makeArticulation, areaFunction, lipRadius, segmentLengths, nasalAreas, velumJunction, velumArea } from "./engine/anatomy.js?v=9500908dbe";
-import { MouthMap, MAP_STEPS, MELODIES, ORNAMENTS, PATTERNS, STYLES, isMapTuning, isHarmonicTuning } from "./engine/throat.js?v=cd983914d8";
-import { makeBranchShape, prepareBranch, branchMagnitudeDb } from "./engine/branch.js?v=858edf769a";
-import { REGISTERS } from "./engine/glottis.js?v=44e6be78ce";
-import { radiationPole } from "./engine/tract.js?v=44afeabdc1";
-import { responseCurve, findFormants, makeFormantSlots } from "./engine/analysis.js?v=2458f8cf6f";
-import { vowelArticulation, noteToHz, Singer } from "./engine/singer.js?v=b3facbb137";
+import { MouthMap, MAP_STEPS, MELODIES, ORNAMENTS, PATTERNS, STYLES, isMapTuning, isHarmonicTuning } from "./engine/throat.js?v=fe3040c8de";
+import { makeBranchShape, prepareBranch, branchMagnitudeDb } from "./engine/branch.js?v=0f96a77061";
+import { REGISTERS } from "./engine/glottis.js?v=0fdd116a83";
+import { radiationPole } from "./engine/tract.js?v=dcd3b7ef73";
+import { responseCurve, findFormants, makeFormantSlots } from "./engine/analysis.js?v=0ada426f71";
+import { vowelArticulation, noteToHz, Singer } from "./engine/singer.js?v=9b9f347a8e";
 import { VOWEL_SHAPES, CLASSIC_BODY } from "./engine/vowels.js?v=260f005eba";
-import { ROLMO } from "./engine/song.js?v=e324200d9e";
-import { FUGUE } from "./engine/songs/fugue.js?v=779c031a57";
-import { PASSACAGLIA } from "./engine/songs/passacaglia.js?v=d21e508928";
-import { drawSongStage, drawScore, buildSongPanel, songTimeText, scoreSeekTime } from "./songview.js?v=cb255e5fee";
-import { buildHdrPanel, drawHdrMeters, makeSpectrogram, drawSpectrogram } from "./hdrview.js?v=ed36f9e92b";
+import { ROLMO } from "./engine/song.js?v=e49e4b97a0";
+import { FUGUE } from "./engine/songs/fugue.js?v=b5027baa3f";
+import { PASSACAGLIA } from "./engine/songs/passacaglia.js?v=8df5d5be15";
+import { STEPPE } from "./engine/songs/steppe.js?v=8a12da2d87";
+import { TENORE } from "./engine/songs/tenore.js?v=8ae6bf56eb";
+import { OM } from "./engine/songs/om.js?v=873747865d";
+import { drawSongStage, drawScore, buildSongPanel, songTimeText, scoreSeekTime } from "./songview.js?v=796a5dfe4d";
+import { buildHdrPanel, drawHdrMeters, makeSpectrogram, drawSpectrogram } from "./hdrview.js?v=759f7d561e";
 import { ROOMS, MATERIALS, eyring, defaultRoomSettings } from "./engine/room.js?v=8963a58369";
 
-const SONGS = { passacaglia: PASSACAGLIA, fugue: FUGUE, rolmo: ROLMO };
+const SONGS = { passacaglia: PASSACAGLIA, fugue: FUGUE, rolmo: ROLMO, steppe: STEPPE, tenore: TENORE, om: OM };
 const SONG_LEDES = {
     passacaglia: "A ground bass (A–G–F–E) and sixteen variations. Built from a study of bass sound design: a sub with its own breaths, a kick tuned to fall onto it, throats that talk in held vowels and quick V-sweeps, the throat lengthening to slide every formant down in the gaps, and a sygyt whistle held above.",
     fugue: "One original subject handled as a fugue for chant, overtones, upper voices and three throat basses: answer, countersubject, cantus firmus, stretto, inversion, chorale, canon, and two drops built on call and response between throats.",
@@ -116,7 +119,7 @@ async function startAudio() {
 
 async function openAudio() {
     const ctx = new AudioContext({ latencyHint: "interactive" });
-    await ctx.audioWorklet.addModule("./worklet.js?v=96d7fa94db");
+    await ctx.audioWorklet.addModule("./worklet.js?v=220e1d3392");
     const node = new AudioWorkletNode(ctx, "monk-processor", { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2] });
     const limiter = ctx.createDynamicsCompressor();
     limiter.threshold.value = -6;

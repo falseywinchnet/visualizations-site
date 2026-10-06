@@ -21,7 +21,7 @@
 // response with the velum open.
 
 import { SECTIONS } from "./anatomy.js?v=9500908dbe";
-import { SECTION_LOSS, LIP_REFLECTION, NOSE_REFLECTION, junctionCoefficient } from "./tract.js?v=44afeabdc1";
+import { SECTION_LOSS, LIP_REFLECTION, NOSE_REFLECTION, junctionCoefficient, portLoss } from "./tract.js?v=dcd3b7ef73";
 
 const MAX_BRANCH = 96;
 
@@ -47,7 +47,8 @@ export function makeBranchShape() {
         aL: 1.0, aR: 1.0, aN: 0.0,
         lipArea: 1.0, lipPole: 0.5,
         noseArea: 1.0, nosePole: 0.5,
-        glottalReflection: 0.95
+        glottalReflection: 0.95,
+        portMu: SECTION_LOSS                       // the port's own loss (tract.js portLoss)
     };
 }
 
@@ -63,13 +64,14 @@ export function prepareBranch(shape, areas, nasalCount, nasalAreas, velumJ, velu
     }
     shape.noseCount = nasalCount;
     // The first nasal section is the velopharyngeal port itself.
-    shape.noseRho[1] = clampRho(junctionCoefficient(Math.max(velumArea, 1e-4), nasalAreas[1]));
+    shape.noseRho[1] = clampRho(junctionCoefficient(velumArea, nasalAreas[1]));
     for (let k = 2; k < nasalCount; k = k + 1) {
         shape.noseRho[k] = clampRho(junctionCoefficient(nasalAreas[k - 1], nasalAreas[k]));
     }
     shape.aL = areas[velumJ - 1];
     shape.aR = areas[velumJ];
     shape.aN = velumArea;
+    shape.portMu = SECTION_LOSS * portLoss(velumArea);
     shape.lipArea = areas[SECTIONS - 1];
     shape.lipPole = lipPole;
     shape.noseArea = nasalAreas[nasalCount - 1];
@@ -81,7 +83,8 @@ export function prepareBranch(shape, areas, nasalCount, nasalAreas, velumJ, velu
 // Chain product P = M_{count-1} ... M_1 for one tube at frequency w.
 const P = { r11: 0, i11: 0, r12: 0, i12: 0, r21: 0, i21: 0, r22: 0, i22: 0 };
 
-function chain(w, rho, count) {
+// firstMu: the loss of section 0 (its left-going wave is written with it).
+function chain(w, rho, count, firstMu) {
     const mu = SECTION_LOSS;
     const cw = Math.cos(w);
     const sw = Math.sin(w);
@@ -89,15 +92,25 @@ function chain(w, rho, count) {
     let p21r = 0.0, p21i = 0.0, p22r = 1.0, p22i = 0.0;
     const m11r = mu * cw;
     const m11i = -mu * sw;
-    const m22r = cw / mu;
-    const m22i = sw / mu;
     for (let i = 1; i < count; i = i + 1) {
         const r = rho[i];
         const g = 1.0 / (1.0 - r);
-        const n11r = (m11r * p11r - m11i * p11i - r * p21r) * g;
-        const n11i = (m11r * p11i + m11i * p11r - r * p21i) * g;
-        const n12r = (m11r * p12r - m11i * p12i - r * p22r) * g;
-        const n12i = (m11r * p12i + m11i * p12r - r * p22i) * g;
+        // Section 0 may have its own loss mu_0 (the nose's port). With
+        // z R_1 = mu (R_0 + w) and z L_0 = mu_0 (L_1 + w), M_1 becomes
+        //   R_1 = (mu/z R_0 - rho (mu/mu_0) L_0) / (1 - rho)
+        //   L_1 = (-rho R_0 + z/mu_0 L_0) / (1 - rho)
+        let m22r = cw / mu;
+        let m22i = sw / mu;
+        let rr = r;
+        if (i === 1) {
+            m22r = cw / firstMu;
+            m22i = sw / firstMu;
+            rr = r * mu / firstMu;
+        }
+        const n11r = (m11r * p11r - m11i * p11i - rr * p21r) * g;
+        const n11i = (m11r * p11i + m11i * p11r - rr * p21i) * g;
+        const n12r = (m11r * p12r - m11i * p12i - rr * p22r) * g;
+        const n12i = (m11r * p12i + m11i * p12r - rr * p22i) * g;
         const n21r = (-r * p11r + m22r * p21r - m22i * p21i) * g;
         const n21i = (-r * p11i + m22r * p21i + m22i * p21r) * g;
         const n22r = (-r * p12r + m22r * p22r - m22i * p22i) * g;
@@ -127,9 +140,9 @@ function endReflection(w, pole, refl) {
 // in a radiating opening. Writes Gamma and T into OUT.
 const OUT = { gr: 0.0, gi: 0.0, tr: 0.0, ti: 0.0 };
 
-function terminatedTube(w, rho, count, endArea, pole, refl) {
+function terminatedTube(w, rho, count, endArea, pole, refl, firstMu) {
     const mu = SECTION_LOSS;
-    chain(w, rho, count);
+    chain(w, rho, count, firstMu);
     endReflection(w, pole, refl);
     const cw = Math.cos(w);
     const sw = Math.sin(w);
@@ -144,9 +157,9 @@ function terminatedTube(w, rho, count, endArea, pole, refl) {
     const bb = br * br + bi * bi;
     const lr = -(ar * br + ai * bi) / bb;
     const li = -(ai * br - ar * bi) / bb;
-    // R0 = mu o / z
-    const r0r = mu * cw;
-    const r0i = -mu * sw;
+    // R0 = mu_0 o / z (section 0's own loss)
+    const r0r = firstMu * cw;
+    const r0i = -firstMu * sw;
     // Gamma = L0 / o = (L0/R0) (mu/z)
     OUT.gr = lr * r0r - li * r0i;
     OUT.gi = lr * r0i + li * r0r;
@@ -168,11 +181,11 @@ const RESULT = { re: 0.0, im: 0.0 };
 // input wave, at normalized angular frequency w (radians per tick).
 export function branchResponseAt(shape, w) {
     const mu = SECTION_LOSS;
-    terminatedTube(w, shape.mouthRho, shape.mouthCount, shape.lipArea, shape.lipPole, LIP_REFLECTION);
+    terminatedTube(w, shape.mouthRho, shape.mouthCount, shape.lipArea, shape.lipPole, LIP_REFLECTION, mu);
     const gRr = OUT.gr, gRi = OUT.gi, tRr = OUT.tr, tRi = OUT.ti;
     let gNr = 0.0, gNi = 0.0, tNr = 0.0, tNi = 0.0;
     if (shape.aN > 0.0) {
-        terminatedTube(w, shape.noseRho, shape.noseCount, shape.noseArea, shape.nosePole, NOSE_REFLECTION);
+        terminatedTube(w, shape.noseRho, shape.noseCount, shape.noseArea, shape.nosePole, NOSE_REFLECTION, shape.portMu);
         gNr = OUT.gr; gNi = OUT.gi; tNr = OUT.tr; tNi = OUT.ti;
     }
     // c = Gamma / (1 + Gamma) for each branch
@@ -193,7 +206,7 @@ export function branchResponseAt(shape, w) {
     const kr = 2.0 * shape.aL * denR / den;
     const ki = -2.0 * shape.aL * denI / den;
     // pharynx terminated by reflectance K - 1, driven at the glottis
-    chain(w, shape.pharynxRho, shape.pharynxCount);
+    chain(w, shape.pharynxRho, shape.pharynxCount, mu);
     const cw = Math.cos(w);
     const sw = Math.sin(w);
     const qr = mu * (kr - 1.0);
