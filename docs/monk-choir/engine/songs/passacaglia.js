@@ -21,7 +21,7 @@
 // above, which is also how a looped drop accumulates layers.
 
 import * as M from "../music.js?v=74884be0cf";
-import { makeSingerConfig } from "../choir.js?v=44ddd35ca9";
+import { makeSingerConfig } from "../choir.js?v=1a24f9b503";
 import {
     BEAT, BAR, newTracks, append, chordSpan, chordAtBeat, placeEntry, fillVoice, smoothFollower,
     sortTrack, Score, rolmoPattern, horn, makeWriters

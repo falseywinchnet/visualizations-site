@@ -33,9 +33,29 @@ import { Tract, radiationPole, SECTION_LOSS } from "./tract.js?v=44afeabdc1";
 import { Glottis, makeVoiceSource, copyVoiceSource } from "./glottis.js?v=44e6be78ce";
 import { scanPeaks } from "./analysis.js?v=2458f8cf6f";
 import { VOWEL_SHAPES } from "./vowels.js?v=260f005eba";
-import { MouthMap, LABIAL_PLANE, NASAL_PLANE, THROAT_PLANE, stepsB, isMapTuning, isHarmonicTuning } from "./throat.js?v=91c87f0f27";
+import { Larynx } from "./larynx.js?v=faa93613b0";
+import { MouthMap, LABIAL_PLANE, NASAL_PLANE, THROAT_PLANE, stepsB, isMapTuning, isHarmonicTuning, focusArticulation } from "./throat.js?v=cd983914d8";
 
 export const CONTROL_BLOCK = 64;
+
+// Vocal-fold rest opening by register for the self-oscillating larynx, m^2
+// (negative: the folds are pressed together at rest).
+const FOLD_REST = {
+    chest: 0.02e-4, pressed: -0.02e-4, head: 0.05e-4, falsetto: 0.1e-4,
+    breathy: 0.12e-4, ventricular: 0.0, fry: -0.01e-4
+};
+
+// Level of the constriction jet's noise (see updateJet). Chosen so the
+// focus whistle's hiss sits 21 dB under it in 3-9 kHz (.dev/README.md).
+const JET_LEVEL = 0.1;
+
+function foldRest(registerKey) {
+    const r = FOLD_REST[registerKey];
+    if (r === undefined) {
+        return 0.02e-4;
+    }
+    return r;
+}
 const FIT_KEYS = ["tonguePos", "tongueHeight", "jaw", "lipAperture", "lipProtrusion"];
 
 // Articulation paths along which the tuning behaviours move. Each was
@@ -258,6 +278,27 @@ export class Singer {
         this.voicingTarget = 1.0;
         this.vowelOverride = -1.0;
         this.breathing = false;
+        // larynx: "pulse" (drawn glottal pulse, glottis.js) or "folds"
+        // (self-oscillating vocal and false folds, larynx.js)
+        this.larynxModel = "pulse";
+        this.folds = null;
+        this.foldsKappa = 0.0;
+        this.foldsGain = 1.0;
+        this.foldsAnatomy = null;
+        this.foldsRegister = "";
+        this.lungsScale = 1.0;      // the singer's own lung-pressure trim
+        this.ventGap = 0.03e-4;     // false folds' rest gap when drawn in, m^2
+        this.ventTension = null;    // log offset re f0 / ratio, null: by pitch (measured map)
+        this.ventContactRate = 0.0; // false-fold contacts per glottal cycle (smoothed)
+        // turbulence at a narrow oral constriction (sygyt's hiss)
+        this.jetIndex = -1;
+        this.jetGain = 0.0;
+        this.jetCentre = 4000.0;
+        this.jetBand = { b0: 0.0, a1: 0.0, a2: 0.0, y1: 0.0, y2: 0.0 };
+        this.jetSeed = (seed * 2654435769 + 12345) >>> 0 || 3;
+        this.openingAverage = 0.3;
+        this.ventCountPrev = 0;
+        this.cycleCountPrev = 0;
 
         this.note = 48.0;
         this.noteTarget = 48.0;
@@ -363,6 +404,166 @@ export class Singer {
         }
         const rms = Math.sqrt(sum / (ticks - skip));
         this.calibration = 0.25 / Math.max(rms, 1e-9);
+    }
+
+    // The self-oscillating larynx needs two numbers per body: how the tube's
+    // pressure wave maps to pascals above the glottis (a unit flow pulse
+    // train on "ah" peaks at 200 Pa), and an output gain so the folds sing as
+    // loud as the drawn pulse they replace (same "ah", same radiation path).
+    calibrateFolds() {
+        const art = makeArticulation();
+        vowelArticulation(0.5, art);
+        const areas = new Float64Array(SECTIONS);
+        const nasal = new Float64Array(MAX_NASAL_SECTIONS);
+        const seg = { pharynx: 0, oral: 0, lips: 0, total: 0 };
+        const L = areaFunction(this.anatomy, art, areas, seg);
+        const rate = SECTIONS * SPEED_OF_SOUND / L;
+        const nc = nasalAreas(this.anatomy, seg, nasal);
+        const pole = radiationPole(lipRadius(areas), rate, SPEED_OF_SOUND);
+        const probe = new Tract();
+        probe.setShape(areas, nc, nasal, velumJunction(seg), 0.0, pole, 0.5, 0);
+        let peak = 1e-9;
+        let phase = 0.0;
+        for (let i = 0; i < Math.round(0.1 * rate); i = i + 1) {
+            phase = phase + 130.0 / rate;
+            if (phase >= 1.0) {
+                phase = phase - 1.0;
+            }
+            let u = 0.0;
+            if (phase < 0.5) {
+                u = 0.5 - 0.5 * Math.cos(2.0 * Math.PI * phase);
+            }
+            probe.tick(u, 0.9);
+            peak = Math.max(peak, Math.abs(probe.glottalPressure()));
+        }
+        this.foldsKappa = 200.0 / peak;
+        let f0 = 130.0;
+        const t = VOICE_TYPES[this.anatomy.type];
+        if (t !== undefined) {
+            f0 = Math.sqrt(t.f0Low * t.f0High);
+        }
+        const tract = new Tract();
+        tract.setShape(areas, nc, nasal, velumJunction(seg), 0.0, pole, 0.5, 0);
+        const larynx = new Larynx(4321);
+        larynx.lungs = 1300.0;
+        larynx.a0 = foldRest(this.registerKey);
+        const lp = { b0: 0, b1: 0, b2: 0, a1: 0, a2: 0 };
+        designLowpass(0.45 * this.sampleRate, rate, lp);
+        const ticks = Math.round(0.3 * rate);
+        const skip = Math.round(0.15 * rate);
+        let prevFlow = 0.0;
+        let x1 = 0.0, x2 = 0.0, y1 = 0.0, y2 = 0.0;
+        let sum = 0.0;
+        for (let i = 0; i < ticks; i = i + 1) {
+            const u = larynx.tick(f0, 1.0 / rate, this.foldsKappa * tract.glottalPressure(), 0.0);
+            const flow = tract.tick(u, Math.max(0.35, 0.985 - 0.6 * Math.min(1.0, larynx.opening)));
+            const radiated = flow - prevFlow;
+            prevFlow = flow;
+            const y = lp.b0 * radiated + lp.b1 * x1 + lp.b2 * x2 - lp.a1 * y1 - lp.a2 * y2;
+            x2 = x1; x1 = radiated; y2 = y1; y1 = y;
+            if (i % 64 === 0) {
+                larynx.listen(f0, 64.0 / rate);
+            }
+            if (i >= skip) {
+                sum = sum + y * y;
+            }
+        }
+        const rms = Math.sqrt(sum / (ticks - skip));
+        // the pulse path reaches 0.25 / calibration on the same "ah"
+        this.foldsGain = (0.25 / this.calibration) / Math.max(rms, 1e-12);
+        this.foldsAnatomy = this.anatomy;
+        this.foldsRegister = this.registerKey;
+    }
+
+    // Settings of the self-oscillating larynx for this block.
+    driveFolds(amp) {
+        if (this.folds === null) {
+            this.folds = new Larynx(this.seed + 17);
+        }
+        if (this.foldsAnatomy !== this.anatomy || this.foldsRegister !== this.registerKey) {
+            this.calibrateFolds();
+        }
+        const lx = this.folds;
+        const f0 = this.f0;
+        // the half tone draws the false folds in
+        const v = this.source.vent;
+        lx.ventOn = Math.max(0.0, Math.min(1.0, (v - 0.2) / 0.5));
+        // lung pressure: the envelope is the breath. With the false folds
+        // drawn in, the air trapped between the two pairs robs the glottis of
+        // drive, and higher folds need more pressure to keep going (measured:
+        // 1.3 kPa holds 70-110 Hz, 2 kPa is needed by 150 Hz).
+        let boost = 0.0;
+        if (f0 > 120.0) {
+            boost = 700.0 * Math.min(1.0, (f0 - 120.0) / 30.0) * lx.ventOn;
+        }
+        lx.lungs = (1300.0 + boost) * this.lungsScale * amp;
+        // how the vocal folds are held, by register (rest opening, m^2)
+        lx.a0 = foldRest(this.registerKey);
+        lx.av0 = this.ventGap;
+        lx.ventRatio = this.source.ventRatio;
+        lx.zetaV = 0.1;
+        if (this.ventTension !== null && this.ventTension !== undefined) {
+            lx.ventTune = this.ventTension;
+        } else {
+            // measured (.dev/test_larynx.mjs): clean sub-octave locking at
+            // -0.4 up to 110 Hz, at -0.25 from 130 Hz
+            let tune = -0.4;
+            if (f0 > 110.0) {
+                tune = -0.4 + 0.15 * Math.min(1.0, (f0 - 110.0) / 20.0);
+            }
+            lx.ventTune = tune;
+        }
+    }
+
+    // Turbulence where the mouth narrows to a gap, as in the HDR voice: the
+    // glottis and the gap are two openings in series, so the jet's speed
+    // through the gap approaches the full Bernoulli speed only as the gap
+    // becomes the narrower of the two. Noise grows with the jet's excess
+    // speed and is centred by a Strouhal relation (f = 0.2 v / width, capped
+    // at 8 kHz), injected at the gap. Ordinary vowels never narrow enough to
+    // reach the threshold; the alveolar gap of sygyt does.
+    updateJet() {
+        const n = SECTIONS;
+        const start = Math.round(n * 0.45);
+        let minArea = 1e9;
+        let minIndex = -1;
+        for (let i = start; i < n - 1; i = i + 1) {
+            if (this.areas[i] < minArea) {
+                minArea = this.areas[i];
+                minIndex = i;
+            }
+        }
+        const ac = Math.max(minArea, 1e-5);
+        let ag = 0.12 * this.openingAverage + 0.002;
+        if (this.larynxModel === "folds" && this.folds !== null) {
+            ag = 0.15 * this.openingAverage + 0.002;
+        }
+        const vRel = ag / Math.sqrt(ag * ag + ac * ac);
+        const excess = Math.max(0.0, vRel - 0.5);
+        this.jetGain = excess * excess * 4.0 * (ac / Math.sqrt(ag * ag + ac * ac) + 0.05);
+        this.jetIndex = Math.min(n - 1, minIndex + 1);
+        const width = 2.0 * Math.sqrt(ac / Math.PI);
+        this.jetCentre = Math.min(8000.0, Math.max(1500.0, 0.2 * 3600.0 * vRel / Math.max(width, 0.05)));
+        // two-pole resonator, Q 1.1, peak gain 1
+        const w = 2.0 * Math.PI * this.jetCentre / this.tickRate;
+        const r = Math.exp(-w / (2.0 * 1.1));
+        this.jetBand.a1 = -2.0 * r * Math.cos(w);
+        this.jetBand.a2 = r * r;
+        this.jetBand.b0 = 1.0 - r;
+    }
+
+    jetNoise() {
+        let x = this.jetSeed;
+        x = x ^ (x << 13);
+        x = x ^ (x >>> 17);
+        x = x ^ (x << 5);
+        this.jetSeed = x >>> 0;
+        const white = this.jetSeed / 2147483648.0 - 1.0;
+        const b = this.jetBand;
+        const y = b.b0 * white - b.a1 * b.y1 - b.a2 * b.y2;
+        b.y2 = b.y1;
+        b.y1 = y;
+        return y;
     }
 
     noteOn(note, velocity) {
@@ -500,6 +701,8 @@ export class Singer {
             mixInto(this.planeLow, plane[0], plane[1], qa);
             mixInto(this.planeHigh, plane[2], plane[3], qa);
             mixInto(out, this.planeLow, this.planeHigh, qb);
+        } else if (this.tuning === "focus") {
+            focusArticulation(qa, qb, out);
         } else {
             vowelArticulation(qa, out);
             out.tipPos = 0.88;
@@ -698,8 +901,9 @@ export class Singer {
             }
             this.mapSub = sub;
             this.map.choose(this.f0 / sub, this.harmonicEff, this.mapTarget, this.mapTargetB);
-            this.mapTarget = this.map.chosenA;
-            this.mapTargetB = this.map.chosenB;
+            this.map.refine(this, this.f0 / sub, this.harmonicEff);
+            this.mapTarget = this.map.refinedA;
+            this.mapTargetB = this.map.refinedB;
             this.r1Mix = this.r1Mix * Math.exp(-dt / 0.15);
             this.tuneLip = this.tuneLip * Math.exp(-dt / 0.15);
             return;
@@ -833,6 +1037,18 @@ export class Singer {
         const amp = this.envelope * this.perfGainSmooth * (0.35 + 0.65 * this.velocityOrOne()) * (0.4 + 0.9 * this.effort) * (1.0 - 0.9 * occlusion);
         // Behind a seal the yielding walls absorb the trapped pressure.
         this.tract.loss = SECTION_LOSS * (1.0 - 0.006 * occlusion);
+        const folds = this.larynxModel === "folds";
+        if (folds) {
+            this.driveFolds(amp);
+        }
+        this.updateJet();
+        const jetOn = this.jetGain > 1e-4 && this.jetIndex > 0;
+        const jetGain = this.jetGain;
+        const jetIndex = this.jetIndex;
+        const openCoef = 1.0 - Math.exp(-1.0 / (0.01 * this.tickRate));
+        const larynx = this.folds;
+        const foldsKappa = this.foldsKappa;
+        const foldsGain = this.foldsGain;
         const glottis = this.glottis;
         const tract = this.tract;
         const src = this.source;
@@ -848,8 +1064,28 @@ export class Singer {
             this.tickAcc = this.tickAcc + tickRatio;
             while (this.tickAcc >= 1.0) {
                 this.tickAcc = this.tickAcc - 1.0;
-                glottis.tick(f0, rate, src, effort, amp);
-                const flow = tract.tick(glottis.flow, glottis.reflection);
+                let flow = 0.0;
+                let opening = 0.0;
+                let u = 0.0;
+                let refl = 0.0;
+                if (folds) {
+                    u = larynx.tick(f0, 1.0 / rate, foldsKappa * tract.glottalPressure(), src.breath) * foldsGain;
+                    opening = Math.min(1.0, larynx.opening);
+                    refl = Math.max(0.35, 0.985 - 0.6 * opening);
+                } else {
+                    glottis.tick(f0, rate, src, effort, amp);
+                    u = glottis.flow;
+                    opening = glottis.opening;
+                    refl = glottis.reflection;
+                }
+                this.openingAverage = this.openingAverage + (opening - this.openingAverage) * openCoef;
+                if (jetOn) {
+                    tract.injIndex = jetIndex;
+                    tract.injValue = this.jetNoise() * jetGain * Math.abs(u) * JET_LEVEL;
+                } else {
+                    tract.injIndex = -1;
+                }
+                flow = tract.tick(u, refl);
                 const radiated = flow - this.prevFlow;
                 this.prevFlow = flow;
                 const y = lp.b0 * radiated + lp.b1 * this.lpX1 + lp.b2 * this.lpX2 - lp.a1 * this.lpY1 - lp.a2 * this.lpY2;
@@ -864,6 +1100,16 @@ export class Singer {
             energy = energy + s * s;
             outL[offset + i] = outL[offset + i] + s * panL;
             outR[offset + i] = outR[offset + i] + s * panR;
+        }
+        if (folds) {
+            larynx.listen(f0, dt);
+            const dc = larynx.glottalCycles - this.cycleCountPrev;
+            if (dc >= 4) {
+                const rateNow = (larynx.ventContacts - this.ventCountPrev) / dc;
+                this.ventContactRate = this.ventContactRate + (rateNow - this.ventContactRate) * 0.3;
+                this.ventCountPrev = larynx.ventContacts;
+                this.cycleCountPrev = larynx.glottalCycles;
+            }
         }
         if (energy < 1e-12 && !this.gate) {
             this.silentBlocks = this.silentBlocks + 1;

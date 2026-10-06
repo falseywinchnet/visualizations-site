@@ -3,11 +3,11 @@
 // posted back for the drawing.
 
 import { ClassicMonk } from "./engine/classic.js?v=a0051c9211";
-import { Choir } from "./engine/choir.js?v=44ddd35ca9";
-import { SongEngine, ROLMO } from "./engine/song.js?v=8b1b029598";
-import { FUGUE } from "./engine/songs/fugue.js?v=f94b03c8da";
-import { PASSACAGLIA } from "./engine/songs/passacaglia.js?v=42c11aa032";
-import { HdrStage } from "./engine/hdrstage.js?v=92131d9266";
+import { Choir } from "./engine/choir.js?v=1a24f9b503";
+import { SongEngine, ROLMO } from "./engine/song.js?v=e324200d9e";
+import { FUGUE } from "./engine/songs/fugue.js?v=779c031a57";
+import { PASSACAGLIA } from "./engine/songs/passacaglia.js?v=d21e508928";
+import { HdrStage } from "./engine/hdrstage.js?v=ba03f1cb2b";
 import { makeRoom, defaultRoomSettings } from "./engine/room.js?v=8963a58369";
 
 const SONGS = { rolmo: ROLMO, fugue: FUGUE, passacaglia: PASSACAGLIA };

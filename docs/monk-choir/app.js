@@ -1,18 +1,18 @@
 // Page: audio start-up, pad, keyboard, MIDI, controls, stage and inspector.
 
-import { PRESETS, presetById } from "./engine/presets.js?v=747fa97554";
-import { makeSingerConfig, anatomyFor, foldIntoRange } from "./engine/choir.js?v=44ddd35ca9";
+import { PRESETS, presetById } from "./engine/presets.js?v=59e715d054";
+import { makeSingerConfig, anatomyFor, foldIntoRange } from "./engine/choir.js?v=1a24f9b503";
 import { VOICE_TYPES, SECTIONS, SPEED_OF_SOUND, makeArticulation, areaFunction, lipRadius, segmentLengths, nasalAreas, velumJunction, velumArea } from "./engine/anatomy.js?v=9500908dbe";
-import { MouthMap, MAP_STEPS, MELODIES, ORNAMENTS, PATTERNS, STYLES, isMapTuning, isHarmonicTuning } from "./engine/throat.js?v=91c87f0f27";
+import { MouthMap, MAP_STEPS, MELODIES, ORNAMENTS, PATTERNS, STYLES, isMapTuning, isHarmonicTuning } from "./engine/throat.js?v=cd983914d8";
 import { makeBranchShape, prepareBranch, branchMagnitudeDb } from "./engine/branch.js?v=858edf769a";
 import { REGISTERS } from "./engine/glottis.js?v=44e6be78ce";
 import { radiationPole } from "./engine/tract.js?v=44afeabdc1";
 import { responseCurve, findFormants, makeFormantSlots } from "./engine/analysis.js?v=2458f8cf6f";
-import { vowelArticulation, noteToHz, Singer } from "./engine/singer.js?v=35ae215bb8";
+import { vowelArticulation, noteToHz, Singer } from "./engine/singer.js?v=b3facbb137";
 import { VOWEL_SHAPES, CLASSIC_BODY } from "./engine/vowels.js?v=260f005eba";
-import { ROLMO } from "./engine/song.js?v=8b1b029598";
-import { FUGUE } from "./engine/songs/fugue.js?v=f94b03c8da";
-import { PASSACAGLIA } from "./engine/songs/passacaglia.js?v=42c11aa032";
+import { ROLMO } from "./engine/song.js?v=e324200d9e";
+import { FUGUE } from "./engine/songs/fugue.js?v=779c031a57";
+import { PASSACAGLIA } from "./engine/songs/passacaglia.js?v=d21e508928";
 import { drawSongStage, drawScore, buildSongPanel, songTimeText, scoreSeekTime } from "./songview.js?v=cb255e5fee";
 import { buildHdrPanel, drawHdrMeters, makeSpectrogram, drawSpectrogram } from "./hdrview.js?v=ed36f9e92b";
 import { ROOMS, MATERIALS, eyring, defaultRoomSettings } from "./engine/room.js?v=8963a58369";
@@ -60,7 +60,7 @@ const state = {
 
 const VOWEL_NAMES = ["ooh", "ow", "ah", "ayh", "eeh"];
 const NOTE_NAMES = ["C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "A♯", "B"];
-const TUNINGS = { none: "—", r1: "F1 follows pitch", overtone: "khöömei", sygyt: "sygyt", gyuto: "Gyuto chord", labial: "labial map", nasal: "nasal map", throat: "throat map", vowel: "kargyraa vowel walk" };
+const TUNINGS = { none: "—", r1: "F1 follows pitch", overtone: "khöömei", sygyt: "sygyt", gyuto: "Gyuto chord", labial: "labial map", nasal: "nasal map", throat: "throat map", vowel: "kargyraa vowel walk", focus: "two-constriction focus" };
 const PAD_LOW_NOTE = 36;
 const DOT_COLORS = ["#6fb59a", "#e9a23b", "#d96a4f", "#9ab6e0", "#f2cf6b", "#c58fd1", "#8fd1c3", "#e6b8a2"];
 const PAD_SPAN = 24;
@@ -116,7 +116,7 @@ async function startAudio() {
 
 async function openAudio() {
     const ctx = new AudioContext({ latencyHint: "interactive" });
-    await ctx.audioWorklet.addModule("./worklet.js?v=055302ba61");
+    await ctx.audioWorklet.addModule("./worklet.js?v=96d7fa94db");
     const node = new AudioWorkletNode(ctx, "monk-processor", { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2] });
     const limiter = ctx.createDynamicsCompressor();
     limiter.threshold.value = -6;
@@ -1102,7 +1102,9 @@ function makeThroatSelect(container, spec) {
     }
     function chosen(v) {
         let value = v;
-        if (spec.numeric) {
+        if (spec.nullable && v === "") {
+            value = null;
+        } else if (spec.numeric) {
             value = Number(v);
         }
         setThroatField(spec.field, value);
@@ -1135,6 +1137,10 @@ function buildThroatControls(c) {
     throatInputs.style.parentElement.title = "Sets register, gesture and mechanics together; adjust them below afterwards";
     makeThroatSelect(c, { field: "register", label: "Register", options: registerOptions() });
     makeThroatSelect(c, { field: "tuning", label: "Gesture / tuning", options: tuningOptions(), title: "What the mouth does: khöömei and sygyt listen to one resonance; the map gestures choose from the singer's own map of mouth shapes, through lips and nose" });
+    makeThroatSelect(c, { field: "larynxModel", label: "Larynx", options: [["pulse", "drawn pulse"], ["folds", "self-oscillating folds"]], title: "Drawn pulse: the glottal flow is a prescribed shape. Self-oscillating: vocal folds and false folds are masses on springs moved by the air; pitch, closure and the false folds' locking emerge" });
+    makeThroatSlider(c, { field: "lungs", label: "Lung pressure (folds)", min: 0.5, max: 1.6, step: 0.01, format: fmtPercent, title: "Self-oscillating folds only: below a threshold the folds stop; more pressure is louder and brighter" });
+    makeThroatSlider(c, { field: "ventGap", label: "False-fold gap (folds)", min: -0.03, max: 0.1, step: 0.005, format: formatGap, title: "How close the false folds are held when drawn in (the half tone or the ventricular register draws them in)" });
+    makeThroatSelect(c, { field: "ventTension", label: "False-fold tension (folds)", numeric: true, nullable: true, options: [["", "by pitch (measured)"], ["-0.7", "very slack"], ["-0.55", "slack"], ["-0.4", "medium"], ["-0.25", "firm"], ["-0.1", "tight"]], title: "Their own frequency relative to half the pitch; the air through their gap stiffens them, so locking needs them slacker than f0/2" });
     makeThroatSelect(c, { field: "ventRatio", label: "Ventricular folds", numeric: true, options: [["1", "in step (1 : 1)"], ["2", "sub-octave (1 : 2)"], ["3", "sub-twelfth (1 : 3)"]], title: "Glottal cycles per cycle of the false folds; heard when the half tone is up or the register is ventricular" });
     makeThroatSlider(c, { field: "press", label: "Press", min: 0, max: 1, step: 0.01, format: fmtPercent, title: "Longer closed phase, faster sealing, no leak: sharper resonances and a stronger overtone" });
     makeThroatSlider(c, { field: "larynx", label: "Larynx (low ↔ high)", min: -1, max: 1, step: 0.01, format: fmtSigned, title: "Lowering the larynx lengthens the throat: darker, every resonance lower" });
@@ -1177,6 +1183,10 @@ function phraseFromUi(v) {
     return v;
 }
 
+function formatGap(v) {
+    return v.toFixed(3) + " cm²";
+}
+
 function formatOrnRate(u) {
     return ornRateFromUi(u).toFixed(1) + " Hz";
 }
@@ -1200,7 +1210,7 @@ function applyStyle(key) {
     }
     // a style starts from an ordinary throat, so nothing carries over
     const plain = makeSingerConfig(cfg.type, "chest", 0);
-    const reset = ["register", "tuning", "ventRatio", "press", "gyutoH1", "gyutoH2", "melody", "melodyRate", "melodyOffset", "ornament", "ornRate", "ornDepth", "phrase", "breathGap", "pattern", "patternRate", "patternOffset", "larynx", "epilarynx"];
+    const reset = ["register", "tuning", "ventRatio", "press", "gyutoH1", "gyutoH2", "melody", "melodyRate", "melodyOffset", "ornament", "ornRate", "ornDepth", "phrase", "breathGap", "pattern", "patternRate", "patternOffset", "larynx", "epilarynx", "larynxModel", "lungs", "ventGap", "ventTension"];
     for (let i = 0; i < reset.length; i = i + 1) {
         cfg[reset[i]] = plain[reset[i]];
     }
@@ -1225,6 +1235,9 @@ function refreshThroat(cfg) {
         if (t.spec.toUi !== undefined) {
             v = t.spec.toUi(v);
         }
+        if (v === null || v === undefined) {
+            v = "";
+        }
         t.input.value = String(v);
         if (!t.select) {
             const out = t.input.parentElement.querySelector("output");
@@ -1246,6 +1259,10 @@ function refreshThroat(cfg) {
     showControl(throatInputs.breathGap.input, cfg.phrase >= 0.5);
     showControl(throatInputs.patternRate.input, cfg.pattern !== "none");
     showControl(throatInputs.patternOffset.input, cfg.pattern !== "none");
+    const foldsOn = cfg.larynxModel === "folds";
+    showControl(throatInputs.lungs.input, foldsOn);
+    showControl(throatInputs.ventGap.input, foldsOn);
+    showControl(throatInputs.ventTension.input, foldsOn);
 }
 
 function showControl(input, on) {
@@ -2028,7 +2045,8 @@ function drawInspector() {
         ["Overtone", tel !== null && isHarmonicTuning(cfg.tuning) && f0 > 0 ? "#" + tel.harmonic + (tel.mapSub > 1 ? " of f0/" + tel.mapSub : "") + " = " + (tel.harmonic * f0 / Math.max(1, tel.mapSub)).toFixed(0) + " Hz" : "—"],
         ["Ventricular", tel !== null && tel.vent > 0.05 ? ["", "in step", "sub-octave", "sub-twelfth"][tel.ventRatio] + " · " + Math.round(tel.vent * 100) + "%" : "still"],
         ["Breath", tel === null ? "—" : (tel.direction > 0 ? "out" : "in") + (tel.voicing < 0.5 ? ", breath only" : "") + (tel.breathing ? " · breathing" : "")],
-        ["Mouth map", isMapTuning(cfg.tuning) ? (tel !== null && !tel.mapReady ? "learning…" : "known") : "—"]
+        ["Mouth map", isMapTuning(cfg.tuning) ? (tel !== null && !tel.mapReady ? "learning…" : "known") : "—"],
+        ["Larynx", cfg.larynxModel === "folds" ? (tel !== null && tel.foldsHeard > 0 ? "folds at " + tel.foldsHeard.toFixed(1) + " Hz" + (tel.vent > 0.3 ? ", false folds touch on " + Math.round(100 * tel.ventContactRate) + "% of cycles" : "") : "self-oscillating folds") : "drawn pulse"]
     ];
     const dl = $("readout");
     dl.innerHTML = "";
@@ -2178,7 +2196,8 @@ const MAP_AXES = {
     labial: ["lips: round → spread", "tongue: back → front"],
     nasal: ["tongue: back → front", "hidden mouth: small → large"],
     throat: ["tongue root: low → high", "mouth: small → open"],
-    vowel: ["vowel: ooh → eeh", ""]
+    vowel: ["vowel: ooh → eeh", ""],
+    focus: ["focus: low → high (both constrictions)", "back of the tongue: back → forward"]
 };
 
 // Build (once per body and gesture) the same map the singer uses, and show

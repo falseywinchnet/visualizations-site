@@ -5,11 +5,11 @@
 // independent glottal jitter, vibrato, pitch wander and onsets, whose small
 // disagreements are what a real choir sounds like.
 
-import { Singer, CONTROL_BLOCK, hzToNote } from "./singer.js?v=35ae215bb8";
+import { Singer, CONTROL_BLOCK, hzToNote } from "./singer.js?v=b3facbb137";
 import { makeAnatomy, VOICE_TYPES } from "./anatomy.js?v=9500908dbe";
 import { REGISTERS } from "./glottis.js?v=44e6be78ce";
 import { CLASSIC_BODY } from "./vowels.js?v=260f005eba";
-import { parseMelody, PATTERNS, isHarmonicTuning } from "./throat.js?v=91c87f0f27";
+import { parseMelody, PATTERNS, isHarmonicTuning } from "./throat.js?v=cd983914d8";
 
 export const MAX_SINGERS = 24;
 
@@ -71,6 +71,10 @@ export function makeSingerConfig(type, register, interval) {
         pattern: "none",          // PATTERNS key: breath game
         patternRate: 6.0,         // steps per second
         patternOffset: 0,         // steps
+        larynxModel: "pulse",     // "pulse" drawn glottal pulse | "folds" self-oscillating folds (larynx.js)
+        lungs: 1.0,               // lung-pressure trim for the folds
+        ventGap: 0.03,            // false folds' rest gap when drawn in, cm^2
+        ventTension: null,        // false folds' tension, log re f0 / ratio (null: by pitch)
         vibratoRate: 5.2,
         vibratoDepth: 0.2,        // semitones
         detune: 0.0,              // cents
@@ -447,6 +451,10 @@ export class Choir {
         singer.pattern = pattern !== undefined ? pattern.steps : PATTERNS.none.steps;
         singer.patternRate = cfg.patternRate;
         singer.patternOffset = cfg.patternOffset;
+        singer.larynxModel = cfg.larynxModel === "folds" ? "folds" : "pulse";
+        singer.lungsScale = cfg.lungs;
+        singer.ventGap = cfg.ventGap * 1e-4;
+        singer.ventTension = cfg.ventTension;
     }
 
     applyOscillator(singer, cfg) {
@@ -770,6 +778,7 @@ export class Choir {
                 tuning: s.tuning, harmonic: s.harmonicEff, direction: s.source.direction, voicing: s.source.voicing,
                 breathing: s.breathing, mapReady: s.map.ready(), mapSub: s.mapSub, ventRatio: s.source.ventRatio,
                 pathQ: s.pathQ, pathQB: s.pathQB,
+                larynxModel: s.larynxModel, ventContactRate: s.ventContactRate, foldsHeard: s.folds !== null && s.folds.periodAvg > 0.0 ? 1.0 / s.folds.periodAvg : 0.0,
                 vowel: s.vowelEff, oscRate: s.oscRate, oscValue: s.oscValue, hum: s.hum
             });
         }

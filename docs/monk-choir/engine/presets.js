@@ -1,7 +1,7 @@
 // Ensemble presets. Each singer differs by body, register, key offset and
 // small personal habits; nothing is a transposed copy of another.
 
-import { makeSingerConfig } from "./choir.js?v=44ddd35ca9";
+import { makeSingerConfig } from "./choir.js?v=1a24f9b503";
 
 function singer(type, register, interval, extra) {
     const c = makeSingerConfig(type, register, interval);
@@ -59,24 +59,24 @@ export const PRESETS = [
     {
         id: "dzoke",
         name: "Dzo-ke half tone",
-        note: "Ventricular folds close every second glottal pulse: the sung note is joined by its sub-octave.",
+        note: "Ventricular folds close every second glottal pulse: the sung note is joined by its sub-octave. Self-oscillating folds: the locking emerges from the airflow.",
         pad: "vowel",
         voicing: "stack",
         hall: { mix: 0.32, rt60: 4.0, damping: 0.5 },
         singers: spread([
-            singer("bass", "ventricular", 0, { octave: 0, vibratoDepth: 0.02, effort: 0.8, larynx: -0.5 }),
-            singer("basso", "ventricular", 0, { octave: 0, vibratoDepth: 0.02, effort: 0.8, larynx: -0.5 }),
-            singer("baritone", "ventricular", 0, { octave: 0, vibratoDepth: 0.03, effort: 0.8, larynx: -0.4 })
+            singer("bass", "ventricular", 0, { octave: 0, vibratoDepth: 0.02, effort: 0.8, larynx: -0.5, larynxModel: "folds" }),
+            singer("basso", "ventricular", 0, { octave: 0, vibratoDepth: 0.02, effort: 0.8, larynx: -0.5, larynxModel: "folds" }),
+            singer("baritone", "ventricular", 0, { octave: 0, vibratoDepth: 0.03, effort: 0.8, larynx: -0.4, larynxModel: "folds" })
         ])
     },
     {
         id: "kargyraa",
         name: "Kargyraa",
-        note: "Tuvan/Mongolian ventricular style: deep sub-octave growl; move the vowel to walk the overtones.",
+        note: "Tuvan/Mongolian ventricular style. Self-oscillating folds: the false folds lock onto every second glottal cycle by themselves. Move the vowel to walk the overtones.",
         pad: "vowel",
         voicing: "stack",
         hall: { mix: 0.22, rt60: 2.5, damping: 0.45 },
-        singers: [singer("bass", "ventricular", 0, { octave: 0, vibratoDepth: 0.0, effort: 0.9, driftCents: 2.0, larynx: -0.3 })]
+        singers: [singer("bass", "ventricular", 0, { octave: 0, vibratoDepth: 0.0, effort: 0.9, driftCents: 2.0, larynx: -0.3, larynxModel: "folds" })]
     },
     {
         id: "khoomei",
@@ -90,11 +90,11 @@ export const PRESETS = [
     {
         id: "sygyt",
         name: "Sygyt (whistle)",
-        note: "Tongue tip sealed behind the teeth clusters F2 and F3 into one sharp whistle on a high harmonic.",
+        note: "Two narrowings of the tongue, as measured by MRI in Tuvan singers: one at the ridge behind the teeth merges F2 and F3 into one sharp peak, one at the back moves it onto the harmonic. Neighbours fall 17-29 dB.",
         pad: "harmonic",
         voicing: "stack",
         hall: { mix: 0.25, rt60: 3.0, damping: 0.35 },
-        singers: [singer("baritone", "pressed", 0, { octave: 0, tuning: "sygyt", vibratoDepth: 0.0, effort: 0.9, driftCents: 2.0, epilarynx: 0.6, level: 4.0 })]
+        singers: [singer("baritone", "pressed", 0, { octave: 0, tuning: "focus", press: 0.6, vibratoDepth: 0.0, effort: 0.9, driftCents: 2.0, epilarynx: 0.6, level: 2.0 })]
     },
     {
         id: "borbangnadyr",
@@ -148,7 +148,7 @@ export const PRESETS = [
         pad: "harmonic",
         voicing: "stack",
         hall: { mix: 0.22, rt60: 2.5, damping: 0.45 },
-        singers: [singer("bass", "ventricular", 0, { octave: 0, tuning: "vowel", ventRatio: 2, press: 0.3, melody: "walk", melodyRate: 1.2, phrase: 7.0, breathGap: 0.9, vibratoDepth: 0.0, effort: 0.9, driftCents: 2.0, larynx: -0.4, level: 1.6 })]
+        singers: [singer("bass", "ventricular", 0, { octave: 0, tuning: "vowel", ventRatio: 2, press: 0.3, melody: "walk", melodyRate: 1.2, phrase: 7.0, breathGap: 0.9, vibratoDepth: 0.0, effort: 0.9, driftCents: 2.0, larynx: -0.4, level: 1.6, larynxModel: "folds" })]
     },
     {
         id: "overtone-canon",

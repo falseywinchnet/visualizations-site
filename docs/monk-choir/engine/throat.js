@@ -23,7 +23,9 @@ import { makeBranchShape, prepareBranch, branchResponseAt } from "./branch.js?v=
 
 export const MAP_STEPS = 25;    // along gesture a
 export const MAP_STEPS_B = 6;   // along gesture b (1 for a single line)
-export const MAP_BINS = 160;
+export const MAP_STEPS_FOCUS = 9;  // along the focus gesture's fine-tuning axis
+const MAP_ROWS_MAX = MAP_STEPS * MAP_STEPS_FOCUS;
+export const MAP_BINS = 320;
 export const MAP_LOW_HZ = 60.0;
 export const MAP_HIGH_HZ = 5000.0;
 
@@ -55,12 +57,69 @@ export const THROAT_PLANE = [
     shape(0.2, 0.85, 0.6, 0.6, 0.2, 0.0, 0.8), shape(0.5, 0.8, 0.6, 0.6, 0.2, 0.0, 0.8)
 ];
 
+// Focus (two constrictions, after MRI of Tuvan singers: a severe narrowing
+// at the alveolar ridge merges F2 and F3 into one sharp peak, a second at
+// the back of the tongue moves it). Knots learned offline for a baritone
+// (.dev/README.md): for each focus frequency, among 142 155 shapes, the one
+// whose harmonic rises furthest above both neighbours for drones of 100 and
+// 130 Hz, chosen jointly so neighbouring knots stay close. Columns:
+// focus Hz, tonguePos, tongueHeight, tipPos, tipClose, jaw, lipAperture,
+// lipProtrusion. Scored on the rise over the louder neighbour plus half the
+// rise over the harmonics two away: closed form 18-20 dB over +-1 and
+// 22-34 dB over +-2 (rewarding +-1 alone gave 21-28 dB over +-2).
+// There are exactly MAP_STEPS knots, so each row of the map is a knot.
+export const FOCUS_KNOTS = [
+    [800, 0.28, 0.905, 0.72, 0.99, 0.3, 0.35, 0.5],
+    [840, 0.31, 0.84, 0.72, 0.99, 0.3, 0.35, 0.5],
+    [883, 0.34, 0.775, 0.75, 0.99, 0.3, 0.35, 0.5],
+    [927, 0.37, 0.71, 0.75, 0.99, 0.3, 0.35, 0.5],
+    [974, 0.46, 0.71, 0.75, 0.99, 0.3, 0.35, 0.5],
+    [1023, 0.49, 0.71, 0.75, 0.99, 0.3, 0.35, 0.5],
+    [1074, 0.4, 0.58, 0.78, 0.99, 0.3, 0.7, 0.5],
+    [1128, 0.37, 0.58, 0.72, 0.99, 0.3, 0.7, 1],
+    [1185, 0.34, 0.58, 0.72, 0.99, 0.3, 0.7, 1],
+    [1245, 0.31, 0.58, 0.75, 0.99, 0.3, 0.7, 1],
+    [1307, 0.34, 0.45, 0.75, 0.99, 0.3, 0.7, 1],
+    [1373, 0.49, 0.45, 0.75, 0.99, 0.3, 0.7, 1],
+    [1442, 0.52, 0.45, 0.75, 0.99, 0.3, 0.7, 1],
+    [1515, 0.52, 0.45, 0.75, 0.93, 0.3, 0.1, 1],
+    [1591, 0.52, 0.515, 0.72, 0.93, 0.3, 0.1, 1],
+    [1671, 0.52, 0.58, 0.72, 0.87, 0.3, 0.1, 1],
+    [1755, 0.49, 0.515, 0.69, 0.87, 0.3, 0.1, 1],
+    [1844, 0.52, 0.515, 0.72, 0.81, 0.3, 0.1, 1],
+    [1936, 0.58, 0.45, 0.78, 0.81, 0.3, 0.1, 1],
+    [2034, 0.61, 0.45, 0.78, 0.81, 0.3, 0.1, 1],
+    [2136, 0.61, 0.45, 0.78, 0.75, 0.3, 0.1, 1],
+    [2244, 0.61, 0.45, 0.72, 0.75, 0.3, 0.1, 1],
+    [2357, 0.61, 0.515, 0.69, 0.75, 0.3, 0.1, 1],
+    [2475, 0.61, 0.71, 0.69, 0.75, 0.3, 0.1, 1],
+    [2600, 0.58, 0.645, 0.63, 0.75, 0.3, 0.1, 1]
+];
+
 // Number of steps along b for a tuning (the vowel walk is a single line).
 export function stepsB(tuning) {
     if (tuning === "vowel") {
         return 1;
     }
+    if (tuning === "focus") {
+        return MAP_STEPS_FOCUS;
+    }
     return MAP_STEPS_B;
+}
+
+function exactLevel(shape, f, rate) {
+    const r = branchResponseAt(shape, 2.0 * Math.PI * f / rate);
+    return 10.0 * Math.log10((r.re * r.re + r.im * r.im) * f * f + 1e-30);
+}
+
+function clamp01(x) {
+    if (x < 0.0) {
+        return 0.0;
+    }
+    if (x > 1.0) {
+        return 1.0;
+    }
+    return x;
 }
 
 function parabolaShift(a, b, c) {
@@ -71,27 +130,65 @@ function parabolaShift(a, b, c) {
     return 0.0;
 }
 
-export const MAP_TUNINGS = ["labial", "nasal", "throat", "vowel"];
+export const MAP_TUNINGS = ["labial", "nasal", "throat", "vowel", "focus"];
 
 export function isMapTuning(t) {
-    return t === "labial" || t === "nasal" || t === "throat" || t === "vowel";
+    return t === "labial" || t === "nasal" || t === "throat" || t === "vowel" || t === "focus";
+}
+
+// Articulation at position q (0..1) along the focus knots, with the tongue
+// body moved by fine (0..1 -> -0.035..+0.035 of tract position). The knots'
+// peaks are about 20 Hz wide and 5% apart, so a harmonic between two knots
+// fell on a slope and lost 10 dB; moving the back of the tongue slides the
+// merged peak smoothly by 50-100 Hz without widening it (.dev/README.md),
+// as the second constriction does in the MRI study.
+export function focusArticulation(q, fine, out) {
+    const last = FOCUS_KNOTS.length - 1;
+    let x = q * last;
+    if (x < 0.0) {
+        x = 0.0;
+    }
+    if (x > last) {
+        x = last;
+    }
+    let i = Math.floor(x);
+    if (i >= last) {
+        i = last - 1;
+    }
+    const t = x - i;
+    const a = FOCUS_KNOTS[i];
+    const b = FOCUS_KNOTS[i + 1];
+    out.tonguePos = a[1] + (b[1] - a[1]) * t + 0.07 * (fine - 0.5);
+    out.tongueHeight = a[2] + (b[2] - a[2]) * t;
+    out.tipPos = a[3] + (b[3] - a[3]) * t;
+    out.tipClose = a[4] + (b[4] - a[4]) * t;
+    out.jaw = a[5] + (b[5] - a[5]) * t;
+    out.lipAperture = a[6] + (b[6] - a[6]) * t;
+    out.lipProtrusion = a[7] + (b[7] - a[7]) * t;
+    out.velum = 0.0;
+    return out;
 }
 
 // Tunings that put one harmonic forward (and so follow a harmonic melody).
 export function isHarmonicTuning(t) {
-    return t === "overtone" || t === "sygyt" || t === "labial" || t === "nasal" || t === "throat" || t === "vowel";
+    return t === "overtone" || t === "sygyt" || t === "labial" || t === "nasal" || t === "throat" || t === "vowel" || t === "focus";
 }
 
 export class MouthMap {
     constructor() {
-        this.table = new Float64Array(MAP_STEPS * MAP_STEPS_B * MAP_BINS);
-        this.values = new Float64Array(MAP_STEPS * MAP_STEPS_B);
+        this.table = new Float32Array(MAP_ROWS_MAX * MAP_BINS);
+        this.values = new Float64Array(MAP_ROWS_MAX);
         this.key = "";
         this.built = 0;
         this.rows = MAP_STEPS;   // MAP_STEPS * steps along b
         this.stepsB = 1;
         this.chosenA = 0.5;
         this.chosenB = 0.5;
+        // exact local refinement (refine)
+        this.refinedA = 0.5;
+        this.refinedB = 0.5;
+        this.exactScore = 0.0;
+        this.tickRate = 1.0;
         this.areas = new Float64Array(SECTIONS);
         this.nasal = new Float64Array(MAX_NASAL_SECTIONS);
         this.seg = { pharynx: 0, oral: 0, lips: 0, total: 0 };
@@ -226,6 +323,85 @@ export class MouthMap {
             this.chosenB = 0.0;
         }
     }
+
+    // Exact score of the shape at (a, b) for harmonic n of fs, from the closed
+    // form of the branched tube: rise over the louder neighbour plus a quarter
+    // of the lead over the harmonics two away.
+    exactAt(singer, a, b, fs, n) {
+        singer.pathArticulation(clamp01(a), clamp01(b), this.art);
+        const L = areaFunction(singer.anatomy, this.art, this.areas, this.seg);
+        const rate = SECTIONS * SPEED_OF_SOUND / L;
+        const nc = nasalAreas(singer.anatomy, this.seg, this.nasal);
+        const lipPole = radiationPole(lipRadius(this.areas), rate, SPEED_OF_SOUND);
+        const nosePole = radiationPole(Math.sqrt(this.nasal[nc - 1] / Math.PI), rate, SPEED_OF_SOUND);
+        prepareBranch(this.shape, this.areas, nc, this.nasal, velumJunction(this.seg), velumArea(singer.anatomy, this.art), lipPole, nosePole, 0.95);
+        const h = exactLevel(this.shape, n * fs, rate);
+        const n1 = Math.max(exactLevel(this.shape, (n - 1) * fs, rate), exactLevel(this.shape, (n + 1) * fs, rate));
+        let n2 = -1e9;
+        if (n > 2) {
+            n2 = Math.max(exactLevel(this.shape, (n - 2) * fs, rate), exactLevel(this.shape, (n + 2) * fs, rate));
+        } else {
+            n2 = exactLevel(this.shape, (n + 2) * fs, rate);
+        }
+        return (h - n1) + 0.25 * (h - n2);
+    }
+
+    // The singer feels around the map's choice: starting from where it was (if
+    // the map still points near there) or from the map's choice, it tries small
+    // moves along both gestures with the exact closed form, three rounds of
+    // shrinking steps. The coarse map ranks shapes; this places the sharp peak
+    // (about 20 Hz wide for the focus gesture) on the harmonic.
+    refine(singer, fs, n) {
+        if (!this.ready() || n * fs > MAP_HIGH_HZ || n < 2) {
+            this.refinedA = this.chosenA;
+            this.refinedB = this.chosenB;
+            return;
+        }
+        const nb = this.stepsB;
+        const rowA = 1.0 / (MAP_STEPS - 1);
+        let rowB = 0.0;
+        if (nb > 1) {
+            rowB = 1.0 / (nb - 1);
+        }
+        let a = this.chosenA;
+        let b = this.chosenB;
+        if (Math.abs(this.refinedA - a) <= 1.5 * rowA && Math.abs(this.refinedB - b) <= 1.5 * rowB + 1e-9) {
+            a = this.refinedA;
+            b = this.refinedB;
+        }
+        let best = this.exactAt(singer, a, b, fs, n);
+        let sa = 0.5 * rowA;
+        let sb = 0.5 * rowB;
+        for (let round = 0; round < 3; round = round + 1) {
+            for (let k = 0; k < 4; k = k + 1) {
+                let ta = a;
+                let tb = b;
+                if (k === 0) {
+                    ta = a + sa;
+                } else if (k === 1) {
+                    ta = a - sa;
+                } else if (k === 2) {
+                    tb = b + sb;
+                } else {
+                    tb = b - sb;
+                }
+                if ((k >= 2 && sb === 0.0) || ta < 0.0 || ta > 1.0 || tb < 0.0 || tb > 1.0) {
+                    continue;
+                }
+                const v = this.exactAt(singer, ta, tb, fs, n);
+                if (v > best) {
+                    best = v;
+                    a = ta;
+                    b = tb;
+                }
+            }
+            sa = sa * 0.5;
+            sb = sb * 0.5;
+        }
+        this.refinedA = a;
+        this.refinedB = b;
+        this.exactScore = best;
+    }
 }
 
 // Harmonic melodies (harmonic numbers, one per step). Original patterns.
@@ -287,7 +463,9 @@ export const STYLES = {
     plain: { label: "Plain chant", set: { register: "chest", tuning: "none", ventRatio: 2, press: 0.0, ornament: "none", melody: "", pattern: "none", phrase: 0.0, epilarynx: 0.3, larynx: 0.0 } },
     khoomei: { label: "Khöömei", set: { register: "pressed", tuning: "overtone", press: 0.5, ornament: "none", pattern: "none", epilarynx: 0.6 } },
     sygyt: { label: "Sygyt (whistle)", set: { register: "pressed", tuning: "sygyt", press: 0.6, ornament: "none", pattern: "none", epilarynx: 0.6 } },
-    kargyraa: { label: "Kargyraa (vowel walk)", set: { register: "ventricular", tuning: "vowel", ventRatio: 2, press: 0.3, larynx: -0.4, melody: "walk", melodyRate: 1.2, ornament: "none", pattern: "none" } },
+    kargyraa: { label: "Kargyraa (vowel walk, self-oscillating folds)", set: { register: "ventricular", tuning: "vowel", ventRatio: 2, press: 0.3, larynx: -0.4, melody: "walk", melodyRate: 1.2, ornament: "none", pattern: "none", larynxModel: "folds" } },
+    focus: { label: "Sygyt, two-constriction focus", set: { register: "pressed", tuning: "focus", press: 0.6, ornament: "none", pattern: "none", epilarynx: 0.6 } },
+    dzoke: { label: "Dzo-ke (self-oscillating folds)", set: { register: "ventricular", tuning: "none", ventRatio: 2, press: 0.3, larynx: -0.4, ornament: "none", pattern: "none", larynxModel: "folds" } },
     borbangnadyr: { label: "Borbangnadyr (rolling)", set: { register: "pressed", tuning: "overtone", press: 0.5, ornament: "trill", ornRate: 7.0, ornDepth: 1.0, pattern: "none" } },
     ezengileer: { label: "Ezengileer (stirrup)", set: { register: "pressed", tuning: "overtone", press: 0.5, ornament: "gallop", ornRate: 2.2, ornDepth: 0.7, pattern: "none" } },
     chylandyk: { label: "Chylandyk (whistle over growl)", set: { register: "ventricular", tuning: "sygyt", ventRatio: 2, press: 0.5, ornament: "none", pattern: "none", epilarynx: 0.6 } },
