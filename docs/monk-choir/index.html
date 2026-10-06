@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sangha monk choir</title>
 <meta name="description" content="A singing-monk synthesizer: the classic 2002 monk voice reproduced sample for sample, then rebuilt as physical singers with their own throats, mouths and registers — choirs, sopranos, falsetto, Gyuto chord chant, ventricular half tones, khöömei and sygyt.">
-<link rel="stylesheet" href="./style.css?v=d51e3a7085">
+<link rel="stylesheet" href="./style.css?v=634c0d02ae">
 </head>
 <body>
 <header class="top">
@@ -122,6 +122,10 @@
       </div>
       <p class="small">Click a monk on the stage or a row above. Tick a control to give this monk its own value; unticked controls follow the ensemble sliders. Lock a monk on a note, or let it follow the keys inside its own key: each monk can have a different one.</p>
       <div class="controls" id="monk-controls"></div>
+      <details class="throat" open>
+        <summary>Throat</summary>
+        <div class="controls" id="throat-controls"></div>
+      </details>
     </div>
   </section>
 
@@ -134,7 +138,11 @@
       </figure>
       <figure>
         <canvas id="spectrum"></canvas>
-        <figcaption>Exact tube response with the voice's harmonics. Tuning targets in gold.</figcaption>
+        <figcaption>Exact tube response with the voice's harmonics (through lips and nose when the velum is open). Tuning targets in gold.</figcaption>
+      </figure>
+      <figure id="map-figure" class="hidden">
+        <canvas id="mouthmap"></canvas>
+        <figcaption id="map-caption"></figcaption>
       </figure>
     </div>
     <dl class="readout" id="readout"></dl>
@@ -162,6 +170,7 @@
         <p><strong>The HDR voice.</strong> The physical voice renders the midtones well: harmonics through formants, within about 40 dB of the loudest partial. The HDR tab adds what lives in the shadows and the highlights, and lets the source hear the tube. The tube is linear for a given shape, so it runs three times on the same shape: voiced flow, turbulence, and fold collisions. Their sum is the voice, and each can be soloed without approximation. Five experiments. (1) The glottis prescribes only its opening; the flow follows the pressure across it, with the inertia of the air in the glottis lagging it. (2) Turbulence is born at the narrowest point of the mouth, grows with the jet's speed past a threshold, and is coloured by jet speed over gap width. (3) A contact transient when the folds close, scaled by closing speed squared: pressed voice clicks, falsetto (which never closes) makes none. (4) Transverse resonances of the widest section (1.84, 3.05 and 3.83 × c/πd) driven by the tube's own pressure. (5) One physiological state (breath pressure, laryngeal tremor, heartbeat) moves pitch, loudness and fold pressure together. Measured against the physical voice on the same notes (chest, baritone): harmonics-to-noise ratio 14.8 dB instead of 4.0 dB, energy above 5 kHz −17 dB instead of −5.5 dB, and frame-level pitch–loudness correlation 0.51 instead of −0.01. The comparison is loudness-matched. Measuring it showed that the physical voice's breath noise was shaped as a high-pass, which made it too hissy. The physical voice now uses the HDR shaping too: its chest-voice HNR went from 4 to 21.7 dB.</p>
         <p>Three more layers. <em>Breathing below:</em> a 20 cm subglottal airway (trachea, then the bronchi widening) resonating at 600 / 1410 / 2200 Hz for an adult man, as reported for real airways, and higher for smaller bodies. Coupled only through the flow, it changes the voice by at most 0.4 dB: real subglottal effects would need the two tubes joined acoustically through the open glottis. <em>Yielding walls:</em> when the lips or tongue seal, the flow fills the mouth slowly, the walls hum at about −22 dB under the vowel (the voice bar), and the trapped pressure bursts at the release; without the walls the closure is silent and there is no burst. <em>Articulator inertia:</em> each articulator is a damped mass with its own speed. In "ah→ee" F2 now lags F1 by 16 ms (3 ms without), and the formant path bends more. The turbulence layer also had to learn that two narrowings in series share one flow: the jet speed saturates as a gap closes instead of running away.</p>
         <p><strong>The room.</strong> Under the stage, choose a room. Each seat of singers gets its own early reflections from an image-source model of a box with real surface materials, heard from a near-coincident pair of cardioid microphones. The late tail decays per band at the rate predicted for that room's size and surfaces (Eyring), and its level comes from the room constant. Measured mid-band decay matches the prediction: 8.6 s against 8.7 s in the stone hall, 2.2 against 2.1 in the temple. The floor is modelled three ways. Its first reflection is filtered by the floor's reflection at the actual angle. Monks sit close to it, so it arrives a few milliseconds after the direct sound and cuts comb notches exactly where the path difference predicts: 630 / 1900 / 3160 Hz seated against a predicted 646 / 1938 / 3230, moving to 370 Hz when they stand. Stone notches run 11–14 dB deep; carpet and earth absorb the reflection and stay under 6 dB. Hard floors facing hard ceilings flutter. A wooden dais is a plate with its own bending modes (38, 54, 72 Hz…) that the seated singers drive through their bodies: about +4 dB of body below 200 Hz. Rooms are loudness-matched, and in the songs the electronic drop stays dry while the monks and instruments sit in the room. Not modelled: the spherical-wave ground wave that makes porous ground dip at grazing angles outdoors.</p>
+        <p><strong>Throat singing.</strong> Select a monk and open <em>Throat</em> under its controls; the new ensembles show each mechanism. <em>Ventricular folds</em> can move once for every one, two or three glottal cycles. Measured against the fundamental, one-in-two puts a sub-octave at −12 dB, one-in-three a sub-twelfth (f0/3) at −18 dB with no sub-octave, and moving in step adds no sub-harmonic, only a harder pulse. <em>Press</em> lengthens the closed phase and seals the folds faster, so resonances ring sharper. The older overtone tuners listen to one resonance and push one articulator. Three new gestures work differently: the singer carries a <em>map of its own mouth</em>, the exact response of the whole tube (lips and nostrils together) over a plane of two movements, and moves to the shape where the wanted harmonic stands highest above its neighbours. That is what lets a singer tune through the nose with the lips sealed: there the tongue reshapes a hidden side cavity, and no single resonance moves smoothly. Over a 110 Hz drone, measured in the rendered sound (more than 6 dB above both neighbours): lips 7–13, nose 5–11, tongue root 4–11. The kargyraa vowel walk tunes onto harmonics of the sub-octave. Even ones (also harmonics of the sung note) ring out by 9–14 dB, odd ones much less, because the source puts little energy there. The selected monk's map is drawn in the inspector. <em>Overtone melodies</em> step the target harmonic; an offset sets monks in canon. <em>Ornaments</em>: a harmonic trill in which the tongue rocks between neighbours (the rolling of borbangnadyr), lip flutter, a tongue-tip trill, and a galloping triple lip pulse (the stirrup rhythm of ezengileer). <em>Breathing</em> stops each phrase for an audible in-breath (−15 dB under the voice), then the overtone climbs back into place. <em>Breath games</em> alternate out-breath and in-breath, voiced and breathed steps. For the in-breath the flow reverses and the glottal pulse is mirrored in time; the mirroring is a modelling assumption, and it changes the spectrum only slightly (−4 dB above 2 kHz). The styles and ensembles are named after Tuvan, Mongolian, Sardinian, Xhosa and Inuit practice as mechanical sketches. They are not transcriptions of those traditions, and every melody and motif is original. Building them exposed clicks: the tube switched its lip opening instantly while carrying a steady airflow. It now moves the opening smoothly, which removed half to two thirds of the sudden jumps in the three songs without changing their balance (bands within 0.2 dB).</p>
         <p class="small">Numbers checked by the test suite in this page's source: the closed-form tube response matches the time-domain waveguide to 10<sup>−13</sup>; scaling a body by 0.8 raises every resonance by exactly 1.25; Gyuto locking settles at 327/654 Hz for a 65.4 Hz fundamental; khöömei holds harmonics 8–12 of 110 Hz at 8–10 dB above their neighbours, and sygyt holds 10–12 at 17 dB.</p>
         <p class="small">Credits: the classic engine is ported from <a href="https://github.com/JonET/monksynth">MonkSynth</a> by Jonathan Taylor (MIT licence, notice in <code>engine/classic.js</code>), itself a reimplementation of AudioNerdz's 2002 freeware plugin. The physical engine, its anatomy and register models, and the drawings are original to this page. Research the presets draw on: Smith, Stevens &amp; Tomlinson (1967) on Gyuto chant; Lindestad et al. (2001) and Bailly, Henrich &amp; Pelorson (2010) on ventricular period doubling; Kob (2004) on sygyt.</p>
       </div>
@@ -169,6 +178,6 @@
   </section>
 </main>
 
-<script type="module" src="./app.js?v=be98922e9d"></script>
+<script type="module" src="./app.js?v=e7804950c1"></script>
 </body>
 </html>

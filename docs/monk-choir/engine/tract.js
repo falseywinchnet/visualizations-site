@@ -67,6 +67,10 @@ export class Tract {
         this.areaLeftOfVelum = 1.0;
         this.areaRightOfVelum = 1.0;
         this.lipArea = 1.0;
+        this.lipAreaStart = 1.0;
+        this.lipAreaTarget = 1.0;
+        this.inputScaleStart = 1.0;
+        this.inputScaleTarget = 1.0;
         this.lipPole = 0.5;
         this.lipState = 0.0;
         this.nosePole = 0.5;
@@ -122,11 +126,18 @@ export class Tract {
         this.velumJ = velumJ;
         this.areaLeftOfVelum = areas[velumJ - 1];
         this.areaRightOfVelum = areas[velumJ];
-        this.lipArea = areas[n - 1];
+        // The lip opening and the glottal input area move with the junctions:
+        // the air in the tube carries a steady flow, so switching either one
+        // instantly steps the radiated flow and clicks.
+        this.lipAreaTarget = areas[n - 1];
+        this.inputScaleTarget = 1.0 / Math.max(areas[0], 0.05);
         this.lipPole = lipPole;
         this.nosePole = nosePole;
-        this.inputScale = 1.0 / Math.max(areas[0], 0.05);
         if (!this.hasShape || rampTicks <= 0) {
+            this.lipArea = this.lipAreaTarget;
+            this.lipAreaStart = this.lipAreaTarget;
+            this.inputScale = this.inputScaleTarget;
+            this.inputScaleStart = this.inputScaleTarget;
             for (let i = 1; i < n; i = i + 1) {
                 this.rho[i] = this.rhoTarget[i];
                 this.rhoStart[i] = this.rhoTarget[i];
@@ -144,6 +155,8 @@ export class Tract {
         }
         this.velumStart = this.velumArea;
         this.velumTarget = velumArea;
+        this.lipAreaStart = this.lipArea;
+        this.inputScaleStart = this.inputScale;
         this.rampTicks = rampTicks;
         this.rampPos = 0;
     }
@@ -156,6 +169,8 @@ export class Tract {
             this.rho[i] = this.rhoStart[i] + (this.rhoTarget[i] - this.rhoStart[i]) * t;
         }
         this.velumArea = this.velumStart + (this.velumTarget - this.velumStart) * t;
+        this.lipArea = this.lipAreaStart + (this.lipAreaTarget - this.lipAreaStart) * t;
+        this.inputScale = this.inputScaleStart + (this.inputScaleTarget - this.inputScaleStart) * t;
         if (this.rampPos >= this.rampTicks) {
             this.rampTicks = 0;
         }

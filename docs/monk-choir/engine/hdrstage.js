@@ -1,11 +1,11 @@
 // The HDR tab's audio: one HDR voice and, for A/B, the physical voice it
 // extends with the same body, register and gestures.
 
-import { Singer, CONTROL_BLOCK } from "./singer.js?v=7c9b69f214";
-import { HdrVoice, LAYERS } from "./hdr.js?v=2a2db22a1b";
+import { Singer, CONTROL_BLOCK } from "./singer.js?v=35ae215bb8";
+import { HdrVoice, LAYERS } from "./hdr.js?v=cfa300ad25";
 import { makeAnatomy } from "./anatomy.js?v=9500908dbe";
-import { makeVoiceSource } from "./glottis.js?v=e11d9ec07d";
-import { Hall } from "./choir.js?v=a5cd9f934a";
+import { makeVoiceSource } from "./glottis.js?v=44e6be78ce";
+import { Hall } from "./choir.js?v=44ddd35ca9";
 
 function probeRms(voice) {
     const t = voice.anatomy.type;

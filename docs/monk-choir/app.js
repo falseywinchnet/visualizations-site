@@ -1,18 +1,20 @@
 // Page: audio start-up, pad, keyboard, MIDI, controls, stage and inspector.
 
-import { PRESETS, presetById } from "./engine/presets.js?v=f018fb38c9";
-import { makeSingerConfig, anatomyFor, foldIntoRange } from "./engine/choir.js?v=a5cd9f934a";
-import { VOICE_TYPES, SECTIONS, SPEED_OF_SOUND, makeArticulation, areaFunction, lipRadius, segmentLengths } from "./engine/anatomy.js?v=9500908dbe";
-import { REGISTERS } from "./engine/glottis.js?v=e11d9ec07d";
-import { radiationPole } from "./engine/tract.js?v=711fe62fc7";
-import { responseCurve, findFormants, makeFormantSlots } from "./engine/analysis.js?v=887637021b";
-import { vowelArticulation, noteToHz } from "./engine/singer.js?v=7c9b69f214";
+import { PRESETS, presetById } from "./engine/presets.js?v=747fa97554";
+import { makeSingerConfig, anatomyFor, foldIntoRange } from "./engine/choir.js?v=44ddd35ca9";
+import { VOICE_TYPES, SECTIONS, SPEED_OF_SOUND, makeArticulation, areaFunction, lipRadius, segmentLengths, nasalAreas, velumJunction, velumArea } from "./engine/anatomy.js?v=9500908dbe";
+import { MouthMap, MAP_STEPS, MELODIES, ORNAMENTS, PATTERNS, STYLES, isMapTuning, isHarmonicTuning } from "./engine/throat.js?v=91c87f0f27";
+import { makeBranchShape, prepareBranch, branchMagnitudeDb } from "./engine/branch.js?v=858edf769a";
+import { REGISTERS } from "./engine/glottis.js?v=44e6be78ce";
+import { radiationPole } from "./engine/tract.js?v=44afeabdc1";
+import { responseCurve, findFormants, makeFormantSlots } from "./engine/analysis.js?v=2458f8cf6f";
+import { vowelArticulation, noteToHz, Singer } from "./engine/singer.js?v=35ae215bb8";
 import { VOWEL_SHAPES, CLASSIC_BODY } from "./engine/vowels.js?v=260f005eba";
-import { ROLMO } from "./engine/song.js?v=3fb80c49e8";
-import { FUGUE } from "./engine/songs/fugue.js?v=a033b57a45";
-import { PASSACAGLIA } from "./engine/songs/passacaglia.js?v=f30021bca9";
+import { ROLMO } from "./engine/song.js?v=8b1b029598";
+import { FUGUE } from "./engine/songs/fugue.js?v=f94b03c8da";
+import { PASSACAGLIA } from "./engine/songs/passacaglia.js?v=42c11aa032";
 import { drawSongStage, drawScore, buildSongPanel, songTimeText, scoreSeekTime } from "./songview.js?v=cb255e5fee";
-import { buildHdrPanel, drawHdrMeters, makeSpectrogram, drawSpectrogram } from "./hdrview.js?v=15e79ed03c";
+import { buildHdrPanel, drawHdrMeters, makeSpectrogram, drawSpectrogram } from "./hdrview.js?v=ed36f9e92b";
 import { ROOMS, MATERIALS, eyring, defaultRoomSettings } from "./engine/room.js?v=8963a58369";
 
 const SONGS = { passacaglia: PASSACAGLIA, fugue: FUGUE, rolmo: ROLMO };
@@ -37,6 +39,8 @@ const state = {
     telemetry: null,
     classicTelemetry: { vowel: 0.5, pitch: 0.5, active: false, amp: 0.0 },
     selected: 0,
+    startPromise: null,   // the audio start in progress
+    pending: [],          // messages posted while the engine loads
     padDown: false,
     padPoint: { x: 0.5, y: 0.5 },
     padTrail: [],
@@ -56,7 +60,7 @@ const state = {
 
 const VOWEL_NAMES = ["ooh", "ow", "ah", "ayh", "eeh"];
 const NOTE_NAMES = ["C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "A♯", "B"];
-const TUNINGS = { none: "—", r1: "F1 follows pitch", overtone: "khöömei", sygyt: "sygyt", gyuto: "Gyuto chord" };
+const TUNINGS = { none: "—", r1: "F1 follows pitch", overtone: "khöömei", sygyt: "sygyt", gyuto: "Gyuto chord", labial: "labial map", nasal: "nasal map", throat: "throat map", vowel: "kargyraa vowel walk" };
 const PAD_LOW_NOTE = 36;
 const DOT_COLORS = ["#6fb59a", "#e9a23b", "#d96a4f", "#9ab6e0", "#f2cf6b", "#c58fd1", "#8fd1c3", "#e6b8a2"];
 const PAD_SPAN = 24;
@@ -84,6 +88,9 @@ function $(id) {
 function post(message) {
     if (state.node !== null) {
         state.node.port.postMessage(message);
+    } else if (state.startPromise !== null) {
+        // the engine is still loading: keep the message (a first key press)
+        state.pending.push(message);
     }
 }
 
@@ -100,8 +107,16 @@ async function startAudio() {
         }
         return;
     }
+    // One start only, however many clicks and key presses arrive meanwhile.
+    if (state.startPromise === null) {
+        state.startPromise = openAudio();
+    }
+    await state.startPromise;
+}
+
+async function openAudio() {
     const ctx = new AudioContext({ latencyHint: "interactive" });
-    await ctx.audioWorklet.addModule("./worklet.js?v=2bd43b1a08");
+    await ctx.audioWorklet.addModule("./worklet.js?v=055302ba61");
     const node = new AudioWorkletNode(ctx, "monk-processor", { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2] });
     const limiter = ctx.createDynamicsCompressor();
     limiter.threshold.value = -6;
@@ -123,6 +138,10 @@ async function startAudio() {
     state.node = node;
     state.started = true;
     syncEngine();
+    for (let i = 0; i < state.pending.length; i = i + 1) {
+        node.port.postMessage(state.pending[i]);
+    }
+    state.pending = [];
     await ctx.resume();
     $("power").textContent = "Sound on";
     $("power").classList.add("on");
@@ -778,7 +797,7 @@ function buildSingerTable() {
         const lv = document.createElement("input");
         lv.type = "range";
         lv.min = "0";
-        lv.max = "4";
+        lv.max = "10";
         lv.step = "0.05";
         lv.value = String(s.level);
         lv.addEventListener("input", makeRowHandler(i, "level", "number"));
@@ -841,7 +860,8 @@ const OWN_CONTROLS = [
     { key: "effort", label: "Effort", min: 0.2, max: 1, step: 0.01, format: fmtFixed2, ensemble: function (cfg) { return Math.min(1, cfg.effort * state.globals.effort); } },
     { key: "vibrato", label: "Vibrato (semitones)", min: 0, max: 1, step: 0.01, format: fmtFixed2, ensemble: function (cfg) { return cfg.vibratoDepth; } },
     { key: "orbitDepth", label: "Orbit size", min: 0, max: 0.5, step: 0.01, format: fmtFixed2, ensemble: function (cfg) { return cfg.oscDepth !== null && cfg.oscDepth !== undefined ? cfg.oscDepth : state.globals["osc.depth"]; } },
-    { key: "orbitRate", label: "Orbit speed", min: 0, max: 1, step: 0.005, format: formatOscRate, ui: true, ensemble: function (cfg) { return state.globals["osc.rate"]; } }
+    { key: "orbitRate", label: "Orbit speed", min: 0, max: 1, step: 0.005, format: formatOscRate, ui: true, ensemble: function (cfg) { return state.globals["osc.rate"]; } },
+    { key: "harmonic", label: "Overtone harmonic", min: 2, max: 16, step: 1, format: formatHarmonic, ensemble: function (cfg) { return isHarmonicTuning(cfg.tuning) ? state.globals.harmonic : cfg.harmonic; } }
 ];
 
 const monkInputs = {};
@@ -992,6 +1012,7 @@ function buildMonkPanel() {
     for (let i = 0; i < OWN_CONTROLS.length; i = i + 1) {
         makeOwnControl(c, OWN_CONTROLS[i]);
     }
+    buildThroatControls($("throat-controls"));
     $("monk-reset").addEventListener("click", resetMonk);
     $("monk-all-follow").addEventListener("click", allFollow);
 }
@@ -1027,6 +1048,210 @@ function allFollow() {
     buildSingerTable();
 }
 
+// ------------------------------------------------------------------ the selected monk's throat
+
+const throatInputs = {};
+
+function ornRateFromUi(u) {
+    return 0.5 * Math.pow(70.0, u);
+}
+
+function ornRateToUi(r) {
+    return Math.max(0, Math.min(1, Math.log(r / 0.5) / Math.log(70.0)));
+}
+
+function fmtHz(v) { return v.toFixed(1) + " Hz"; }
+function fmtSteps(v) { return v.toFixed(1) + " steps/s"; }
+function fmtPhrase(v) { return v < 0.5 ? "never breathes" : v.toFixed(1) + " s"; }
+function fmtSigned(v) { return (v > 0 ? "+" : "") + v.toFixed(2); }
+
+function setThroatField(field, value) {
+    const cfg = selectedSinger();
+    if (cfg === undefined) {
+        return;
+    }
+    cfg[field] = value;
+    sendSinger(field, value);
+    if (field === "register" || field === "tuning") {
+        buildSingerTable();
+    } else {
+        refreshMonkPanel();
+    }
+    state.inspectDirty = true;
+}
+
+// A slider bound to one field of the selected monk. toUi/fromUi map a
+// non-linear field onto the slider.
+function makeThroatSlider(container, spec) {
+    const input = makeSlider(container, { label: spec.label, min: spec.min, max: spec.max, step: spec.step, value: spec.min, format: spec.format, title: spec.title, onInput: moved });
+    function moved(v) {
+        let value = v;
+        if (spec.fromUi !== undefined) {
+            value = spec.fromUi(v);
+        }
+        setThroatField(spec.field, value);
+    }
+    throatInputs[spec.field] = { input: input, spec: spec };
+    return input;
+}
+
+function makeThroatSelect(container, spec) {
+    const select = makeSelect(container, { label: spec.label, options: spec.options, value: String(spec.options[0][0]), onInput: chosen });
+    if (spec.title) {
+        select.parentElement.title = spec.title;
+    }
+    function chosen(v) {
+        let value = v;
+        if (spec.numeric) {
+            value = Number(v);
+        }
+        setThroatField(spec.field, value);
+    }
+    throatInputs[spec.field] = { input: select, spec: spec, select: true };
+    return select;
+}
+
+function rangeOptions(lo, hi) {
+    const out = [];
+    for (let k = lo; k <= hi; k = k + 1) {
+        out.push([String(k), "#" + k]);
+    }
+    return out;
+}
+
+function keyedOptions(table) {
+    const out = [];
+    const keys = Object.keys(table);
+    for (let i = 0; i < keys.length; i = i + 1) {
+        const v = table[keys[i]];
+        out.push([keys[i], typeof v === "string" ? v : v.label]);
+    }
+    return out;
+}
+
+function buildThroatControls(c) {
+    const styleOptions = [["", "apply a style…"]].concat(keyedOptions(STYLES));
+    throatInputs.style = makeSelect(c, { label: "Style", options: styleOptions, value: "", onInput: applyStyle });
+    throatInputs.style.parentElement.title = "Sets register, gesture and mechanics together; adjust them below afterwards";
+    makeThroatSelect(c, { field: "register", label: "Register", options: registerOptions() });
+    makeThroatSelect(c, { field: "tuning", label: "Gesture / tuning", options: tuningOptions(), title: "What the mouth does: khöömei and sygyt listen to one resonance; the map gestures choose from the singer's own map of mouth shapes, through lips and nose" });
+    makeThroatSelect(c, { field: "ventRatio", label: "Ventricular folds", numeric: true, options: [["1", "in step (1 : 1)"], ["2", "sub-octave (1 : 2)"], ["3", "sub-twelfth (1 : 3)"]], title: "Glottal cycles per cycle of the false folds; heard when the half tone is up or the register is ventricular" });
+    makeThroatSlider(c, { field: "press", label: "Press", min: 0, max: 1, step: 0.01, format: fmtPercent, title: "Longer closed phase, faster sealing, no leak: sharper resonances and a stronger overtone" });
+    makeThroatSlider(c, { field: "larynx", label: "Larynx (low ↔ high)", min: -1, max: 1, step: 0.01, format: fmtSigned, title: "Lowering the larynx lengthens the throat: darker, every resonance lower" });
+    makeThroatSlider(c, { field: "epilarynx", label: "Twang (epilarynx)", min: 0, max: 1, step: 0.01, format: fmtPercent, title: "Narrowing just above the folds: a ring near 3 kHz and a source that hears the tube" });
+    makeThroatSelect(c, { field: "gyutoH1", label: "Gyuto: F1 on harmonic", numeric: true, options: rangeOptions(3, 8) });
+    makeThroatSelect(c, { field: "gyutoH2", label: "Gyuto: F2 on harmonic", numeric: true, options: rangeOptions(6, 16) });
+    const melodyOptions = keyedOptions(MELODIES).concat([["custom", "custom…"]]);
+    throatInputs.melodySelect = makeSelect(c, { label: "Overtone melody", options: melodyOptions, value: "", onInput: chooseMelody });
+    const wrap = document.createElement("div");
+    wrap.className = "control";
+    const label = document.createElement("label");
+    const name = document.createElement("span");
+    name.textContent = "Harmonics (custom)";
+    label.appendChild(name);
+    const text = document.createElement("input");
+    text.type = "text";
+    text.placeholder = "6 8 9 10 12";
+    text.className = "text-input";
+    text.addEventListener("change", typedMelody);
+    wrap.appendChild(label);
+    wrap.appendChild(text);
+    c.appendChild(wrap);
+    throatInputs.melodyText = text;
+    makeThroatSlider(c, { field: "melodyRate", label: "Melody speed", min: 0.3, max: 6, step: 0.05, format: fmtSteps });
+    makeThroatSelect(c, { field: "melodyOffset", label: "Melody starts", numeric: true, options: [["0", "on step 1"], ["-1", "1 step late"], ["-2", "2 steps late"], ["-3", "3 steps late"], ["-4", "4 steps late"], ["2", "2 steps early"]], title: "Offset against other monks: a canon" });
+    makeThroatSelect(c, { field: "ornament", label: "Ornament", options: keyedOptions(ORNAMENTS) });
+    makeThroatSlider(c, { field: "ornRate", label: "Ornament rate", min: 0, max: 1, step: 0.005, format: formatOrnRate, fromUi: ornRateFromUi, toUi: ornRateToUi, title: "Trill 5–9 Hz, gallop 2–3 Hz, lip flutter and tongue trill 15–30 Hz" });
+    makeThroatSlider(c, { field: "ornDepth", label: "Ornament depth", min: 0, max: 1, step: 0.01, format: fmtPercent });
+    makeThroatSlider(c, { field: "phrase", label: "Breathe every", min: 0, max: 15, step: 0.1, format: fmtPhrase, fromUi: phraseFromUi, title: "Phrase length; the singer stops, takes an audible in-breath and starts again with the overtone climbing into place" });
+    makeThroatSlider(c, { field: "breathGap", label: "Breath length", min: 0.3, max: 2, step: 0.05, format: fmtSeconds });
+    makeThroatSelect(c, { field: "pattern", label: "Breath game", options: keyedOptions(PATTERNS), title: "Short motifs on the out-breath and the in-breath, voiced and breathed" });
+    makeThroatSlider(c, { field: "patternRate", label: "Game speed", min: 2, max: 12, step: 0.1, format: fmtSteps });
+    makeThroatSelect(c, { field: "patternOffset", label: "Game starts", numeric: true, options: [["0", "on step 1"], ["1", "1 step later"], ["2", "2 steps later"], ["3", "3 steps later"]], title: "Offset against a partner" });
+}
+
+function phraseFromUi(v) {
+    if (v < 0.5) {
+        return 0.0;
+    }
+    return v;
+}
+
+function formatOrnRate(u) {
+    return ornRateFromUi(u).toFixed(1) + " Hz";
+}
+
+function chooseMelody(v) {
+    if (v === "custom") {
+        throatInputs.melodyText.focus();
+        return;
+    }
+    setThroatField("melody", v);
+}
+
+function typedMelody() {
+    setThroatField("melody", throatInputs.melodyText.value.trim());
+}
+
+function applyStyle(key) {
+    const cfg = selectedSinger();
+    if (cfg === undefined || STYLES[key] === undefined) {
+        return;
+    }
+    // a style starts from an ordinary throat, so nothing carries over
+    const plain = makeSingerConfig(cfg.type, "chest", 0);
+    const reset = ["register", "tuning", "ventRatio", "press", "gyutoH1", "gyutoH2", "melody", "melodyRate", "melodyOffset", "ornament", "ornRate", "ornDepth", "phrase", "breathGap", "pattern", "patternRate", "patternOffset", "larynx", "epilarynx"];
+    for (let i = 0; i < reset.length; i = i + 1) {
+        cfg[reset[i]] = plain[reset[i]];
+    }
+    const set = STYLES[key].set;
+    const fields = Object.keys(set);
+    for (let i = 0; i < fields.length; i = i + 1) {
+        cfg[fields[i]] = set[fields[i]];
+    }
+    throatInputs.style.value = "";
+    pushConfig();
+    buildSingerTable();
+}
+
+function refreshThroat(cfg) {
+    const fields = Object.keys(throatInputs);
+    for (let i = 0; i < fields.length; i = i + 1) {
+        const t = throatInputs[fields[i]];
+        if (t.spec === undefined) {
+            continue;
+        }
+        let v = cfg[t.spec.field];
+        if (t.spec.toUi !== undefined) {
+            v = t.spec.toUi(v);
+        }
+        t.input.value = String(v);
+        if (!t.select) {
+            const out = t.input.parentElement.querySelector("output");
+            out.textContent = t.spec.format(Number(t.input.value));
+        }
+    }
+    const custom = MELODIES[cfg.melody] === undefined;
+    throatInputs.melodySelect.value = custom ? "custom" : cfg.melody;
+    throatInputs.melodyText.value = custom ? cfg.melody : MELODIES[cfg.melody].steps.join(" ");
+    const harmonicLine = isHarmonicTuning(cfg.tuning);
+    showControl(throatInputs.gyutoH1.input, cfg.tuning === "gyuto");
+    showControl(throatInputs.gyutoH2.input, cfg.tuning === "gyuto");
+    showControl(throatInputs.melodySelect, harmonicLine);
+    showControl(throatInputs.melodyText, harmonicLine);
+    showControl(throatInputs.melodyRate.input, harmonicLine && cfg.melody !== "");
+    showControl(throatInputs.melodyOffset.input, harmonicLine && cfg.melody !== "");
+    showControl(throatInputs.ornRate.input, cfg.ornament !== "none");
+    showControl(throatInputs.ornDepth.input, cfg.ornament !== "none");
+    showControl(throatInputs.breathGap.input, cfg.phrase >= 0.5);
+    showControl(throatInputs.patternRate.input, cfg.pattern !== "none");
+    showControl(throatInputs.patternOffset.input, cfg.pattern !== "none");
+}
+
+function showControl(input, on) {
+    input.parentElement.classList.toggle("hidden", !on);
+}
+
 // Show the selected monk's settings; following controls show the ensemble's value.
 function refreshMonkPanel() {
     const cfg = selectedSinger();
@@ -1058,6 +1283,7 @@ function refreshMonkPanel() {
         c.input.value = String(v);
         c.out.textContent = spec.format(Number(c.input.value));
     }
+    refreshThroat(cfg);
 }
 
 // ------------------------------------------------------------------ pad
@@ -1713,6 +1939,8 @@ const inspectAreas = new Float64Array(SECTIONS);
 const inspectSeg = {};
 const inspectCurve = new Float64Array(240);
 const inspectSlots = makeFormantSlots(4);
+const inspectNasal = new Float64Array(64);
+const inspectBranch = makeBranchShape();
 
 function drawInspector() {
     if (state.mode !== "choir") {
@@ -1752,7 +1980,33 @@ function drawInspector() {
     drawTube(L, art);
     const maxHz = 4000;
     responseCurve(inspectAreas, tickRate, 0.95, pole, maxHz, inspectCurve.length, inspectCurve);
-    const found = findFormants(inspectAreas, tickRate, 0.95, pole, maxHz, 3, inspectSlots);
+    if (art.velum > 0.02) {
+        // velum open: the whole branched tube, heard at lips plus nostrils
+        const nc = nasalAreas(anatomy, inspectSeg, inspectNasal);
+        const nosePole = radiationPole(Math.sqrt(inspectNasal[nc - 1] / Math.PI), tickRate, SPEED_OF_SOUND);
+        prepareBranch(inspectBranch, inspectAreas, nc, inspectNasal, velumJunction(inspectSeg), velumArea(anatomy, art), pole, nosePole, 0.95);
+        for (let i = 0; i < inspectCurve.length; i = i + 1) {
+            const f = Math.max(1.0, maxHz * i / (inspectCurve.length - 1));
+            inspectCurve[i] = branchMagnitudeDb(inspectBranch, f, tickRate);
+        }
+    }
+    drawMouthMap(cfg, tel);
+    let nasalPeaks = -1;
+    if (art.velum > 0.02) {
+        nasalPeaks = 0;
+        for (let i = 2; i < inspectCurve.length - 1 && nasalPeaks < 3; i = i + 1) {
+            if (inspectCurve[i] > inspectCurve[i - 1] && inspectCurve[i] >= inspectCurve[i + 1]) {
+                inspectSlots[nasalPeaks].f = maxHz * i / (inspectCurve.length - 1);
+                nasalPeaks = nasalPeaks + 1;
+            }
+        }
+    }
+    let found = 0;
+    if (nasalPeaks < 0) {
+        found = findFormants(inspectAreas, tickRate, 0.95, pole, maxHz, 3, inspectSlots);
+    } else {
+        found = nasalPeaks;
+    }
     let f0 = 0;
     if (tel !== null) {
         f0 = tel.f0;
@@ -1770,7 +2024,11 @@ function drawInspector() {
         ["Open quotient", tel !== null ? tel.oq.toFixed(2) : reg.oq.toFixed(2)],
         ["Half tone", tel !== null ? Math.round(tel.vent * 100) + "%" : Math.round(reg.vent * 100) + "%"],
         ["Vowel orbit", tel !== null && tel.oscRate > 0 && (state.globals["osc.depth"] > 0 || state.globals["osc.round"] > 0) ? (1 / tel.oscRate).toFixed(2) + " s period" : "still"],
-        ["Tuning", TUNINGS[cfg.tuning] + (cfg.tuning === "overtone" || cfg.tuning === "sygyt" ? " #" + state.globals.harmonic : "")]
+        ["Tuning", TUNINGS[cfg.tuning] + (cfg.tuning === "gyuto" ? " (" + cfg.gyutoH1 + " / " + cfg.gyutoH2 + ")" : "")],
+        ["Overtone", tel !== null && isHarmonicTuning(cfg.tuning) && f0 > 0 ? "#" + tel.harmonic + (tel.mapSub > 1 ? " of f0/" + tel.mapSub : "") + " = " + (tel.harmonic * f0 / Math.max(1, tel.mapSub)).toFixed(0) + " Hz" : "—"],
+        ["Ventricular", tel !== null && tel.vent > 0.05 ? ["", "in step", "sub-octave", "sub-twelfth"][tel.ventRatio] + " · " + Math.round(tel.vent * 100) + "%" : "still"],
+        ["Breath", tel === null ? "—" : (tel.direction > 0 ? "out" : "in") + (tel.voicing < 0.5 ? ", breath only" : "") + (tel.breathing ? " · breathing" : "")],
+        ["Mouth map", isMapTuning(cfg.tuning) ? (tel !== null && !tel.mapReady ? "learning…" : "known") : "—"]
     ];
     const dl = $("readout");
     dl.innerHTML = "";
@@ -1887,11 +2145,11 @@ function drawSpectrum(maxHz, f0, tel, cfg) {
     // tuning targets
     const targets = [];
     if (f0 > 20) {
-        if (cfg.tuning === "overtone" || cfg.tuning === "sygyt") {
-            targets.push(state.globals.harmonic * f0);
+        if (isHarmonicTuning(cfg.tuning) && tel !== null) {
+            targets.push(tel.harmonic * f0 / Math.max(1, tel.mapSub));
         } else if (cfg.tuning === "gyuto") {
-            targets.push(5 * f0);
-            targets.push(10 * f0);
+            targets.push(cfg.gyutoH1 * f0);
+            targets.push(cfg.gyutoH2 * f0);
         } else if (cfg.tuning === "r1") {
             targets.push(1.1 * f0);
         }
@@ -1910,6 +2168,90 @@ function drawSpectrum(maxHz, f0, tel, cfg) {
     for (let f = 0; f <= maxHz; f = f + 1000) {
         ctx.fillText(f === 0 ? "0" : (f / 1000) + " kHz", Math.min(w - 34, xOf(f) + 2), h - 4);
     }
+}
+
+// ------------------------------------------------------------------ the singer's mouth map
+
+const pageMap = { key: "", map: null, singer: null };
+
+const MAP_AXES = {
+    labial: ["lips: round → spread", "tongue: back → front"],
+    nasal: ["tongue: back → front", "hidden mouth: small → large"],
+    throat: ["tongue root: low → high", "mouth: small → open"],
+    vowel: ["vowel: ooh → eeh", ""]
+};
+
+// Build (once per body and gesture) the same map the singer uses, and show
+// how strongly the current harmonic stands out over the gesture plane.
+function drawMouthMap(cfg, tel) {
+    const fig = $("map-figure");
+    if (!isMapTuning(cfg.tuning)) {
+        fig.classList.add("hidden");
+        return;
+    }
+    fig.classList.remove("hidden");
+    const key = cfg.type + "|" + cfg.lengthScale + "|" + cfg.tuning + "|" + cfg.larynx.toFixed(1) + "|" + cfg.epilarynx.toFixed(1);
+    if (pageMap.key !== key) {
+        const singer = new Singer(48000, anatomyFor(Object.assign(makeSingerConfig(cfg.type, cfg.register, 0), cfg)), cfg.register, 1);
+        singer.tuning = cfg.tuning;
+        singer.epilarynx = cfg.epilarynx;
+        singer.larynxTarget = cfg.larynx;
+        singer.updateMap();
+        while (!singer.map.ready()) {
+            singer.map.buildRow(singer);
+        }
+        pageMap.key = key;
+        pageMap.map = singer.map;
+        pageMap.singer = singer;
+    }
+    const map = pageMap.map;
+    const canvas = $("mouthmap");
+    const ctx = fitCanvas(canvas);
+    const w = canvas.clientWidth;
+    const h = canvas.clientHeight;
+    ctx.clearRect(0, 0, w, h);
+    let f0 = 110.0;
+    let n = state.globals.harmonic;
+    let sub = 1;
+    if (tel !== null) {
+        if (tel.f0 > 20) {
+            f0 = tel.f0;
+        }
+        n = tel.harmonic;
+        sub = Math.max(1, tel.mapSub);
+    }
+    const fs = f0 / sub;
+    const nb = map.stepsB;
+    const left = 30;
+    const bottom = h - 22;
+    const cw = (w - left - 8) / MAP_STEPS;
+    const ch = (bottom - 8) / nb;
+    for (let ia = 0; ia < MAP_STEPS; ia = ia + 1) {
+        for (let ib = 0; ib < nb; ib = ib + 1) {
+            const sc = map.score(ia * nb + ib, fs, n);
+            const t = Math.max(0, Math.min(1, (sc + 5) / 30));
+            ctx.fillStyle = "rgba(233,162,59," + (0.06 + 0.9 * t).toFixed(3) + ")";
+            ctx.fillRect(left + ia * cw, bottom - (ib + 1) * ch, cw + 0.5, ch + 0.5);
+        }
+    }
+    if (tel !== null && tel.pathQ !== undefined) {
+        const x = left + tel.pathQ * (MAP_STEPS - 1) * cw + 0.5 * cw;
+        const y = bottom - (nb > 1 ? tel.pathQB * (nb - 1) : 0) * ch - 0.5 * ch;
+        ctx.strokeStyle = "#6fb59a";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(x, y, 6, 0, Math.PI * 2);
+        ctx.stroke();
+    }
+    ctx.fillStyle = "rgba(239,228,207,0.65)";
+    ctx.font = "11px Georgia, serif";
+    ctx.fillText(MAP_AXES[cfg.tuning][0], left, h - 6);
+    ctx.save();
+    ctx.translate(14, bottom);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillText(MAP_AXES[cfg.tuning][1], 0, 0);
+    ctx.restore();
+    $("map-caption").textContent = "Where harmonic #" + n + (sub > 1 ? " of f0/" + sub : "") + " (" + (n * fs).toFixed(0) + " Hz) stands out over its neighbours, by mouth shape (brighter = stronger). The ring is where the singer's mouth is now.";
 }
 
 // ------------------------------------------------------------------ decomposition table

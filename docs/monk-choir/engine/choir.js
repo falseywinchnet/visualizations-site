@@ -5,10 +5,11 @@
 // independent glottal jitter, vibrato, pitch wander and onsets, whose small
 // disagreements are what a real choir sounds like.
 
-import { Singer, CONTROL_BLOCK, hzToNote } from "./singer.js?v=7c9b69f214";
+import { Singer, CONTROL_BLOCK, hzToNote } from "./singer.js?v=35ae215bb8";
 import { makeAnatomy, VOICE_TYPES } from "./anatomy.js?v=9500908dbe";
-import { REGISTERS } from "./glottis.js?v=e11d9ec07d";
+import { REGISTERS } from "./glottis.js?v=44e6be78ce";
 import { CLASSIC_BODY } from "./vowels.js?v=260f005eba";
+import { parseMelody, PATTERNS, isHarmonicTuning } from "./throat.js?v=91c87f0f27";
 
 export const MAX_SINGERS = 24;
 
@@ -52,8 +53,24 @@ export function makeSingerConfig(type, register, interval) {
         octave: "auto",           // "auto" folds into the singer's range, or a number of octaves
         pan: 0.0,
         level: 1.0,
-        tuning: "none",           // none | r1 | overtone | sygyt | gyuto
+        tuning: "none",           // none | r1 | overtone | sygyt | gyuto | labial | nasal | throat | vowel
         harmonic: 10,
+        // throat mechanics (throat.js, glottis.js)
+        ventRatio: 2,             // glottal cycles per ventricular cycle: 1 in step, 2 sub-octave, 3 sub-twelfth
+        press: 0.0,               // 0..1 longer closed phase, faster sealing, no leak
+        gyutoH1: 5,               // Gyuto chord: harmonic for F1
+        gyutoH2: 10,              // and for F2
+        melody: "",               // MELODIES key or harmonic numbers ("6 8 9 10")
+        melodyRate: 2.0,          // steps per second
+        melodyOffset: 0,          // steps (canon between singers)
+        ornament: "none",         // none | trill | flutter | tip | gallop
+        ornRate: 6.0,             // Hz
+        ornDepth: 0.6,
+        phrase: 0.0,              // seconds per breath (0: never breathes)
+        breathGap: 0.7,           // seconds
+        pattern: "none",          // PATTERNS key: breath game
+        patternRate: 6.0,         // steps per second
+        patternOffset: 0,         // steps
         vibratoRate: 5.2,
         vibratoDepth: 0.2,        // semitones
         detune: 0.0,              // cents
@@ -71,7 +88,7 @@ export function makeSingerConfig(type, register, interval) {
         oscPhase: null,
         oscShape: null,
         // per-monk overrides of the ensemble controls (null: follow the ensemble)
-        own: { vowel: null, hum: null, halftone: null, effort: null, vibrato: null, orbitDepth: null, orbitRate: null },
+        own: { vowel: null, hum: null, halftone: null, effort: null, vibrato: null, orbitDepth: null, orbitRate: null, harmonic: null },
         // pitch: "follow" (played note + interval), "lock" (its own note),
         // "key" (follows, snapped into its own key)
         pitchMode: "follow",
@@ -294,6 +311,11 @@ export class Choir {
         } else {
             m.cfg[field] = value;
         }
+        if (field === "larynx") {
+            m.singer.larynxTarget = value;
+        } else if (field === "epilarynx") {
+            m.singer.epilarynx = value;
+        }
         this.applyGlobals(m.singer, m.cfg);
         if (field === "pitchMode" || field === "lockNote" || field === "drone" || field === "keyTonic" || field === "keyMode") {
             this.retarget(false);
@@ -360,18 +382,27 @@ export class Choir {
         this.applyOscillator(singer, cfg);
         singer.bend = this.bend;
         singer.glideRate = 1.0 / Math.max(this.glide, 0.005) * 2.0;
-        if (cfg.tuning === "overtone" || cfg.tuning === "sygyt") {
+        if (own.harmonic !== null && own.harmonic !== undefined) {
+            singer.harmonic = own.harmonic;
+        } else if (isHarmonicTuning(cfg.tuning)) {
             singer.harmonic = this.harmonic;
+        } else {
+            singer.harmonic = cfg.harmonic;
         }
+        this.applyThroat(singer, cfg);
         const base = REGISTERS[cfg.register].vent;
         const half = own.halftone !== null && own.halftone !== undefined ? own.halftone : this.halftone;
         singer.sourceTarget.vent = Math.max(base, half);
         const effort = own.effort !== null && own.effort !== undefined ? own.effort : cfg.effort * this.effortScale;
         singer.effort = Math.min(1.0, effort);
+        // Only touch vibrato when this monk has (or just lost) its own value,
+        // so a song's timed vibrato changes survive other global changes.
         if (own.vibrato !== null && own.vibrato !== undefined) {
             singer.vibratoDepth = own.vibrato;
-        } else {
+            singer.vibratoOwned = true;
+        } else if (singer.vibratoOwned === true) {
             singer.vibratoDepth = cfg.vibratoDepth;
+            singer.vibratoOwned = false;
         }
     }
 
@@ -382,6 +413,40 @@ export class Choir {
             }
         }
         return this.members.length;
+    }
+
+    // Register, press, ventricular ratio, tuning targets and the performance
+    // layer (melody, ornaments, breathing, breath game) for one singer.
+    applyThroat(singer, cfg) {
+        if (singer.registerKey !== cfg.register) {
+            singer.setRegister(cfg.register);
+        }
+        singer.tuning = cfg.tuning;
+        const reg = REGISTERS[cfg.register];
+        const press = Math.max(0.0, Math.min(1.0, cfg.press));
+        const t = singer.sourceTarget;
+        t.oq = reg.oq * (1.0 - 0.35 * press);
+        t.qa = reg.qa * (1.0 - 0.6 * press);
+        t.leak = reg.leak * (1.0 - press);
+        t.breath = reg.breath * (1.0 - 0.5 * press);
+        t.ventRatio = cfg.ventRatio;
+        singer.gyutoH1 = cfg.gyutoH1;
+        singer.gyutoH2 = cfg.gyutoH2;
+        if (singer.melodyText !== cfg.melody) {
+            singer.melodyText = cfg.melody;
+            singer.melody = parseMelody(cfg.melody);
+        }
+        singer.melodyRate = cfg.melodyRate;
+        singer.melodyOffset = cfg.melodyOffset;
+        singer.ornament = cfg.ornament;
+        singer.ornRate = cfg.ornRate;
+        singer.ornDepth = cfg.ornDepth;
+        singer.phrase = cfg.phrase;
+        singer.breathGap = cfg.breathGap;
+        const pattern = PATTERNS[cfg.pattern];
+        singer.pattern = pattern !== undefined ? pattern.steps : PATTERNS.none.steps;
+        singer.patternRate = cfg.patternRate;
+        singer.patternOffset = cfg.patternOffset;
     }
 
     applyOscillator(singer, cfg) {
@@ -702,7 +767,9 @@ export class Choir {
                 velum: s.art.velum, length: s.length, F1: s.measuredF1, F2: s.measuredF2,
                 vent: s.source.vent, oq: s.source.oq, gate: s.gate,
                 tipPos: s.art.tipPos, tipClose: s.art.tipClose, epilarynx: s.art.epilarynx, larynx: s.art.larynx,
-                tuning: s.tuning, harmonic: s.harmonic,
+                tuning: s.tuning, harmonic: s.harmonicEff, direction: s.source.direction, voicing: s.source.voicing,
+                breathing: s.breathing, mapReady: s.map.ready(), mapSub: s.mapSub, ventRatio: s.source.ventRatio,
+                pathQ: s.pathQ, pathQB: s.pathQB,
                 vowel: s.vowelEff, oscRate: s.oscRate, oscValue: s.oscValue, hum: s.hum
             });
         }

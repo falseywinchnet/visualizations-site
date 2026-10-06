@@ -13,7 +13,20 @@
 //
 // Ventricular folds (dzo-ke, kargyraa): the false folds above the glottis
 // vibrate at half the glottal rate and partially occlude every second pulse.
-// This is the physical origin of the sub-octave ("half") tone.
+// This is the physical origin of the sub-octave ("half") tone. ventRatio sets
+// how many glottal cycles one ventricular cycle spans: 2 is the sub-octave
+// (kargyraa, the Sardinian bassu), 1 has both pairs of folds moving in step
+// (a doubled, harder pulse, as reported for the Sardinian contra), 3 gives
+// a sub-twelfth (the fundamental divided by three).
+//
+// Direction: +1 is ordinary exhaled voice. -1 is voice on the in-breath
+// (ingressive), as in Inuit breath games: the flow reverses and, in this
+// model, the pulse is mirrored in time (the folds are pushed apart from
+// above, so they open abruptly and close gradually), with more turbulence
+// and less stable cycles. The mirrored pulse is our modelling assumption.
+//
+// Voicing 0..1 scales the vibrating pulse; without it the folds stand apart
+// and the breath is only turbulence (the "h" of a whispered or breathed step).
 //
 // The glottal opening also sets the reflection at the glottal end of the
 // tract: while the folds are open, acoustic energy leaks into the trachea, so
@@ -30,11 +43,15 @@ export const REGISTERS = {
     fry: { label: "Strohbass / fry", oq: 0.28, skew: 0.8, qa: 0.03, leak: 0.0, breath: 0.02, jitter: 0.04, shimmer: 0.15, vent: 0.3 }
 };
 
+// Extra turbulence when the folds stand apart (breath-only steps).
+export const UNVOICED_BREATH = 0.35;
+
 export function makeVoiceSource(registerKey) {
     const r = REGISTERS[registerKey];
     return {
         oq: r.oq, skew: r.skew, qa: r.qa, leak: r.leak, breath: r.breath,
-        jitter: r.jitter, shimmer: r.shimmer, vent: r.vent
+        jitter: r.jitter, shimmer: r.shimmer, vent: r.vent,
+        ventRatio: 2, direction: 1.0, voicing: 1.0
     };
 }
 
@@ -47,6 +64,9 @@ export function copyVoiceSource(src, dst) {
     dst.jitter = src.jitter;
     dst.shimmer = src.shimmer;
     dst.vent = src.vent;
+    dst.ventRatio = src.ventRatio;
+    dst.direction = src.direction;
+    dst.voicing = src.voicing;
     return dst;
 }
 
@@ -54,6 +74,7 @@ export class Glottis {
     constructor(seed) {
         this.phase = 0.0;
         this.parity = 0;
+        this.cycleCount = 0;  // glottal cycles, for the ventricular ratio
         this.cycleRate = 1.0;   // jitter factor for this cycle
         this.cycleAmp = 1.0;    // shimmer factor for this cycle
         this.returnState = 0.0;
@@ -81,16 +102,22 @@ export class Glottis {
 
     startCycle(src) {
         this.parity = 1 - this.parity;
-        this.cycleRate = 1.0 + src.jitter * this.gaussianish();
-        this.cycleAmp = 1.0 + src.shimmer * this.gaussianish();
-        // The ventricular folds also pull alternate glottal cycles early and
-        // late: a second route to the sub-octave.
-        if (src.vent > 0.0) {
-            if (this.parity === 1) {
-                this.cycleRate = this.cycleRate * (1.0 + 0.06 * src.vent);
-            } else {
-                this.cycleRate = this.cycleRate * (1.0 - 0.06 * src.vent);
-            }
+        const ratio = src.ventRatio >= 1 ? src.ventRatio : 2;
+        this.cycleCount = (this.cycleCount + 1) % 6;
+        let jitter = src.jitter;
+        let shimmer = src.shimmer;
+        if (src.direction < 0.0) {
+            jitter = jitter * 2.5;
+            shimmer = shimmer * 1.8;
+        }
+        this.cycleRate = 1.0 + jitter * this.gaussianish();
+        this.cycleAmp = 1.0 + shimmer * this.gaussianish();
+        // The ventricular folds also pull the glottal cycles within one of
+        // their own cycles early and late: a second route to the
+        // sub-harmonic. (With ratio 2 this alternates exactly as before.)
+        if (src.vent > 0.0 && ratio > 1) {
+            const k = this.cycleCount % ratio;
+            this.cycleRate = this.cycleRate * (1.0 + 0.06 * src.vent * Math.cos(2.0 * Math.PI * (k + 1) / ratio));
         }
     }
 
@@ -104,24 +131,37 @@ export class Glottis {
         }
         const p = this.phase;
         const oq = src.oq;
-        const tOpen = oq * src.skew;
         let u = 0.0;
-        if (p < tOpen) {
-            u = 0.5 * (1.0 - Math.cos(Math.PI * p / tOpen));
-        } else if (p < oq) {
-            u = Math.cos(0.5 * Math.PI * (p - tOpen) / (oq - tOpen));
+        if (src.direction >= 0.0) {
+            const tOpen = oq * src.skew;
+            if (p < tOpen) {
+                u = 0.5 * (1.0 - Math.cos(Math.PI * p / tOpen));
+            } else if (p < oq) {
+                u = Math.cos(0.5 * Math.PI * (p - tOpen) / (oq - tOpen));
+            }
+        } else {
+            // in-breath: the same pulse mirrored in time
+            const tSnap = oq * (1.0 - src.skew);
+            if (p < tSnap) {
+                u = Math.sin(0.5 * Math.PI * p / tSnap);
+            } else if (p < oq) {
+                u = 0.5 * (1.0 + Math.cos(Math.PI * (p - tSnap) / (oq - tSnap)));
+            }
         }
         if (src.vent > 0.0) {
-            const half = 0.5 * (this.parity + p);
-            const s = Math.sin(Math.PI * half);
+            const ratio = src.ventRatio >= 1 ? src.ventRatio : 2;
+            const position = ((this.cycleCount % ratio) + p) / ratio;
+            const s = Math.sin(Math.PI * position);
             u = u * (1.0 - src.vent * s * s);
         }
+        u = u * src.voicing;
         // Louder phonation seals the folds faster.
         const qa = src.qa * (1.45 - 0.9 * effort);
         const ta = Math.max(qa / f0, 1.0 / tickRate);
         const a = Math.exp(-1.0 / (ta * tickRate));
         this.returnState = (1.0 - a) * u + a * this.returnState;
-        const opening = this.returnState + src.leak;
+        // Unvoiced: the folds stand apart and the breath streams through.
+        const opening = this.returnState + src.leak + 0.35 * (1.0 - src.voicing);
         this.opening = opening;
         // Turbulence at the glottis, scaled by the flow through it. It is
         // shaped to fall above ~2.5 kHz; the mouth's radiation lifts it back
@@ -131,8 +171,12 @@ export class Glottis {
         // shaping and level as the HDR voice; see .dev/test_hdr.mjs.)
         const white = this.random() * 2.0 - 1.0;
         this.noiseLow = this.noiseLow + (white - this.noiseLow) * (1.0 - Math.exp(-2.0 * Math.PI * 2500.0 / tickRate));
-        const noise = this.noiseLow * src.breath * 0.2 * (0.2 + opening);
-        this.flow = amp * this.cycleAmp * (opening + noise);
+        let breath = src.breath + UNVOICED_BREATH * (1.0 - src.voicing);
+        if (src.direction < 0.0) {
+            breath = breath * 1.8;
+        }
+        const noise = this.noiseLow * breath * 0.2 * (0.2 + opening);
+        this.flow = src.direction * amp * this.cycleAmp * (opening + noise);
         let r = 0.985 - 0.6 * opening;
         if (r < 0.35) {
             r = 0.35;

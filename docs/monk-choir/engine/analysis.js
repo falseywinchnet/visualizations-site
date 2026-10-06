@@ -17,7 +17,7 @@
 // tests/ checks this against the impulse response of the time-domain tract.
 
 import { SECTIONS } from "./anatomy.js?v=9500908dbe";
-import { SECTION_LOSS, LIP_REFLECTION, junctionCoefficient } from "./tract.js?v=711fe62fc7";
+import { SECTION_LOSS, LIP_REFLECTION, junctionCoefficient } from "./tract.js?v=44afeabdc1";
 
 // Scratch, reused by every call (single-threaded use).
 const RHO = new Float64Array(SECTIONS + 1);

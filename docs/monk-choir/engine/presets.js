@@ -1,7 +1,7 @@
 // Ensemble presets. Each singer differs by body, register, key offset and
 // small personal habits; nothing is a transposed copy of another.
 
-import { makeSingerConfig } from "./choir.js?v=a5cd9f934a";
+import { makeSingerConfig } from "./choir.js?v=44ddd35ca9";
 
 function singer(type, register, interval, extra) {
     const c = makeSingerConfig(type, register, interval);
@@ -95,6 +95,111 @@ export const PRESETS = [
         voicing: "stack",
         hall: { mix: 0.25, rt60: 3.0, damping: 0.35 },
         singers: [singer("baritone", "pressed", 0, { octave: 0, tuning: "sygyt", vibratoDepth: 0.0, effort: 0.9, driftCents: 2.0, epilarynx: 0.6, level: 4.0 })]
+    },
+    {
+        id: "borbangnadyr",
+        name: "Borbangnadyr (rolling)",
+        note: "Khöömei whose tongue rocks the resonance between two neighbouring harmonics, so the overtone rolls. A herder's call walks over the drone.",
+        pad: "harmonic",
+        voicing: "stack",
+        hall: { mix: 0.22, rt60: 2.6, damping: 0.4 },
+        singers: [singer("baritone", "pressed", 0, { octave: 0, tuning: "overtone", press: 0.5, ornament: "trill", ornRate: 7.0, ornDepth: 1.0, melody: "call", melodyRate: 1.0, vibratoDepth: 0.0, effort: 0.85, driftCents: 2.0, epilarynx: 0.6, level: 3.0 })]
+    },
+    {
+        id: "ezengileer",
+        name: "Ezengileer (stirrup)",
+        note: "The lips round three times and rest, like hooves: the whistle pulses in a gallop while the melody ripples.",
+        pad: "harmonic",
+        voicing: "stack",
+        hall: { mix: 0.22, rt60: 2.6, damping: 0.4 },
+        singers: [singer("baritone", "pressed", 0, { octave: 0, tuning: "overtone", press: 0.5, ornament: "gallop", ornRate: 2.2, ornDepth: 0.7, melody: "ripple", melodyRate: 1.1, vibratoDepth: 0.0, effort: 0.85, driftCents: 2.0, epilarynx: 0.6, level: 3.0 })]
+    },
+    {
+        id: "chylandyk",
+        name: "Chylandyk (whistle over growl)",
+        note: "Ventricular sub-octave below, a sygyt whistle above: three layers from one throat.",
+        pad: "harmonic",
+        voicing: "stack",
+        hall: { mix: 0.24, rt60: 2.8, damping: 0.4 },
+        singers: [singer("baritone", "ventricular", 0, { octave: 0, tuning: "sygyt", ventRatio: 2, press: 0.5, melody: "high", melodyRate: 1.2, vibratoDepth: 0.0, effort: 0.9, driftCents: 2.0, epilarynx: 0.6, level: 9.0 })]
+    },
+    {
+        id: "dumchuktaar",
+        name: "Dumchuktaar (through the nose)",
+        note: "Lips sealed, velum open. The tongue reshapes the hidden mouth cavity and the overtone comes out of the nose. Tuned from the singer's own map of mouth shapes.",
+        pad: "harmonic",
+        voicing: "stack",
+        hall: { mix: 0.24, rt60: 2.8, damping: 0.4 },
+        singers: [singer("baritone", "pressed", 0, { octave: 0, tuning: "nasal", press: 0.5, melody: "rise", melodyRate: 1.0, vibratoDepth: 0.0, effort: 0.85, driftCents: 2.0, level: 3.0 })]
+    },
+    {
+        id: "uruulyn",
+        name: "Uruulyn (labial)",
+        note: "The lips tune: a small round opening for low overtones, spread for high ones.",
+        pad: "harmonic",
+        voicing: "stack",
+        hall: { mix: 0.24, rt60: 2.8, damping: 0.4 },
+        singers: [singer("baritone", "pressed", 0, { octave: 0, tuning: "labial", press: 0.5, melody: "rise", melodyRate: 1.4, vibratoDepth: 0.0, effort: 0.85, driftCents: 2.0, level: 2.4 })]
+    },
+    {
+        id: "kargyraa-walk",
+        name: "Kargyraa vowel walk",
+        note: "The melody lives on harmonics of the sub-octave. The vowel walks onto them: even ones ring out, odd ones (true sub-harmonics) are subtler.",
+        pad: "harmonic",
+        voicing: "stack",
+        hall: { mix: 0.22, rt60: 2.5, damping: 0.45 },
+        singers: [singer("bass", "ventricular", 0, { octave: 0, tuning: "vowel", ventRatio: 2, press: 0.3, melody: "walk", melodyRate: 1.2, phrase: 7.0, breathGap: 0.9, vibratoDepth: 0.0, effort: 0.9, driftCents: 2.0, larynx: -0.4, level: 1.6 })]
+    },
+    {
+        id: "overtone-canon",
+        name: "Overtone canon",
+        note: "Three throat singers on one drone, each with a different gesture (tongue, lips, nose), singing the same overtone line two steps apart.",
+        pad: "harmonic",
+        voicing: "stack",
+        hall: { mix: 0.3, rt60: 3.4, damping: 0.4 },
+        singers: spread([
+            singer("baritone", "pressed", 0, { octave: 0, tuning: "overtone", press: 0.5, melody: "descent", melodyRate: 1.5, melodyOffset: 0, phrase: 9.0, vibratoDepth: 0.0, effort: 0.85, epilarynx: 0.6, level: 2.2 }),
+            singer("baritone", "pressed", 0, { octave: 0, tuning: "labial", press: 0.5, melody: "descent", melodyRate: 1.5, melodyOffset: -2, phrase: 9.0, vibratoDepth: 0.0, effort: 0.85, level: 2.4 }),
+            singer("bass", "pressed", 0, { octave: 0, tuning: "nasal", press: 0.5, melody: "descent", melodyRate: 1.5, melodyOffset: -4, phrase: 9.0, vibratoDepth: 0.0, effort: 0.85, level: 3.0 })
+        ])
+    },
+    {
+        id: "tenore",
+        name: "Four throats (Sardinian tenore)",
+        note: "Bassu with its folds dividing the pitch to a sub-octave; contra a fifth above with both pairs of folds in step; mesu boghe and boghe above in ordinary voice.",
+        pad: "vowel",
+        voicing: "stack",
+        hall: { mix: 0.18, rt60: 1.8, damping: 0.5 },
+        singers: spread([
+            singer("bass", "ventricular", 0, { octave: 0, ventRatio: 2, press: 0.3, larynx: -0.3, vibratoDepth: 0.02, effort: 0.85, level: 1.4 }),
+            singer("baritone", "ventricular", 7, { octave: 0, ventRatio: 1, press: 0.5, vibratoDepth: 0.02, effort: 0.85, level: 1.2 }),
+            singer("tenor", "chest", 12, { octave: 0, vibratoDepth: 0.08, effort: 0.7 }),
+            singer("tenor", "chest", 16, { octave: 0, vibratoDepth: 0.12, effort: 0.75, level: 1.2 })
+        ])
+    },
+    {
+        id: "split-tone",
+        name: "Split-tone women (umngqokolo)",
+        note: "Women singing with the ventricular sub-octave and an overtone line on top: a lower, rough tone split from a high whistle.",
+        pad: "harmonic",
+        voicing: "stack",
+        hall: { mix: 0.24, rt60: 2.4, damping: 0.45 },
+        singers: spread([
+            singer("alto", "ventricular", 0, { octave: 0, tuning: "overtone", ventRatio: 2, press: 0.5, melody: "call", melodyRate: 1.2, vibratoDepth: 0.0, effort: 0.85, epilarynx: 0.6, level: 4.8 }),
+            singer("mezzo", "ventricular", 0, { octave: 0, tuning: "overtone", ventRatio: 2, press: 0.5, melody: "call", melodyRate: 1.2, melodyOffset: -4, vibratoDepth: 0.0, effort: 0.85, epilarynx: 0.6, level: 4.8 })
+        ])
+    },
+    {
+        id: "breath-game",
+        name: "Breath game (in and out)",
+        note: "Two women face to face trade short motifs on the out-breath and the in-breath, voiced and breathed, one step apart, in the manner of Inuit katajjaq. Hold a note.",
+        pad: "vowel",
+        voicing: "stack",
+        hall: { mix: 0.12, rt60: 1.2, damping: 0.5 },
+        singers: [
+            singer("alto", "head", 0, { octave: 0, pan: -0.5, pattern: "rolling", patternRate: 6.5, patternOffset: 0, vibratoDepth: 0.0, attack: 0.02, release: 0.08, level: 2.6 }),
+            singer("mezzo", "head", 0, { octave: 0, pan: 0.5, pattern: "rolling", patternRate: 6.5, patternOffset: 2, vibratoDepth: 0.0, attack: 0.02, release: 0.08, level: 2.6 })
+        ]
     },
     {
         id: "schola",

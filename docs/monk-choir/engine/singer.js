@@ -13,16 +13,27 @@
 //   sygyt   tongue tip sealed behind the teeth; the tongue body moves the
 //           clustered F2/F3 resonance onto n * F0
 //   gyuto   low chant: jaw puts F1 on the 5th harmonic, tongue puts F2 on the
-//           10th (the emphasis reported for Gyuto chant)
+//           10th (the emphasis reported for Gyuto chant; both selectable)
+//   labial, nasal, throat, vowel
+//           map tuners (throat.js): the singer knows which shape along a
+//           gesture makes harmonic n stand out, through lips and nose, and
+//           moves there. vowel walks the vowel line onto harmonics of the
+//           ventricular sub-harmonic (kargyraa).
+//
+// Performance layer (updatePerformance): a harmonic melody, ornaments (a
+// harmonic trill, lip flutter, a tongue-tip trill, a galloping lip pulse),
+// breathing phrases with an audible in-breath, and breath-game patterns that
+// alternate exhaled and inhaled, voiced and breathed steps.
 
 import {
     SECTIONS, SPEED_OF_SOUND, MAX_NASAL_SECTIONS, makeArticulation, copyArticulation,
     areaFunction, nasalAreas, velumJunction, velumArea, lipRadius, ARTICULATION_KEYS, VOICE_TYPES
 } from "./anatomy.js?v=9500908dbe";
-import { Tract, radiationPole, SECTION_LOSS } from "./tract.js?v=711fe62fc7";
-import { Glottis, makeVoiceSource, copyVoiceSource } from "./glottis.js?v=e11d9ec07d";
-import { scanPeaks } from "./analysis.js?v=887637021b";
+import { Tract, radiationPole, SECTION_LOSS } from "./tract.js?v=44afeabdc1";
+import { Glottis, makeVoiceSource, copyVoiceSource } from "./glottis.js?v=44e6be78ce";
+import { scanPeaks } from "./analysis.js?v=2458f8cf6f";
 import { VOWEL_SHAPES } from "./vowels.js?v=260f005eba";
+import { MouthMap, LABIAL_PLANE, NASAL_PLANE, THROAT_PLANE, stepsB, isMapTuning, isHarmonicTuning } from "./throat.js?v=91c87f0f27";
 
 export const CONTROL_BLOCK = 64;
 const FIT_KEYS = ["tonguePos", "tongueHeight", "jaw", "lipAperture", "lipProtrusion"];
@@ -203,6 +214,50 @@ export class Singer {
         this.tuneCounter = seed % 4; // stagger the analysis across singers
         this.measuredF1 = 0.0;
         this.measuredF2 = 0.0;
+        this.gyutoH1 = 5;
+        this.gyutoH2 = 10;
+        this.harmonicEff = 8;
+        // mouth-map tuner
+        this.map = new MouthMap();
+        this.mapTarget = 0.5;
+        this.mapTargetB = 0.5;
+        this.pathQB = 0.5;
+        this.planeLow = makeArticulation();
+        this.planeHigh = makeArticulation();
+        this.mapSub = 1;
+        this.mapTuning = "";
+        this.mapAnatomy = null;
+        this.mapLarynx = 0.0;
+        this.mapEpilarynx = 0.0;
+        this.tongueTau = 0.045;
+        // the shape the tuners listen to (before ornaments are added)
+        this.artTune = makeArticulation();
+        this.tuneAreas = new Float64Array(SECTIONS);
+        this.tuneSeg = { pharynx: 0, oral: 0, lips: 0, total: 0 };
+        // performance layer
+        this.melody = [];
+        this.melodyText = "";
+        this.melodyRate = 2.0;    // steps per second
+        this.melodyOffset = 0;    // steps
+        this.melodyTime = 0.0;
+        this.ornament = "none";
+        this.ornRate = 6.0;       // Hz
+        this.ornDepth = 0.5;
+        this.ornPhase = 0.0;
+        this.phrase = 0.0;        // seconds sung before each breath (0: never breathe)
+        this.breathGap = 0.7;     // seconds the breath takes
+        this.phraseTime = 0.0;
+        this.pattern = [];
+        this.patternRate = 6.0;   // steps per second
+        this.patternOffset = 0;   // steps
+        this.patternTime = 0.0;
+        this.perfGain = 1.0;
+        this.perfGainSmooth = 1.0;
+        this.noteOffset = 0.0;
+        this.dirTarget = 1.0;
+        this.voicingTarget = 1.0;
+        this.vowelOverride = -1.0;
+        this.breathing = false;
 
         this.note = 48.0;
         this.noteTarget = 48.0;
@@ -210,6 +265,7 @@ export class Singer {
         this.bend = 0.0;
         this.vibratoRate = 5.2;
         this.vibratoDepth = 0.25; // semitones
+        this.vibratoOwned = false;
         this.vibratoPhase = (seed % 997) / 997.0;
         this.vibratoOnset = 0.0;
         this.drift = 0.0;
@@ -364,11 +420,20 @@ export class Singer {
             this.base.velum = 0.0;
         } else if (this.tuning === "sygyt") {
             mixInto(this.base, SYGYT_PATH[0], SYGYT_PATH[1], this.pathQ);
+        } else if (isMapTuning(this.tuning)) {
+            const tk = 1.0 - Math.exp(-dt / this.tongueTau);
+            this.pathQ = this.pathQ + (this.mapTarget - this.pathQ) * tk;
+            this.pathQB = this.pathQB + (this.mapTargetB - this.pathQB) * tk;
+            this.pathArticulation(this.pathQ, this.pathQB, this.base);
         } else if (this.posture !== null) {
             copyArticulation(this.posture, this.base);
         } else {
             this.advanceOscillator(dt);
-            this.vowelEff = clamp(this.vowel + this.oscDepth * this.oscValue, 0.0, 1.0);
+            let v = this.vowel;
+            if (this.vowelOverride >= 0.0) {
+                v = this.vowelOverride;
+            }
+            this.vowelEff = clamp(v + this.oscDepth * this.oscValue, 0.0, 1.0);
             vowelArticulation(this.vowelEff, this.base);
             if (this.oscRound > 0.0) {
                 // quarter cycle out of phase with the vowel axis: an ellipse
@@ -415,6 +480,190 @@ export class Singer {
         if (this.velumOpen > 0.001) {
             this.art.velum = Math.max(this.art.velum, 0.9 * this.velumOpen);
         }
+        if (this.ornament === "flutter" || this.ornament === "tip" || this.ornament === "gallop") {
+            copyArticulation(this.art, this.artTune);
+            this.applyOrnament();
+        }
+    }
+
+    // Articulation at point (qa, qb) of this singer's map-tuning plane.
+    pathArticulation(qa, qb, out) {
+        let plane = null;
+        if (this.tuning === "labial") {
+            plane = LABIAL_PLANE;
+        } else if (this.tuning === "nasal") {
+            plane = NASAL_PLANE;
+        } else if (this.tuning === "throat") {
+            plane = THROAT_PLANE;
+        }
+        if (plane !== null) {
+            mixInto(this.planeLow, plane[0], plane[1], qa);
+            mixInto(this.planeHigh, plane[2], plane[3], qa);
+            mixInto(out, this.planeLow, this.planeHigh, qb);
+        } else {
+            vowelArticulation(qa, out);
+            out.tipPos = 0.88;
+            out.tipClose = 0.0;
+            out.velum = 0.0;
+        }
+        out.epilarynx = this.epilarynx;
+        out.larynx = this.larynxTarget;
+        return out;
+    }
+
+    // Fast articulator ornaments, laid on top of the sung shape. The tuners
+    // keep listening to the shape without them (artTune).
+    applyOrnament() {
+        const d = this.ornDepth;
+        const ph = this.ornPhase;
+        if (this.ornament === "flutter") {
+            // the lips flap shut and apart
+            const c = 0.5 + 0.5 * Math.cos(2.0 * Math.PI * ph);
+            this.art.lipAperture = Math.max(0.012, this.art.lipAperture * (1.0 - d * Math.pow(c, 1.5)));
+        } else if (this.ornament === "tip") {
+            // the tongue tip taps the ridge behind the teeth
+            const c = 0.5 + 0.5 * Math.cos(2.0 * Math.PI * ph);
+            this.art.tipPos = 0.9;
+            this.art.tipClose = Math.max(this.art.tipClose, 0.95 * d * c * c);
+        } else if (this.ornament === "gallop") {
+            // three quick lip-roundings and a rest, like hooves
+            let g = 0.0;
+            for (let k = 0; k < 3; k = k + 1) {
+                const x = (ph - 0.16 * k) / 0.045;
+                g = g + Math.exp(-x * x);
+            }
+            this.art.lipAperture = clamp(this.art.lipAperture * (1.0 - 0.7 * d * g), 0.02, 1.0);
+            this.art.lipProtrusion = clamp(this.art.lipProtrusion + 0.5 * d * g, 0.0, 1.0);
+        }
+    }
+
+    // Melody, ornaments, phrases and breath patterns: what the singer does
+    // over time while the note is held. Sets harmonicEff, noteOffset,
+    // perfGain, the breath direction and voicing, and a vowel override.
+    updatePerformance(dt) {
+        let gain = 1.0;
+        let harmonic = this.harmonic;
+        let dir = 1.0;
+        let voicing = 1.0;
+        let offset = 0.0;
+        let vowel = -1.0;
+        if (this.gate) {
+            this.melodyTime = this.melodyTime + dt;
+            this.phraseTime = this.phraseTime + dt;
+            this.patternTime = this.patternTime + dt;
+        } else if (this.envelope < 0.01) {
+            this.melodyTime = 0.0;
+            this.phraseTime = 0.0;
+            this.patternTime = 0.0;
+        }
+        const harmonicLine = isHarmonicTuning(this.tuning);
+        if (harmonicLine && this.melody.length > 0) {
+            const pos = Math.floor(this.melodyTime * this.melodyRate + this.melodyOffset);
+            const idx = ((pos % this.melody.length) + this.melody.length) % this.melody.length;
+            harmonic = this.melody[idx];
+        }
+        this.ornPhase = this.ornPhase + this.ornRate * dt;
+        this.ornPhase = this.ornPhase - Math.floor(this.ornPhase);
+        if (this.ornament === "trill" && harmonicLine && this.ornPhase < 0.5 * this.ornDepth) {
+            harmonic = harmonic + 1;
+        }
+        this.breathing = false;
+        if (this.phrase > 0.0) {
+            const cycle = this.phrase + this.breathGap;
+            const t = this.phraseTime % cycle;
+            if (t >= this.phrase) {
+                // the breath: a moment's silence, an audible in-breath, silence
+                const g = (t - this.phrase) / Math.max(this.breathGap, 0.05);
+                gain = 0.0;
+                if (g > 0.2 && g < 0.85) {
+                    dir = -1.0;
+                    voicing = 0.0;
+                    gain = 0.15 * Math.sin(Math.PI * (g - 0.2) / 0.65);
+                }
+                this.breathing = true;
+            } else if (harmonicLine && t < 0.3) {
+                // each phrase starts low and the overtone climbs into place
+                harmonic = Math.max(2, harmonic - Math.round(3.0 * (1.0 - t / 0.3)));
+            }
+        }
+        if (this.pattern.length > 0) {
+            const pos = this.patternTime * this.patternRate + this.patternOffset;
+            const whole = Math.floor(pos);
+            const frac = pos - whole;
+            const len = this.pattern.length;
+            const step = this.pattern[((whole % len) + len) % len];
+            // The mouth, pitch and breath move to the new step only once the
+            // gap at its start has gone quiet; until then the last step holds.
+            let shapeStep = step;
+            if (frac < 0.08) {
+                shapeStep = this.pattern[(((whole - 1) % len) + len) % len];
+            }
+            if (shapeStep.r !== 1) {
+                dir = shapeStep.d;
+                voicing = shapeStep.v;
+                offset = shapeStep.p;
+                vowel = shapeStep.w;
+            } else {
+                dir = this.source.direction;
+                voicing = this.voicingTarget;
+                offset = this.noteOffset;
+                vowel = this.vowelOverride;
+            }
+            if (step.r === 1) {
+                gain = 0.0;
+            } else {
+                let e = 1.0;
+                if (frac < 0.12) {
+                    e = 0.0;
+                } else if (frac < 0.24) {
+                    e = (frac - 0.12) / 0.12;
+                } else if (frac > 0.85) {
+                    e = (1.0 - frac) / 0.15;
+                }
+                if (voicing < 0.5) {
+                    e = e * 1.6;  // a breathed step is pushed harder
+                }
+                gain = gain * e;
+            }
+        }
+        this.harmonicEff = Math.max(2, harmonic);
+        this.noteOffset = offset;
+        this.vowelOverride = vowel;
+        this.voicingTarget = voicing;
+        // The breath turns round only in silence.
+        if (dir !== this.source.direction) {
+            if (this.perfGainSmooth < 0.03) {
+                this.source.direction = dir;
+            } else {
+                gain = 0.0;
+            }
+        }
+        this.perfGain = gain;
+        let tau = 0.025;
+        if (this.pattern.length > 0) {
+            tau = 0.008;
+        }
+        this.perfGainSmooth = this.perfGainSmooth + (gain - this.perfGainSmooth) * (1.0 - Math.exp(-dt / tau));
+        const vk = 1.0 - Math.exp(-dt / 0.01);
+        this.source.voicing = this.source.voicing + (this.voicingTarget - this.source.voicing) * vk;
+    }
+
+    // Keep the mouth map current for this body, gesture and throat.
+    updateMap() {
+        if (!isMapTuning(this.tuning)) {
+            return;
+        }
+        if (this.tuning !== this.mapTuning || this.anatomy !== this.mapAnatomy ||
+            Math.abs(this.larynxTarget - this.mapLarynx) > 0.08 || Math.abs(this.epilarynx - this.mapEpilarynx) > 0.08) {
+            this.mapTuning = this.tuning;
+            this.mapAnatomy = this.anatomy;
+            this.mapLarynx = this.larynxTarget;
+            this.mapEpilarynx = this.epilarynx;
+            this.map.restart(this.tuning, stepsB(this.tuning));
+        }
+        if (!this.map.ready()) {
+            this.map.buildRow(this);
+        }
     }
 
     advanceOscillator(dt) {
@@ -442,9 +691,28 @@ export class Singer {
         if (this.hum > 0.15 || this.stopLip > 0.15 || this.stopTip > 0.15 || this.velumOpen > 0.15) {
             return;
         }
-        const rate = this.tickRate;
-        const pole = radiationPole(lipRadius(this.areas), rate, SPEED_OF_SOUND);
-        const found = scanPeaks(this.areas, rate, 0.95, pole, 90.0, 3000.0, 35.0, this.peaks, 4);
+        if (isMapTuning(this.tuning)) {
+            let sub = 1;
+            if (this.tuning === "vowel" && this.source.vent > 0.3) {
+                sub = this.source.ventRatio;
+            }
+            this.mapSub = sub;
+            this.map.choose(this.f0 / sub, this.harmonicEff, this.mapTarget, this.mapTargetB);
+            this.mapTarget = this.map.chosenA;
+            this.mapTargetB = this.map.chosenB;
+            this.r1Mix = this.r1Mix * Math.exp(-dt / 0.15);
+            this.tuneLip = this.tuneLip * Math.exp(-dt / 0.15);
+            return;
+        }
+        let areas = this.areas;
+        let rate = this.tickRate;
+        if (this.ornament === "flutter" || this.ornament === "tip" || this.ornament === "gallop") {
+            const L = areaFunction(this.anatomy, this.artTune, this.tuneAreas, this.tuneSeg);
+            areas = this.tuneAreas;
+            rate = SECTIONS * SPEED_OF_SOUND / L;
+        }
+        const pole = radiationPole(lipRadius(areas), rate, SPEED_OF_SOUND);
+        const found = scanPeaks(areas, rate, 0.95, pole, 90.0, 3000.0, 35.0, this.peaks, 4);
         if (found < 2) {
             return;
         }
@@ -457,12 +725,12 @@ export class Singer {
             const e = Math.log(1.1 * f0 / f1);
             this.r1Mix = clamp(this.r1Mix + 0.8 * e * gain, 0.0, 1.0);
         } else if (this.tuning === "overtone" || this.tuning === "sygyt") {
-            const e = Math.log(this.harmonic * f0 / f2);
+            const e = Math.log(this.harmonicEff * f0 / f2);
             this.pathQ = clamp(this.pathQ + 0.6 * e * gain, 0.0, 1.0);
         } else if (this.tuning === "gyuto") {
-            const e2 = Math.log(10.0 * f0 / f2);
+            const e2 = Math.log(this.gyutoH2 * f0 / f2);
             this.pathQ = clamp(this.pathQ + 0.8 * e2 * gain, 0.0, 1.0);
-            const e1 = Math.log(5.0 * f0 / f1);
+            const e1 = Math.log(this.gyutoH1 * f0 / f1);
             this.tuneLip = clamp(this.tuneLip + 0.5 * e1 * gain, -0.45, 0.45);
         }
     }
@@ -491,7 +759,7 @@ export class Singer {
         const gaussian = (this.rand() + this.rand() + this.rand() - 1.5) * 2.0;
         this.drift = this.drift - this.drift * dt / tau + this.driftCents * Math.sqrt(2.0 * dt / tau) * gaussian;
         const cents = this.detune + this.drift;
-        this.f0 = noteToHz(this.note + this.bend + vib + cents / 100.0);
+        this.f0 = noteToHz(this.note + this.noteOffset + this.bend + vib + cents / 100.0);
     }
 
     updateEnvelope(dt) {
@@ -520,6 +788,7 @@ export class Singer {
         s.jitter = t.jitter;
         s.shimmer = t.shimmer;
         s.vent = s.vent + (t.vent - s.vent) * k;
+        s.ventRatio = t.ventRatio;
     }
 
     // Recompute the tube for this control block and hand it to the tract.
@@ -545,9 +814,11 @@ export class Singer {
     render(outL, outR, offset, n) {
         const dt = n / this.sampleRate;
         this.updateEnvelope(dt);
+        this.updatePerformance(dt);
         this.updatePitch(dt);
         this.updateSource(dt);
         this.updateArticulation(dt);
+        this.updateMap();
         this.tuneCounter = this.tuneCounter + 1;
         if (this.tuneCounter >= 4) {
             this.tuneFormants(dt * 4.0);
@@ -559,7 +830,7 @@ export class Singer {
         // A closed mouth with a closed velum lets pressure build above the
         // glottis, so the flow through the folds (and the voicing) drops.
         const occlusion = Math.max(this.stopLip, this.stopTip) * (1.0 - this.art.velum);
-        const amp = this.envelope * (0.35 + 0.65 * this.velocityOrOne()) * (0.4 + 0.9 * this.effort) * (1.0 - 0.9 * occlusion);
+        const amp = this.envelope * this.perfGainSmooth * (0.35 + 0.65 * this.velocityOrOne()) * (0.4 + 0.9 * this.effort) * (1.0 - 0.9 * occlusion);
         // Behind a seal the yielding walls absorb the trapped pressure.
         this.tract.loss = SECTION_LOSS * (1.0 - 0.006 * occlusion);
         const glottis = this.glottis;

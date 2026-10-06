@@ -350,7 +350,7 @@ tr.selected td { background: rgba(233, 162, 59, 0.08); }
 
 figure { margin: 0; }
 
-#tube, #spectrum {
+#tube, #spectrum, #mouthmap {
   width: 100%;
   height: 150px;
   display: block;
@@ -617,3 +617,24 @@ figcaption {
 }
 
 .pitch-badge.own { color: var(--saffron); }
+
+.throat {
+  margin-top: 12px;
+}
+
+.throat summary {
+  cursor: pointer;
+  color: var(--paper);
+  margin-bottom: 8px;
+}
+
+.text-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--ink-3);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 4px 6px;
+  color: var(--paper);
+  font: inherit;
+}

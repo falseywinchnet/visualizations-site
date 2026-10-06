@@ -29,8 +29,8 @@
 //                the folds press harder; the small cycle jitter that remains
 //                is no longer the main source of life.
 
-import { Singer, CONTROL_BLOCK } from "./singer.js?v=7c9b69f214";
-import { Tract, SECTION_LOSS } from "./tract.js?v=711fe62fc7";
+import { Singer, CONTROL_BLOCK } from "./singer.js?v=35ae215bb8";
+import { Tract, SECTION_LOSS } from "./tract.js?v=44afeabdc1";
 import { SECTIONS, SPEED_OF_SOUND, S_VELUM } from "./anatomy.js?v=9500908dbe";
 
 export const LAYERS = ["interaction", "noise", "impact", "crossmodes", "living", "subglottal", "walls", "inertia"];
