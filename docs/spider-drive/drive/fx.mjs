@@ -14,7 +14,7 @@ function atlas(){const c=document.createElement('canvas');c.width=256;c.height=6
  // 3 flame tongue
  gr=g.createRadialGradient(224,40,1,224,36,30);gr.addColorStop(0,'rgba(255,255,255,1)');gr.addColorStop(.35,'rgba(255,255,255,.8)');gr.addColorStop(1,'rgba(255,255,255,0)');g.fillStyle=gr;g.beginPath();g.ellipse(224,36,18,28,0,0,Math.PI*2);g.fill();
  const t=new T.CanvasTexture(c);t.colorSpace=T.SRGBColorSpace;return t;}
-class Pool{
+export class Pool{
  constructor(scene,tex,n,additive){
   this.n=n;const g=new T.InstancedBufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute([-.5,-.5,0,.5,-.5,0,.5,.5,0,-.5,.5,0],3));g.setIndex([0,1,2,0,2,3]);
   this.p=new Float32Array(n*3);this.c=new Float32Array(n*4);this.s=new Float32Array(n*3);// size, rotation, frame
@@ -60,7 +60,10 @@ void main(){
     this.c[i*4]=1;this.c[i*4+1]=mix(.85,.25,t);this.c[i*4+2]=mix(.4,.02,t);}
   }
   this.count=n;this.g.instanceCount=n;
-  for(const a of ['ip','ic','is']){const at=this.g.attributes[a];at.needsUpdate=true;at.addUpdateRange?.(0,n*at.itemSize);}
+  // No live instances means no vertex data is consumed. In WebGL's typed
+  // array upload overload, a zero-length range can mean the entire buffer.
+  // Replace stale ranges (including frames the mesh was not rendered).
+  for(const a of ['ip','ic','is']){const at=this.g.attributes[a];at.clearUpdateRanges();if(n>0){at.addUpdateRange(0,n*at.itemSize);at.needsUpdate=true;}}
  }
 }
 export class FX{

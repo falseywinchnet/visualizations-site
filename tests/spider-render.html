@@ -1,0 +1,50 @@
+<!doctype html><meta charset="utf-8"><title>Spider rendering equivalence</title>
+<script type="importmap">{"imports":{"three":"../docs/spider-drive/vendor/three.module.js"}}</script>
+<style>body{background:#172019;color:#e6eee7;font:15px system-ui;padding:24px}button{padding:12px}pre{white-space:pre-wrap}canvas{max-width:100%}</style>
+<h1>Rendering equivalence and cost checks</h1><p>Same vehicle, materials, geometry, camera, lights, shadows, resolution and post-processing. Compares redundant bloom depth attachments and zero-intensity lamp participation. Timings include a GPU finish and are test-scene measurements, not game FPS.</p>
+<button id="run">Run GPU comparisons</button><pre id="results">Ready</pre><div id="view"></div>
+<script type="module">
+import * as T from 'three';
+import {Post} from '../docs/spider-drive/drive/post.mjs';
+import {SpiderModel} from '../docs/spider-drive/drive/vehicle.mjs';
+import {Spider} from '../docs/spider-drive/drive/physics.mjs';
+const output=document.querySelector('#results'),button=document.querySelector('#run');
+const median=a=>a.sort((x,y)=>x-y)[a.length>>1];
+button.onclick=async()=>{
+ button.disabled=true;output.textContent='Building test scene…';const records=[];let renderer;
+ try{
+  renderer=new T.WebGLRenderer({antialias:false,logarithmicDepthBuffer:true,preserveDrawingBuffer:true});renderer.shadowMap.enabled=true;renderer.shadowMap.type=T.PCFSoftShadowMap;renderer.toneMapping=T.ACESFilmicToneMapping;renderer.toneMappingExposure=.65;renderer.info.autoReset=false;
+  document.querySelector('#view').replaceChildren(renderer.domElement);
+  const scene=new T.Scene();scene.background=new T.Color(.12,.17,.22);const camera=new T.PerspectiveCamera(52,1.6,.2,2000);camera.position.set(20,13,28);camera.lookAt(0,3,0);
+  scene.add(new T.HemisphereLight(0xaabbdd,0x53452e,1.2));const sun=new T.DirectionalLight(0xffddbb,4);sun.position.set(20,40,30);sun.castShadow=true;sun.shadow.mapSize.set(1024,1024);Object.assign(sun.shadow.camera,{left:-35,right:35,top:35,bottom:-35,far:150});scene.add(sun);
+  const ground=new T.Mesh(new T.PlaneGeometry(200,200,32,32),new T.MeshStandardMaterial({color:0x697d48,roughness:.9}));ground.rotation.x=-Math.PI/2;ground.receiveShadow=true;scene.add(ground);
+  const model=new SpiderModel(),sp=new Spider({ground:()=>0,normal:()=>[0,1,0],surface:()=>({}),obstacles:()=>[]});scene.add(model.root);model.update(sp,0,{headlights:true,worklights:true});
+  const lamps=model.lampMounts.map(m=>{const l=new T.SpotLight(0xfff0d6,0,140,m.angle,.55,1.1),target=new T.Object3D();l.position.set(...m.pos);target.position.set(...m.aim);m.parent.add(l,target);l.target=target;l.userData.power=m.power;return l;});
+  const gl=renderer.getContext();const draw=post=>{renderer.info.reset();post.frame(0,scene,camera);gl.finish();};
+  const capture=()=>{const s=renderer.getDrawingBufferSize(new T.Vector2()),a=new Uint8Array(s.x*s.y*4);gl.readPixels(0,0,s.x,s.y,gl.RGBA,gl.UNSIGNED_BYTE,a);return a;};
+  for(const quality of ['low','medium','high']){
+   const ratio=quality==='high'?1.75:quality==='medium'?1.4:1;renderer.setPixelRatio(ratio);renderer.setSize(480,300);
+   const post=new Post(renderer,scene,camera,{quality});post.setSize(480,300);const targets=[post.bloom.renderTargetBright,...post.bloom.renderTargetsHorizontal,...post.bloom.renderTargetsVertical];
+   for(const lightsOn of [false,true]){
+    const run=async (depth,includeOffLamps)=>{
+     for(const rt of targets){rt.dispose();rt.depthBuffer=depth;}
+     for(const l of lamps){l.intensity=lightsOn?420*l.userData.power:0;l.visible=includeOffLamps||lightsOn;}
+     for(let i=0;i<4;i++){draw(post);await new Promise(requestAnimationFrame);}
+     const times=[];for(let i=0;i<12;i++){const start=performance.now();draw(post);times.push(performance.now()-start);await new Promise(requestAnimationFrame);}
+     return {pixels:capture(),ms:median(times),calls:renderer.info.render.calls,triangles:renderer.info.render.triangles};
+    };
+    const before=await run(true,true),depthOnly=await run(false,true),after=await run(false,false);let differing=0,maxError=0,depthDiffering=0;
+    for(let i=0;i<before.pixels.length;i++)if(before.pixels[i]!==depthOnly.pixels[i])depthDiffering++;
+    for(let i=0;i<before.pixels.length;i++){const d=Math.abs(before.pixels[i]-after.pixels[i]);if(d)differing++;maxError=Math.max(maxError,d);}
+    const row={quality,lightsOn,pixelRatio:ratio,lamps:lamps.length,differingChannels:differing,depthDifferingChannels:depthDiffering,maxChannelError:maxError,beforeMs:+before.ms.toFixed(2),afterMs:+after.ms.toFixed(2),calls:after.calls,triangles:after.triangles,unusedDepthPixels:quality==='low'?0:targets.reduce((n,rt)=>n+rt.width*rt.height,0)};
+    records.push(row);output.textContent=JSON.stringify(records,null,2);
+    // Changing the light-count shader variant can round a few channels by
+    // one 8-bit step. Depth-only removal must remain exactly identical.
+    if(depthDiffering||maxError>1||differing>before.pixels.length*.0001||before.calls!==after.calls||before.triangles!==after.triangles)throw Error('Rendering changed: '+JSON.stringify(row));
+   }
+   post.composer.dispose();post.bloom.dispose();post.clean.dispose();post.grade.dispose();for(const pass of post.composer.passes)if(pass.constructor.name==='OutputPass')pass.dispose();
+  }
+  output.textContent='ALL GPU COMPARISONS PASSED\n'+JSON.stringify(records,null,2);
+ }catch(e){output.textContent+='\nFAIL: '+e.stack;console.error(e);}finally{renderer?.dispose();button.disabled=false;}
+};
+</script>

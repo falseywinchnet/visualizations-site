@@ -168,15 +168,19 @@ export class Vegetation{
   const la=Math.min(1,150/Math.max(1e-6,Math.hypot(this._vel[0],this._vel[1])*3));/* at most 150 m ahead */
   const ax=cam.x+this._vel[0]*3*la,az=cam.z+this._vel[1]*3*la;
   const cx=Math.floor(ax/CHUNK),cz=Math.floor(az/CHUNK),rT=Math.ceil(this.Rt/CHUNK),rN=Math.ceil(Math.max(this.Rg,this.Rc)/CHUNK)+2;
-  // request chunks, nearest first, limited in flight
-  const req=[];for(let j=-rT;j<=rT;j++)for(let i=-rT;i<=rT;i++){const d=Math.hypot(i,j)*CHUNK;if(d>this.Rt+CHUNK)continue;const k=this.key(cx+i,cz+j);if(!this.chunks.has(k)&&!this.pendingF.has(k))req.push([d,cx+i,cz+j,k,false]);}
-  for(let j=-rN;j<=rN;j++)for(let i=-rN;i<=rN;i++){const k=this.key(cx+i,cz+j);if(!this.near.has(k)&&!this.pendingN.has(k))req.push([Math.hypot(i,j)*CHUNK-40,cx+i,cz+j,k,true]);}
-  req.sort((a,b)=>a[0]-b[0]);
+  // The request area changes only on a chunk boundary or quality change.
+  // Keep its sorted queue while workers finish; do not rescan thousands of
+  // map entries and sort the same missing chunks on every display frame.
+  if(!this._requests||cx!==this._requestX||cz!==this._requestZ||this.q!==this._requestQuality){
+   const req=[];for(let j=-rT;j<=rT;j++)for(let i=-rT;i<=rT;i++){const d=Math.hypot(i,j)*CHUNK;if(d>this.Rt+CHUNK)continue;const k=this.key(cx+i,cz+j);if(!this.chunks.has(k)&&!this.pendingF.has(k))req.push([d,cx+i,cz+j,k,false]);}
+   for(let j=-rN;j<=rN;j++)for(let i=-rN;i<=rN;i++){const k=this.key(cx+i,cz+j);if(!this.near.has(k)&&!this.pendingN.has(k))req.push([Math.hypot(i,j)*CHUNK-40,cx+i,cz+j,k,true]);}
+   req.sort((a,b)=>a[0]-b[0]);this._requests=req;this._requestCursor=0;this._requestX=cx;this._requestZ=cz;this._requestQuality=this.q;
+  }
   let inflight=this.pendingF.size+this.pendingN.size;
-  for(const [d,x,z,k,near] of req){if(inflight>=14)break;inflight++;(near?this.pendingN:this.pendingF).add(k);this.workers[this.rr++%this.workers.length].postMessage({type:'veg',key:k,cx:x,cz:z,nearOnly:near,far:!near});}
+  while(inflight<14&&this._requestCursor<this._requests.length){const [d,x,z,k,near]=this._requests[this._requestCursor++];const ready=near?this.near:this.chunks,pending=near?this.pendingN:this.pendingF;if(ready.has(k)||pending.has(k))continue;inflight++;pending.add(k);this.workers[this.rr++%this.workers.length].postMessage({type:'veg',key:k,cx:x,cz:z,nearOnly:near,far:!near});}
   // evict far chunks
-  if(this.chunks.size>1400)for(const [k] of this.chunks){const x=Math.floor(k/10007+.5),z=k-x*10007;if(Math.hypot(x-cx,z-cz)*CHUNK>this.Rt*1.4)this.chunks.delete(k);}
-  if(this.near.size>420)for(const [k] of this.near){const x=Math.floor(k/10007+.5),z=k-x*10007;if(Math.hypot(x-cx,z-cz)*CHUNK>Math.max(this.Rg,this.Rc)*1.6+CHUNK)this.near.delete(k);}
+  if(this.chunks.size>1400)for(const [k] of this.chunks){const x=Math.floor(k/10007+.5),z=k-x*10007;if(Math.hypot(x-cx,z-cz)*CHUNK>this.Rt*1.4){this.chunks.delete(k);this._requests=null;}}
+  if(this.near.size>420)for(const [k] of this.near){const x=Math.floor(k/10007+.5),z=k-x*10007;if(Math.hypot(x-cx,z-cz)*CHUNK>Math.max(this.Rg,this.Rc)*1.6+CHUNK){this.near.delete(k);this._requests=null;}}
   // rebuild instance buffers when moved or new data arrived
   const moved=Math.hypot(cam.x-this.last.x,cam.z-this.last.z);
   if(moved>10||(this.dirty&&(performance.now()-(this._lastBuild||0))>250)){this.rebuild(cam);this.last.copy(cam);this.dirty=false;this._lastBuild=performance.now();}

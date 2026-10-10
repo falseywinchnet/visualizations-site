@@ -225,7 +225,7 @@ function setView(v){G.view=v;body.dataset.view=v;body.dataset.cine=String(v==='c
 const tmpV=new T.Vector3(),tmpV2=new T.Vector3(),tmpQ=new T.Quaternion();
 let headOff=new T.Vector3();
 function cameraUpdate(dt,snap=false){
- const R=model.root;R.updateMatrixWorld();
+ const R=model.root;R.updateWorldMatrix(true,false);
  const target=R.localToWorld(tmpV.set(0,4.2,0)).clone();
  let fov=52,near=.25;
  if(G.view==='seat'){
@@ -322,7 +322,9 @@ function syncModel(dt){
  // mud and dust build up on soft ground; fording washes it off
  {const surf=spider.wheels[2].surface||{};const soil=(surf.soft||0)*(surf.name==='Mud'?3:1)+(surf.dust||0)*.3;model.dirt.value=clamp(model.dirt.value+dt*(soil*speed*.0025)-dt*(spider.wading||0)*.06-dt*(atmo?.weather==='rain'?.004:0),.05,1);}
  model.update(spider,dt,{lead:G.state==='drive'&&!G.paused?acc:0,headlights:G.lights,worklights:G.lights,beacons:G.mission?.beacons??false,braking:spider.ctl.brake,night:atmo?.night||0,ladder:!!G.ladder,groundY:gy,dirt:model.dirt.value,wet:spider.wading>.1?1:0,monitorAim:G.mission?.monitorAim});
- for(const h of heads)h.intensity=G.lights?420*h.userData.power:0;for(const b of beams)b.visible=G.lights&&(atmo?.night||0)>.3&&G.view!=='seat';
+ // Three still includes zero-intensity lights in every lit shader's light
+ // loop. Exclude switched-off lamps from that list; restore all when on.
+ for(const h of heads){h.visible=G.lights;h.intensity=G.lights?420*h.userData.power:0;}for(const b of beams)b.visible=G.lights&&(atmo?.night||0)>.3&&G.view!=='seat';
 }
 let last=performance.now(),acc=0,subK=0,hudT=0,missionT=0,fpsT=0,frames=0,fps=60,lowFps=0;
 function step(dt){

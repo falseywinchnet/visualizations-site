@@ -5,6 +5,14 @@ import {deckWidth} from './terrain.mjs';
 import {hash2,clamp,mix,rng} from './noise.mjs';
 
 const ROOT=32768,MAXL=9,NODE_N=64;// 64 m leaves at 1 m spacing (64x64 quads per node: a quarter of the draw calls of 32x32 nodes)
+const nodeKey=(l,i,j)=>l*1e8+i*1e4+j;
+export function pruneCoveredTerrain(show,nodes){
+ // A tile has at most MAXL ancestors. Look those up directly instead of
+ // comparing every visible tile with every other tile.
+ for(const k of show){const u=nodes.get(k).userData;let i=(u.x0+ROOT/2)/u.size,j=(u.z0+ROOT/2)/u.size;
+  for(let l=u.level-1;l>=0;l--){i>>=1;j>>=1;if(show.has(nodeKey(l,i,j))){show.delete(k);break;}}}
+ return show;
+}
 export class Scenery{
  constructor(scene,terrain,{texArray,waterNormals,workers,quality='medium',body=null}){
   this.scene=scene;this.t=terrain;this.w=terrain.w;this.workers=workers;this.quality=quality;this.body=body;this.off=!!(body&&body.id!=='earth');
@@ -17,7 +25,7 @@ export class Scenery{
   this.rr=0;
  }
  setQuality(q){this.quality=q;this.K=q==='low'?.65:q==='high'?.95:.8;}
- key(l,i,j){return l*1e8+i*1e4+j;}
+ key(l,i,j){return nodeKey(l,i,j);}
  _onNode(d){
   this.inflight--;const p=this.pending.get(d.key);this.pending.delete(d.key);if(!p)return;
   const g=new T.BufferGeometry();
@@ -52,8 +60,7 @@ export class Scenery{
    for(let L=l-1,I=i>>1,J=j>>1;L>=0;L--,I>>=1,J>>=1){const ak=this.key(L,I,J);if(this.nodes.has(ak)){show.add(ak);found=true;break;}}
    if(!found)for(const v of this.visible){const u=this.nodes.get(v)?.userData;if(u&&u.level>l&&u.x0>=-ROOT/2+i*(ROOT/2**l)&&u.x0<-ROOT/2+(i+1)*(ROOT/2**l)&&u.z0>=-ROOT/2+j*(ROOT/2**l)&&u.z0<-ROOT/2+(j+1)*(ROOT/2**l))show.add(v);}
   }
-  // remove descendants shown under a shown ancestor
-  for(const k of [...show]){const u=this.nodes.get(k).userData;for(const k2 of show){if(k2===k)continue;const v=this.nodes.get(k2).userData;if(v.level>u.level&&v.x0>=u.x0&&v.x0<u.x0+u.size&&v.z0>=u.z0&&v.z0<u.z0+u.size){show.delete(k2);}}}
+  pruneCoveredTerrain(show,this.nodes);
   for(const k of this.visible)if(!show.has(k)){const m=this.nodes.get(k);if(m)m.visible=false;}
   for(const k of show){const m=this.nodes.get(k);m.visible=true;m.userData.used=this.frame;}
   this.visible=show;
