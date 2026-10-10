@@ -3,7 +3,7 @@
 // world record the Earth generator does (drive/worldgen.mjs), so terrain, scenery, map and missions
 // read it unchanged; the body-specific parts ride in `body`, `biomeLabels`, `biomeRGB`, `craters`,
 // `rangeOut` and the site and building types. Pure JS: runs in the worker and in Node.
-import {Noise,rng,hash2,clamp,mix,smoothstep} from './noise.mjs';
+import {Noise,rng,hash2,clamp,mix,smooth,smoothstep} from './noise.mjs';
 import {GENERATOR_VERSION,WORLD,bilinear} from './worldgen.mjs';
 
 const {half,N,cell}=WORLD;
@@ -90,9 +90,43 @@ export function generateMoon(seed,onProgress=()=>{}){
 }
 
 // ------------------------------------------------------------------ Mars
+// The basal escarpment of Olympus Mons, one analytic surface shared by the map and the terrain beyond it (so the
+// two meet seamlessly). The real scarp rings the volcano's 600 km base, 2 to 8 km high and steepest on the
+// north-west; here it is ~6 km high and climbs at 25-30 deg on average over ~11 km: a talus apron at the foot,
+// then the face, banded by the stacked lava sheets the volcano is built of (benches every ~600 m of height),
+// furrowed by spur-and-gully ribs that run down the dip, and recessed where giant landslides calved off it, each
+// scar fronted by hummocky debris lobes out on the plain (the aureole deposits). At one place younger flank flows
+// poured over the edge and buried it: a lava fan, a ramp of ~10-17 deg that runs from the plain to the crest. Above
+// the crest the shield's flank rises at ~5 deg toward a summit 22 km up and 300 km away.
+// P: {dir:[dx,dz], foot (m from the origin along dir), H, W, scallops:[{s,w,r}], fan:{s,w}}; nz: [Noise,Noise].
+export function marsScarp(x,z,P,nz){
+ const [a,b]=nz,dx=P.dir[0],dz=P.dir[1],along=x*dx+z*dz,strike=-x*dz+z*dx;
+ let foot=P.foot+a.fbm(strike/5200,.37,3)*650,deb=0;
+ for(const S of P.scallops){const q=(strike-S.s)/S.w;if(Math.abs(q)<1.4){const k=Math.max(0,1-q*q);foot+=S.r*k;/* recessed scar */
+   const dd=along-(P.foot-S.r*.1);const lob=Math.max(0,1-(q*q)/1.96)*smoothstep(-S.r*2.2,-200,dd)*smoothstep(S.r*.9,-100,dd);/* debris in front */
+   deb=Math.max(deb,lob*(90+60*b.ridged(strike/380,along/900,3))*(.7+.3*a.fbm(x/600,z/600,2)));}}
+ const H=P.H*(.86+.14*a.fbm(strike/9000,1.7,2)),W=P.W,d=along-foot;
+ let face=0,w=0;
+ if(d>0){const apron=1200;
+  if(d<apron){face=300*Math.pow(d/apron,1.6);w=d/apron*.4;}
+  else if(d<W){const u=(d-apron)/(W-apron),nb=9,k=u*nb+a.fbm(strike/3200,4.1,2)*.9+b.fbm(u*3,strike/9000,2)*.6,L=Math.floor(k),fr=k-L,bs=.55+.45*hash2(L,17),terr=(L+smooth(clamp((fr-.25-.3*bs)/(.75-.3*bs+.001),0,1)))/nb;/* lava sheets of uneven thickness, their ledges wandering along the face */
+   face=300+(H-300)*((1-.38*bs)*Math.pow(u,.92)+.38*bs*terr);w=Math.sin(Math.PI*Math.min(1,u*1.15))*.9+.1;}
+  else{face=H+(d-W)*.087;w=Math.max(0,.3-(d-W)/4000);}
+  // spur-and-gully: ribs and ravines running down the dip, strongest mid-face; and the face's rubble
+  face+=(b.ridged(strike/650,along/2600,3)-.55)*190*w+a.fbm(x/280,z/280,3)*24*w;}
+ // the lava fan: flows from the flank cascaded over the edge and buried it in a convex ramp onto the plain
+ if(P.fan){const q=Math.abs(strike-P.fan.s)/P.fan.w;if(q<1){const fw=smooth(clamp((1-q)/.55,0,1)),df=along-(P.foot-2000);
+   if(df>0){const L=W+2000+6000,u=Math.min(1,df/L),ramp=(H*Math.pow(u,1.3)+Math.max(0,df-L)*.087)*(1+.04*b.ridged(strike/140,along/700,2));/* steepening upward, lava-channel levees down it */
+    face=mix(face,Math.max(face*.15,ramp),fw);}}}
+ return Math.max(face,0)+deb;
+}
 export function generateMars(seed,onProgress=()=>{}){
  const R=rng(seed*7919+37),noise=new Noise(seed+910),n2=new Noise(seed+911);const M=N*N,h=new Float32Array(M);
  const sa=R()*Math.PI*2,sdx=Math.cos(sa),sdz=Math.sin(sa);/* toward the scarp */
+ const SP={dir:[sdx,sdz],foot:half*.6,H:6000,W:11000,scallops:[],fan:{s:(R()-.5)*half*.9,w:1900}};
+ for(let k=0;k<4;k++){const s=(R()-.5)*2*half*3;if(Math.abs(s-SP.fan.s)<5000)continue;SP.scallops.push({s,w:1800+R()*2400,r:900+R()*900});}
+ if(!SP.scallops.some(S=>Math.abs(S.s)<half)){const s=SP.fan.s>0?-half*.7:half*.7;SP.scallops.push({s,w:2200,r:1200});}/* one scar and its debris within reach */
+ const SN=[new Noise(seed+920),new Noise(seed+921)];
  onProgress({stage:'Laying the lava plains',p:.05});
  // lobes: elongated raised flows with levees running down from the scarp side
  const lobes=[];for(let k=0;k<9;k++){const t=(R()-.5)*2*half*.9;const ox=-sdz*t,oz=sdx*t;lobes.push({ox,oz,w:220+R()*420,hgt:8+R()*22,ph:R()*6.28,len:1800+R()*3000});}
@@ -106,8 +140,8 @@ export function generateMars(seed,onProgress=()=>{}){
   v+=lobe;
   // wrinkle ridges across the plain
   const w1=(x*-sdz+z*sdx)+noise.fbm(x/700,z/700,2)*300;{const q=((w1%2600+2600)%2600-1300);v+=18*Math.exp(-(q*q)/(2*120*120))*smoothstep(.5,-.3,u);}
-  // the basal scarp: terraced rise beginning 1.1 km inside the map edge
-  const sc=smoothstep(.62,1.05,u+noise.fbm(x/1400,z/1400,2)*.08);v+=sc*sc*1500+sc*noise.ridged(x/500,z/500,3)*120;
+  // the basal escarpment of Olympus Mons (shared with the terrain beyond the map)
+  const sh=marsScarp(x,z,SP,SN),sc=smoothstep(40,700,sh);v+=sh;
   h[k]=v;
   // dark sand in the lee of ridges and lobes, dust elsewhere
   const d=smoothstep(.45,.75,n2.fbm(x/520+3,z/520,3)*.5+.5)*smoothstep(.3,0,sc);desert[k]=d;
@@ -115,12 +149,13 @@ export function generateMars(seed,onProgress=()=>{}){
  for(const c of craters){const reach=c.D*1.35;const i0=Math.max(0,Math.floor((c.x-reach+half)/cell)),i1=Math.min(N-1,Math.ceil((c.x+reach+half)/cell)),j0=Math.max(0,Math.floor((c.z-reach+half)/cell)),j1=Math.min(N-1,Math.ceil((c.z+reach+half)/cell));
   for(let j=j0;j<=j1;j++)for(let i=i0;i<=i1;i++){const x=-half+(i+.5)*cell,z=-half+(j+.5)*cell;h[j*N+i]+=craterRelief(Math.hypot(x-c.x,z-c.z),c.D,c.fresh)*.8;}}
  const sl=slopeGrid(h);
- for(let j=0;j<N;j++)for(let i=0;i<N;i++){const k=j*N+i,x=-half+(i+.5)*cell,z=-half+(j+.5)*cell;const u=(x*sdx+z*sdz)/half;biome[k]=u>.62?3:desert[k]>.5?1:rock[k]>.45?2:0;if(sl[k]>.5)rock[k]=Math.max(rock[k],.8);}
+ for(let j=0;j<N;j++)for(let i=0;i<N;i++){const k=j*N+i,x=-half+(i+.5)*cell,z=-half+(j+.5)*cell;const u=(x*sdx+z*sdz)/half;biome[k]=(h[k]>0&&marsScarp(x,z,SP,SN)>25)?3:desert[k]>.5?1:rock[k]>.45?2:0;if(sl[k]>.5)rock[k]=Math.max(rock[k],.8);}
  onProgress({stage:'Raising the colony',p:.75});
  const hAt=(x,z)=>bilinear(h,N,(x+half)/cell-.5,(z+half)/cell-.5);
  const b0=flatNear(h,sl,-sdx*400+(R()-.5)*400,-sdz*400+(R()-.5)*400,500);
  const sites=[{type:'staging',name:'Tharsis Station',x:b0.x,z:b0.z},{type:'landing',name:'Landing field',x:b0.x-sdx*500+sdz*120,z:b0.z-sdz*500-sdx*120}];
- sites.push({type:'scarp',name:'Scarp foot overlook',x:sdx*(half*.6)+sdz*(R()-.5)*800,z:sdz*(half*.6)-sdx*(R()-.5)*800});
+ sites.push({type:'scarp',name:'Foot of the Olympus scarp',x:sdx*(half*.55)+sdz*(R()-.5)*800,z:sdz*(half*.55)-sdx*(R()-.5)*800});
+ {const s=SP.fan.s,al=SP.foot-2100;sites.push({type:'fan',name:'Lava fan toe',x:sdx*al-sdz*s,z:sdz*al+sdx*s});}
  {const c=craters[0];sites.push({type:'rim',name:`${c.name} crater rim`,x:c.x+c.D*.55,z:c.z,crater:c});}
  {const a=R()*6.28;const p=flatNear(h,sl,Math.cos(a)*1800,Math.sin(a)*1800,300);sites.push({type:'rover',name:'Abandoned rover',x:p.x,z:p.z});}
  {const a=R()*6.28;const p=flatNear(h,sl,Math.cos(a)*1300,Math.sin(a)*1300,300);sites.push({type:'drill',name:'Ice drill site',x:p.x,z:p.z});}
@@ -128,7 +163,7 @@ export function generateMars(seed,onProgress=()=>{}){
  const buildings=base(b0.x,b0.z,hAt(b0.x,b0.z),R()*6.28,'mars',R);
  const grids={rock,desert,hard,slope:sl,dry:new Float32Array(M).fill(.6),moisture:new Float32Array(M),temperature:new Float32Array(M)};
  onProgress({stage:'Ready',p:1});
- return pack(seed,'mars',h,grids,biome,{roads,buildings,sites,craters,wind:[-sdz*.8,sdx*.8],mountain:[sdx,sdz],biomeLabels:['Dust plain','Dune field','Lava flow','Scarp foot'],biomeRGB:[[178,124,82],[96,74,58],[150,104,70],[132,94,66]],rangeOut:{type:'scarp',dir:[sdx,sdz],h:6500}});
+ return pack(seed,'mars',h,grids,biome,{roads,buildings,sites,craters,wind:[-sdz*.8,sdx*.8],mountain:[sdx,sdz],biomeLabels:['Dust plain','Dune field','Lava flow','Olympus scarp'],biomeRGB:[[178,124,82],[96,74,58],[150,104,70],[132,94,66]],rangeOut:{type:'scarp',dir:[sdx,sdz],h:6000,P:SP}});
 }
 
 // ------------------------------------------------------------------ Titan

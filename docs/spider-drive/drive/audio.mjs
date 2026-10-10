@@ -47,6 +47,18 @@ export class Sound{
   // combustion is never perfectly even: a slow random wobble on the firing pitch
   e.wob=C.createBufferSource();e.wob.buffer=this.brown;e.wob.loop=true;const wl=C.createBiquadFilter();wl.type='lowpass';wl.frequency.value=5;const wg=C.createGain();wg.gain.value=260;e.wob.connect(wl).connect(wg);wg.connect(e.osc.detune);wg.connect(e.sub.detune);wg.connect(e.knockOsc.detune);e.wob.start();
   e.osc.start();e.sub.start();e.knockSrc.start();e.knockOsc.start();e.turbo.start();e.boost=0;
+  // electric drive (off Earth: no oxygen to burn): six hub-motor inverters singing with wheel speed (a saw and its
+  // third harmonic through a resonant band), the PWM carrier as a thin high tone, the fuel-cell air/reactant blower
+  // as a whirring turbine that follows the power drawn, and a coolant pump hum. Exterior and structure-borne copies.
+  {const el=this.el={},mk=(type,f)=>{const o=C.createOscillator();o.type=type;o.frequency.value=f;o.start();return o;};
+   el.inv=mk('sawtooth',200);el.inv3=mk('triangle',600);el.invBP=C.createBiquadFilter();el.invBP.type='bandpass';el.invBP.Q.value=3;el.invBP.frequency.value=900;el.invG=C.createGain();el.invG.gain.value=0;
+   el.inv.connect(el.invBP);el.inv3.connect(el.invBP);el.invBP.connect(el.invG);
+   el.car=mk('sine',3150);el.carG=C.createGain();el.carG.gain.value=0;el.car.connect(el.carG);
+   el.blade=mk('sine',520);el.bladeG=C.createGain();el.bladeG.gain.value=0;el.blade.connect(el.bladeG);
+   el.cool=mk('sine',58);el.cool2=mk('sine',117);el.coolG=C.createGain();el.coolG.gain.value=0;el.cool.connect(el.coolG);el.cool2.connect(el.coolG);
+   el.mix=C.createGain();el.mix.gain.value=1;for(const g of [el.invG,el.carG,el.bladeG,el.coolG])g.connect(el.mix);el.mix.connect(this.ext);
+   el.intF=C.createBiquadFilter();el.intF.type='lowpass';el.intF.frequency.value=1800;el.intG=C.createGain();el.intG.gain.value=0;el.mix.connect(el.intF).connect(el.intG).connect(this.int);
+   el.air=loop(this.white,'bandpass',800,2.2);}
   // hydraulic pump whine
   this.pump={o:C.createOscillator(),g:C.createGain()};this.pump.o.type='triangle';this.pump.g.gain.value=0;this.pump.o.connect(this.pump.g).connect(this.ext);this.pump.o.start();
   this.pump.o2=C.createOscillator();this.pump.o2.type='sine';this.pump.o2.connect(this.pump.g);this.pump.o2.start();
@@ -70,7 +82,7 @@ export class Sound{
  // what the world outside sounds like. Vacuum: nothing carries; what reaches the cabin is structure-borne,
  // dull and quiet. Mars: thin, highs eaten by CO2. Titan: dense air, loud and low, pitch down with the slower
  // sound speed. No birds or crickets off Earth; no injector knock from a closed-cycle pack.
- setBody(B){this.bodyCfg=B.id==='moon'?{cut:260,gain:.35,wind:0,wild:false,knock:0,pitch:1}:B.id==='mars'?{cut:2500,gain:.6,wind:.5,wild:false,knock:0,pitch:.9}:B.id==='titan'?{cut:6000,gain:1.15,wind:1.4,wild:false,knock:0,pitch:.72}:{cut:18000,gain:1,wind:1,wild:true,knock:1,pitch:1};this.applyBody();}
+ setBody(B){this.electric=B.id!=='earth';this.bodyCfg=B.id==='moon'?{cut:260,gain:.35,wind:0,wild:false,knock:0,pitch:1}:B.id==='mars'?{cut:2500,gain:.6,wind:.5,wild:false,knock:0,pitch:.9}:B.id==='titan'?{cut:6000,gain:1.15,wind:1.4,wild:false,knock:0,pitch:.72}:{cut:18000,gain:1,wind:1,wild:true,knock:1,pitch:1};this.applyBody();}
  applyBody(){const c=this.bodyCfg||{cut:18000,gain:1,wind:1,wild:true,knock:1,pitch:1};this.extBase=c.cut;this.windK=c.wind;this.wild=c.wild;this.knockK=c.knock;this.pitchK=c.pitch;if(this.extG)this.extG.gain.setTargetAtTime(c.gain,this.ctx.currentTime,.3);}
  setVolume(v){this.vol=v;if(this.master)this.master.gain.setTargetAtTime(this.paused?0:v,this.ctx.currentTime,.05);}
  pause(p){this.paused=p;if(this.master)this.master.gain.setTargetAtTime(p?0:this.vol,this.ctx.currentTime,.05);}
@@ -78,9 +90,9 @@ export class Sound{
  burst(dur,freq,q,gain,type='bandpass',dest=this.ext,buf=this.white){if(!this.ctx)return;const C=this.ctx,s=C.createBufferSource();s.buffer=buf;const f=C.createBiquadFilter();f.type=type;f.frequency.value=freq;f.Q.value=q;const g=C.createGain();const t=C.currentTime;g.gain.setValueAtTime(gain,t);g.gain.exponentialRampToValueAtTime(.001,t+dur);s.connect(f).connect(g).connect(dest);s.start(t,Math.random());s.stop(t+dur+.05);}
  tone(f0,f1,dur,gain,type='sine',dest=this.ext){if(!this.ctx)return;const C=this.ctx,o=C.createOscillator();o.type=type;const g=C.createGain();const t=C.currentTime;o.frequency.setValueAtTime(f0,t);o.frequency.exponentialRampToValueAtTime(Math.max(1,f1),t+dur);g.gain.setValueAtTime(gain,t);g.gain.exponentialRampToValueAtTime(.001,t+dur);o.connect(g).connect(dest);o.start(t);o.stop(t+dur+.05);}
  flock(n,dist){if(!this.ctx)return;const k=clamp(1-dist/260,0,1)*Math.min(1,n/6);if(k<=0)return;const C=this.ctx;for(let i=0;i<Math.min(n,8);i++){setTimeout(()=>{this.burst(.06,1500+Math.random()*900,1.2,.09*k,'bandpass');this.burst(.09,520,1.5,.07*k,'bandpass',this.ext,this.brown);},i*70+Math.random()*60);}if(Math.random()<.7)setTimeout(()=>this.tone(2600+Math.random()*800,1800,.12,.05*k,'sine'),200);}
- starter(){if(!this.ctx)return;this.tone(95,150,1.1,.14,'sawtooth');this.tone(190,300,1.1,.05,'square');this.burst(1.1,700,1.5,.08,'bandpass');}
- catchUp(){this.thump(.7);this.burst(.5,220,.7,.5,'lowpass',this.ext,this.brown);}
- engineStop(){this.burst(.8,160,.7,.35,'lowpass',this.ext,this.brown);this.hiss(.5);}
+ starter(){if(!this.ctx)return;if(this.electric){this.tone(160,120,.12,.3,'square');this.burst(.06,2400,3,.1,'bandpass');this.tone(240,1400,.5,.05,'triangle');return;}this.tone(95,150,1.1,.14,'sawtooth');this.tone(190,300,1.1,.05,'square');this.burst(1.1,700,1.5,.08,'bandpass');}
+ catchUp(){if(this.electric){this.tone(880,880,.12,.04,'sine');setTimeout(()=>this.tone(1320,1320,.16,.04,'sine'),140);return;}this.thump(.7);this.burst(.5,220,.7,.5,'lowpass',this.ext,this.brown);}
+ engineStop(){if(this.electric){this.tone(1400,120,1.2,.05,'triangle');this.tone(140,90,.12,.25,'square');return;}this.burst(.8,160,.7,.35,'lowpass',this.ext,this.brown);this.hiss(.5);}
  crack(k=1){this.burst(.12,2200,.7,.9*k,'bandpass');this.burst(.5,500,.8,.5*k,'lowpass',this.ext,this.brown);}
  thump(k=1){this.tone(90,40,.35,.9*k);this.burst(.25,300,.7,.5*k,'lowpass',this.ext,this.brown);}
  hiss(k=1){this.burst(1.6,4200,.5,.25*k,'highpass');}
@@ -100,10 +112,17 @@ export class Sound{
   const now=C.currentTime;e.osc.frequency.setTargetAtTime(Math.max(1,rpm/120),now,.04);e.sub.frequency.setTargetAtTime(Math.max(20,fire),now,.04);e.knockOsc.frequency.setTargetAtTime(Math.max(5,fire),now,.04);
   e.boost+=(load*clamp((rpm-800)/800,0,1)-e.boost)*Math.min(1,dt*1.5);// turbo spools behind the throttle
   e.drive.gain.setTargetAtTime(1+load*1.4,now,.08);e.lp.frequency.setTargetAtTime(150+load*110+rpm*.05,now,.08);e.lp2.frequency.setTargetAtTime(340+load*220,now,.1);
-  this.set(e.g,on?(.26+load*.04)*run:0);this.set(e.subG,on?(.14+load*.08)*run:0);
-  this.set(e.knockG,on?.45*(1-load*.45)*(1.1-rpm/2400)*run*(this.knockK??1):0);
-  const ob=sp.engine.boost||0;e.turbo.frequency.setTargetAtTime(700+e.boost*1300+ob*900,now,.15);this.set(e.turboG,on?e.boost*.004+ob*.012:0,.2);e.intake.f.frequency.setTargetAtTime(600+e.boost*700,now,.2);this.set(e.intake.g,on?e.boost*.04:0,.2);
-  this.set(e.rumble.g,on?(.28+load*.2)*run:0);this.set(e.roar.g,on?load*.35:0,.15);
+  const V8=!this.electric;this.set(e.g,V8&&on?(.26+load*.04)*run:0);this.set(e.subG,V8&&on?(.14+load*.08)*run:0);
+  this.set(e.knockG,V8&&on?.45*(1-load*.45)*(1.1-rpm/2400)*run*(this.knockK??1):0);
+  {const el=this.el,live=this.electric&&!sp.engine.off&&!sp.engine.stalled,v=Math.abs(sp.speed?sp.speed():0),ob=sp.engine.boost||0,dp=clamp((sp.engine.drivePower||0)/1.25e6,0,1.6);
+   const f=95+v*36;el.inv.frequency.setTargetAtTime(f,now,.05);el.inv3.frequency.setTargetAtTime(f*3,now,.05);el.invBP.frequency.setTargetAtTime(500+f*1.6,now,.08);
+   this.set(el.invG,live?(.012+dp*.05+ob*.02)*Math.min(1,.25+v/4):0,.06);
+   el.car.frequency.setTargetAtTime(3150+dp*240,now,.1);this.set(el.carG,live?.0025+dp*.006:0,.1);
+   el.blade.frequency.setTargetAtTime(380+dp*900+ob*500,now,.4);this.set(el.bladeG,live?.006+dp*.016:0,.3);
+   el.air.f.frequency.setTargetAtTime(600+dp*1400,now,.4);this.set(el.air.g,live?.02+dp*.06:0,.3);
+   this.set(el.coolG,live?.05:0,.4);this.set(el.intG,this.electric?this.seatK*1.6:0,.2);}
+  const ob=sp.engine.boost||0;e.turbo.frequency.setTargetAtTime(700+e.boost*1300+ob*900,now,.15);this.set(e.turboG,V8&&on?e.boost*.004+ob*.012:0,.2);e.intake.f.frequency.setTargetAtTime(600+e.boost*700,now,.2);this.set(e.intake.g,V8&&on?e.boost*.04:0,.2);
+  this.set(e.rumble.g,V8&&on?(.28+load*.2)*run:0);this.set(e.roar.g,V8&&on?load*.35:0,.15);
   const flow=sp.engine.pumpFlow||0;this.pump.o.frequency.setTargetAtTime(70+rpm*.05,C.currentTime,.05);this.pump.o2.frequency.setTargetAtTime(140+rpm*.1,C.currentTime,.05);this.set(this.pump.g,clamp(flow/.006,0,1)*.07);
   // valve clicks on leg reversals, accumulator thumps on hard compressions
   // (the levelling servo reverses its valves every few milliseconds; clicking on those read as a Geiger counter)
@@ -153,21 +172,86 @@ const MOODS={
  crossing:{root:42,bpm:100,prog:[[0,3,7],[1,5,8],[0,3,7],[10,13,17]],alt:[[0,3,7],[8,11,15],[5,8,12],[7,10,14]],base:.15},
 };
 const mtof=m=>440*Math.pow(2,(m-69)/12);
+// A score for each world (free roam and the menu; Earth's missions keep their own themes above). Each has its own
+// key, tempo, instruments and air: tone is the music bus low-pass (Titan's thick murk, the Moon's glassy clarity),
+// room the reverb, echo the delay feedback. play() lays out one sixteenth-note step from the intensity I.
+const pick=(arr,k)=>arr[((k%arr.length)+arr.length)%arr.length];
+const hash=(a,b)=>{let h=(a*374761393+b*668265263)|0;h=(h^(h>>>13))*1274126177|0;return ((h^(h>>>16))>>>0)/4294967296;};
+const STYLES={
+ // river country: a fingerpicked guitar over upright bass and a soft organ, shaker and brushes as the pace picks
+ // up, a fiddle line above it, a banjo roll at full tilt. G major, I-IV-I-V and vi-IV-I-V.
+ earth:{root:43,bpm:104,base:.2,tone:15000,room:.24,echo:.22,
+  prog:[[0,4,7],[5,9,12],[0,4,7],[7,11,14]],alt:[[9,12,16],[5,9,12],[0,4,7],[7,11,14]],
+  play(m,t,s,I,ch,R,beat){
+   if(s===0)m.organ(t,ch.map(n=>R+24+n),beat*4,.035+.02*(1-I));
+   if(s===0||s===8)m.upright(t,R+(s===0?ch[0]:ch[0]+7)-12,beat*1.6,.3);
+   if(I>.5&&(s===6||s===14))m.upright(t,R+ch[0]+(s===6?4:-1)-12,beat*.5,.16);
+   const pat=[0,null,2,null,1,null,2,1,0,null,2,null,1,2,null,1];const k=pat[s];
+   if(k!==null){const n=k===0?R+12+ch[0]+(this.bar%2?7:0):R+24+ch[k];m.pluck(t,n,.07+.03*I);}
+   if(I>.25)m.shaker(t,(s%2?.035:.02)*(.6+I));
+   if(I>.35){if(s===0||s===8||(I>.6&&s===10))m.softKick(t,.35+.25*I);if(s===4||s===12)m.brush(t,.08+.08*I);}
+   if(I>.5&&s%2===0){const sc=[0,2,4,7,9,12,14,16];const step=Math.floor((this.bar*8+s/2));const h=hash(step,7);if(h<.55+.3*I){const n=R+36+pick(sc,Math.floor(hash(step,3)*sc.length+this.bar));m.lead(t,n,beat*(h<.3?1:.5),.035+.025*I,{type:'sawtooth',vib:6,depth:14,cut:2200,glide:.03});}}
+   if(I>.78){const tones=[...ch,ch[0]+12];m.pluck(t,R+36+pick(tones,s*2+this.bar),.035);}
+  }},
+ // the mare: no air, a black sky. Slow glass and bell tones in D lydian, a sub drone, a heartbeat pulse when moving,
+ // a glassy arpeggio at speed, and now and then a Quindar tone, the Apollo radio's beep.
+ moon:{root:50,bpm:66,base:.12,tone:12000,room:.55,echo:.45,
+  prog:[[0,7,11,16],[2,9,14,18],[-3,4,9,14],[-5,2,7,11]],alt:[[0,7,11,16],[6,11,14,18],[4,11,14,19],[-1,6,11,14]],
+  play(m,t,s,I,ch,R,beat){
+   if(s===0&&this.bar%2===0){m.glass(t,ch.map(n=>R+12+n),beat*8,.03);m.sub(t,R-12,beat*8,.07);}
+   const h=hash(this.bar*16+s,11);if(h<.07+.16*I)m.bell(t,R+24+pick(ch,Math.floor(h*97)),.06+.04*I,3.5);
+   if(I>.3&&(s===0||s===3))m.softKick(t,(s?.18:.28)*(.5+I),46);
+   if(I>.5&&s%2===0)m.glassArp(t,R+36+pick([...ch,ch[1]+12],s/2+this.bar),.02+.02*I);
+   if(I>.72&&s===8)m.noiseSweep(t,beat*3,400,2600,.02);
+   if(s===0&&hash(this.bar,5)<.18){m.quindar(t+beat*2.5,2525);}
+  }},
+ // below the Olympus scarp: E phrygian dominant, a horn drone that swells with each bar, taiko from the canyon,
+ // dust sweeps, and a theremin-like lead gliding over it; a driving low bass and brass stabs at full pace.
+ mars:{root:40,bpm:84,base:.22,tone:7000,room:.38,echo:.3,
+  prog:[[0,7,12],[1,8,13],[0,7,12],[-2,5,10]],alt:[[0,4,7],[1,5,8],[5,8,12],[-1,4,7]],
+  play(m,t,s,I,ch,R,beat){
+   if(s===0)m.horn(t,[R+12+ch[0],R+12+ch[1]],beat*4,.05+.03*I);
+   const tk=I<.3?(s===0&&this.bar%2===0):I<.6?[0,6,8,11].includes(s):[0,3,6,8,11,12,14].includes(s)||(this.bar%4===3&&s>=12);
+   if(tk)m.taiko(t,.3+.35*I,s===0?52:s>=12?84:66);
+   if(s===0&&this.bar%4===0)m.noiseSweep(t,beat*8,250,1400,.035);
+   if(I>.25&&s%4===0){const sc=[0,1,4,5,7,8,10,12,13];const step=this.bar*4+s/4;if(hash(step,9)<.7)m.lead(t,R+24+pick(sc,Math.floor(hash(step,2)*6)+this.bar),beat*(hash(step,4)<.5?2:1),.04+.02*I,{type:'sine',vib:5.2,depth:28,cut:3000,glide:.12,tri:true});}
+   if(I>.45&&s%2===0)m.bass(t,R+ch[0]-12+(s===14?12:0),beat*.4,.18+.1*I);
+   if(I>.7&&s===0&&this.bar%2===0)m.stab(t,ch.map(n=>R+24+n),.1);
+  }},
+ // the methane shore: dense air muffles everything (D dorian). A deep chorus pad, whale-like sub pulses, drips
+ // and methane bubbles, slow gong swells, a muffled half-time beat with wood, and a low ostinato at pace.
+ titan:{root:38,bpm:72,base:.15,tone:2600,room:.5,echo:.5,
+  prog:[[0,7,10,14],[-2,5,8,12],[3,7,10,15],[-4,3,7,10]],alt:[[0,7,10,14],[5,9,12,16],[3,7,10,15],[-2,5,9,12]],
+  play(m,t,s,I,ch,R,beat){
+   if(s===0)m.pad(t,ch.map(n=>R+12+n),beat*4,.05);
+   if(s===0||(s===10&&I>.3))m.sub(t,R-12+(s?7:0),beat*3,.11,true);
+   const h=hash(this.bar*16+s,13);if(h<.06+.12*I)m.drip(t,R+36+pick([0,2,3,5,7,9,10],Math.floor(h*91)),.05);
+   if(hash(this.bar*16+s,17)<.03)m.bubbles(t,.03);
+   if(s===0&&this.bar%8===0)m.gong(t,.06);
+   if(I>.4){if(s===0||s===11)m.softKick(t,.32+.2*I,42);if(s===8)m.wood(t,.06+.05*I);}
+   if(I>.6&&s%2===0)m.bass(t,R+ch[(s/2)%3]-12,beat*.45,.14+.08*I);
+   if(I>.75&&s%4===2)m.glassArp(t,R+24+pick(ch,s+this.bar),.03);
+  }},
+};
 export class Music{
  constructor(snd){this.s=snd;this.on=true;this.vol=.55;this.mood=MOODS.menu;this.moodName='menu';this.int=0;this.target=0;this.step=0;this.bar=0;this.next=0;this.timer=null;this.duck=1;}
  init(){
   const C=this.s.ctx;if(!C||this.bus)return;
   this.bus=C.createGain();this.bus.gain.value=this.on?this.vol:0;
   const comp=C.createDynamicsCompressor();comp.threshold.value=-16;comp.ratio.value=4;comp.attack.value=.01;comp.release.value=.2;
-  this.duckG=C.createGain();const trim=C.createGain();trim.gain.value=.6;this.bus.connect(this.duckG).connect(comp).connect(trim).connect(this.s.master);
+  this.duckG=C.createGain();const trim=C.createGain();trim.gain.value=.6;this.tone=C.createBiquadFilter();this.tone.type='lowpass';this.tone.frequency.value=16000;this.tone.Q.value=.5;this.bus.connect(this.tone).connect(this.duckG).connect(comp).connect(trim).connect(this.s.master);
   // space: a feedback delay and a short generated reverb
   this.dry=C.createGain();this.dry.connect(this.bus);
   this.delay=C.createDelay(1);this.fb=C.createGain();this.fb.gain.value=.28;this.wetD=C.createGain();this.wetD.gain.value=.22;this.delay.connect(this.fb).connect(this.delay);this.delay.connect(this.wetD).connect(this.bus);
   const len=C.sampleRate*2.2,ir=C.createBuffer(2,len,C.sampleRate);for(let ch=0;ch<2;ch++){const d=ir.getChannelData(ch);for(let i=0;i<len;i++)d[i]=(Math.random()*2-1)*Math.pow(1-i/len,3.2);}
   this.rev=C.createConvolver();this.rev.buffer=ir;this.wetR=C.createGain();this.wetR.gain.value=.3;this.rev.connect(this.wetR).connect(this.bus);
-  this.next=C.currentTime+.1;this.timer=setInterval(()=>this.schedule(),40);
+  this.next=C.currentTime+.1;this.timer=setInterval(()=>this.schedule(),40);this.air();
  }
- setMood(name){if(!MOODS[name]||name===this.moodName)return;this.moodName=name;this.mood=MOODS[name];this.bar=0;this.step=0;if(this.s.ctx)this.next=Math.max(this.next,this.s.ctx.currentTime+.05);}
+ setMood(name){if(!MOODS[name]||name===this.moodName)return;this.moodName=name;this.mood=MOODS[name];this.bar=0;this.step=0;if(this.s.ctx)this.next=Math.max(this.next,this.s.ctx.currentTime+.05);this.air();}
+ setWorld(id){this.world=STYLES[id]?id:'earth';this.bar=0;this.step=0;this.air();}
+ // the world's own score plays in free roam and the menu (and always off Earth, where only free roam exists)
+ score(){const st=STYLES[this.world||'earth'];return st&&(this.world!=='earth'||this.moodName==='free'||this.moodName==='menu')?st:null;}
+ air(){if(!this.tone)return;const st=this.score(),t=this.s.ctx.currentTime;this.tone.frequency.setTargetAtTime(st?st.tone:16000,t,.5);this.wetR.gain.setTargetAtTime(st?st.room:.3,t,.5);this.fb.gain.setTargetAtTime(st?st.echo:.28,t,.5);}
  setOn(v){this.on=v;if(this.bus)this.bus.gain.setTargetAtTime(v?this.vol:0,this.s.ctx.currentTime,.3);}
  setVolume(v){this.vol=v;if(this.bus&&this.on)this.bus.gain.setTargetAtTime(v,this.s.ctx.currentTime,.1);}
  duckFor(sec){if(!this.duckG)return;const t=this.s.ctx.currentTime;this.duckG.gain.cancelScheduledValues(t);this.duckG.gain.setTargetAtTime(.45,t,.05);this.duckG.gain.setTargetAtTime(1,t+sec,.5);}
@@ -186,14 +270,39 @@ export class Music{
  stab(t,notes,v){const C=this.s.ctx,f=C.createBiquadFilter();f.type='lowpass';f.frequency.setValueAtTime(2800,t);f.frequency.exponentialRampToValueAtTime(700,t+.3);const g=C.createGain();f.connect(g).connect(this.out(.2,.45));g.gain.setValueAtTime(v,t);g.gain.exponentialRampToValueAtTime(.001,t+.45);
   for(const m of notes)for(const det of [-12,0,11]){const o=C.createOscillator();o.type='sawtooth';o.frequency.value=mtof(m);o.detune.value=det;o.connect(f);o.start(t);o.stop(t+.5);}}
  arp(t,m,v){const C=this.s.ctx,o=C.createOscillator(),f=C.createBiquadFilter(),g=C.createGain();o.type='square';o.frequency.value=mtof(m);f.type='lowpass';f.frequency.value=2400;o.connect(f).connect(g).connect(this.out(.35,.25));g.gain.setValueAtTime(v,t);g.gain.exponentialRampToValueAtTime(.001,t+.14);o.start(t);o.stop(t+.16);}
+ // --- voices for the world scores
+ osc(type,f,t,dur,dest){const o=this.s.ctx.createOscillator();o.type=type;o.frequency.value=f;o.connect(dest);o.start(t);o.stop(t+dur);return o;}
+ vca(t,a,v,dec,dest){const g=this.s.ctx.createGain();g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(v,t+a);g.gain.exponentialRampToValueAtTime(.0008,t+a+dec);g.connect(dest);return g;}
+ lpf(f0,f1,t,dur,q=.7){const f=this.s.ctx.createBiquadFilter();f.type='lowpass';f.Q.value=q;if(t===undefined){f.frequency.value=f0;return f;}f.frequency.setValueAtTime(f0,t);if(f1)f.frequency.exponentialRampToValueAtTime(f1,t+dur);return f;}
+ pluck(t,m,v){const f=this.lpf(3200,450,t,.35,1.2),g=this.vca(t,.003,v,.9,this.out(.15,.25));f.connect(g);this.osc('sawtooth',mtof(m),t,1,f);this.osc('triangle',mtof(m)*2,t,.6,f);}
+ upright(t,m,len,v){const f=this.lpf(900,260,t,.3),g=this.vca(t,.01,v,Math.max(.3,len),this.out(0,.08));f.connect(g);this.osc('sine',mtof(m),t,len+.4,f);this.osc('triangle',mtof(m)*2,t,len*.5,f);}
+ organ(t,notes,len,v){const g=this.s.ctx.createGain();this.env(g,t,.25,v,len,.85,.3,len*.95);const f=this.lpf(1600);f.connect(g).connect(this.out(.05,.4));for(const n of notes){this.osc('triangle',mtof(n),t,len*1.3,f);this.osc('sine',mtof(n)*2,t,len*1.3,f).detune.value=4;}}
+ shaker(t,v){this.noise(t,.05,'highpass',6500,.7,v,.05);}
+ brush(t,v){this.noise(t,.16,'bandpass',2600,.6,v,.25);}
+ softKick(t,v,f0=60){const C=this.s.ctx,o=C.createOscillator(),g=C.createGain();o.frequency.setValueAtTime(f0*2.2,t);o.frequency.exponentialRampToValueAtTime(f0,t+.1);g.gain.setValueAtTime(v,t);g.gain.exponentialRampToValueAtTime(.001,t+.45);o.connect(g).connect(this.out(0,.15));o.start(t);o.stop(t+.5);}
+ lead(t,m,len,v,o={}){const C=this.s.ctx,f=this.lpf(o.cut||2500),g=C.createGain();this.env(g,t,.04,v,len,.8,.12,len*.9);f.connect(g).connect(this.out(.3,.4));
+  const fr=mtof(m),p=this._lead||fr;this._lead=fr;const make=type=>{const x=C.createOscillator();x.type=type;x.frequency.setValueAtTime(p,t);x.frequency.setTargetAtTime(fr,t,o.glide||.03);const l=C.createOscillator();l.frequency.value=o.vib||5;const d=C.createGain();d.gain.setValueAtTime(0,t);d.gain.linearRampToValueAtTime(o.depth||10,t+len*.5);l.connect(d).connect(x.detune);x.connect(f);x.start(t);l.start(t);x.stop(t+len+.4);l.stop(t+len+.4);};
+  make(o.type||'sawtooth');if(o.tri)make('triangle');}
+ bell(t,m,v,dur=3){const C=this.s.ctx,fr=mtof(m),c=C.createOscillator(),mo=C.createOscillator(),mi=C.createGain();c.frequency.value=fr;mo.frequency.value=fr*3.5;mi.gain.setValueAtTime(fr*2.2,t);mi.gain.exponentialRampToValueAtTime(1,t+dur*.6);mo.connect(mi).connect(c.frequency);const g=this.vca(t,.004,v,dur,this.out(.45,.7));c.connect(g);c.start(t);mo.start(t);c.stop(t+dur+.1);mo.stop(t+dur+.1);}
+ glass(t,notes,len,v){const g=this.s.ctx.createGain();this.env(g,t,len*.4,v,len,1,len*.3,len*.9);g.connect(this.out(.2,.8));for(const n of notes)for(const d of [-5,6]){this.osc('sine',mtof(n),t,len*1.4,g).detune.value=d;}}
+ glassArp(t,m,v){const g=this.vca(t,.003,v,.5,this.out(.4,.5));this.osc('sine',mtof(m),t,.6,g);this.osc('sine',mtof(m)*3.01,t,.25,g);}
+ sub(t,m,len,v,swell=false){const g=this.s.ctx.createGain();this.env(g,t,swell?len*.3:.05,v,len,.9,len*.2,len*.8);g.connect(this.out(0,.1));const o=this.osc('sine',mtof(m),t,len*1.3,g);if(swell){o.frequency.setValueAtTime(mtof(m)*.94,t);o.frequency.exponentialRampToValueAtTime(mtof(m),t+len*.4);}}
+ horn(t,notes,len,v){const g=this.s.ctx.createGain();this.env(g,t,len*.35,v,len,.9,len*.2,len*.9);const f=this.lpf(180,null,t);f.frequency.setValueAtTime(180,t);f.frequency.linearRampToValueAtTime(1100,t+len*.5);f.frequency.linearRampToValueAtTime(300,t+len);f.connect(g).connect(this.out(.1,.6));for(const n of notes)for(const d of [-9,8])this.osc('sawtooth',mtof(n),t,len*1.3,f).detune.value=d;}
+ noiseSweep(t,dur,f0,f1,v){const C=this.s.ctx,s=C.createBufferSource();s.buffer=this.s.white;const f=C.createBiquadFilter();f.type='bandpass';f.Q.value=2;f.frequency.setValueAtTime(f0,t);f.frequency.exponentialRampToValueAtTime(f1,t+dur*.6);f.frequency.exponentialRampToValueAtTime(f0,t+dur);const g=C.createGain();g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(v,t+dur*.5);g.gain.linearRampToValueAtTime(0,t+dur);s.connect(f).connect(g).connect(this.out(.2,.5));s.start(t,Math.random()*1.5);s.stop(t+dur+.05);}
+ quindar(t,f){const g=this.vca(t,.005,.025,.25,this.out(0,.05));this.osc('sine',f,t,.27,g);}
+ drip(t,m,v){const C=this.s.ctx,o=C.createOscillator();o.frequency.setValueAtTime(mtof(m)*1.5,t);o.frequency.exponentialRampToValueAtTime(mtof(m),t+.05);const g=this.vca(t,.002,v,.6,this.out(.55,.5));o.connect(g);o.start(t);o.stop(t+.7);}
+ bubbles(t,v){for(let k=0;k<5;k++){const t0=t+k*.07+Math.random()*.05,C=this.s.ctx,o=C.createOscillator(),f0=250+Math.random()*350;o.frequency.setValueAtTime(f0,t0);o.frequency.exponentialRampToValueAtTime(f0*2.4,t0+.07);const g=this.vca(t0,.004,v,.1,this.out(.2,.3));o.connect(g);o.start(t0);o.stop(t0+.15);}}
+ gong(t,v){const g=this.s.ctx.createGain();g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(v,t+1.6);g.gain.exponentialRampToValueAtTime(.0008,t+7);g.connect(this.out(.2,.8));for(const r of [1,1.48,2.09,2.76,3.41])this.osc('sine',55*r,t,7.2,g);}
+ wood(t,v){this.noise(t,.06,'bandpass',1100,8,v,.3);}
  // --- the sequencer
  schedule(){
   const C=this.s.ctx;if(!C||this.s.paused||!this.on)return;if(this.next<C.currentTime-.2)this.next=C.currentTime+.05;
-  while(this.next<C.currentTime+.3){this.playStep(this.next);this.next+=60/this.mood.bpm/4;}
+  while(this.next<C.currentTime+.3){this.playStep(this.next);this.next+=60/(this.score()||this.mood).bpm/4;}
  }
  playStep(t){
-  const M=this.mood,s=this.step%16,beat=60/M.bpm;this.int+=(Math.max(this.target,M.base*.6)-this.int)*.02;const I=this.int;
+  const ST=this.score(),M=ST||this.mood,s=this.step%16,beat=60/M.bpm;this.int+=(Math.max(this.target,M.base*.6)-this.int)*.02;const I=this.int;
   const phrase=Math.floor(this.bar/8)%2,prog=phrase&&M.alt?M.alt:M.prog,ch=prog[this.bar%4],R=M.root;
+  if(ST){ST.play.call(this,this,t,s,I,ch,R,beat);if(s===15)this.bar++;this.step++;return;}
   const build=this.bar%8===7&&s>=8;// fill into the next phrase
   // pads on each bar
   if(s===0)this.pad(t,ch.map(n=>R+24+n),beat*4,.05+.03*(1-I));

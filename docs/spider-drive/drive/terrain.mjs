@@ -3,7 +3,7 @@
 import {Noise,hash2,clamp,mix,smooth,smoothstep} from './noise.mjs';
 import {bicubic,bilinear} from './worldgen.mjs';
 import {BODY_SURFACES} from './bodies.mjs';
-import {craterRelief} from './worldgen-bodies.mjs';
+import {craterRelief,marsScarp} from './worldgen-bodies.mjs';
 
 export const SURFACES={
  asphalt:{name:'Asphalt',mu:.95,slide:.8,roll:.012,soft:0,dust:.05,color:[.25,.25,.24]},
@@ -95,7 +95,10 @@ export class Terrain{
   if(ro.type==='craterWall'){// the host crater's wall: 1.1 km of rise over 3 km in three slumped terraces, wandering in plan, starting 1.6 km beyond the map
    const wob=this.noise.fbm(Math.atan2(z,x)*3.1,.7,2)*260;const r=Math.hypot(x,z)+wob,r0=(ro.r0||this.half+900)+700;if(r<r0)return h+out*.006;const u=Math.min(1.6,(r-r0)/3000),H=(ro.h||1800)*.6;
    const terr=Math.floor(u*3)/3+smooth(clamp((u*3-Math.floor(u*3)-.35)/.65,0,1))/3;return h+terr*H+this.noise.ridged(x/900,z/900,3)*90*smoothstep(0,.3,u)+this.noise.fbm(x/300,z/300,2)*12*smoothstep(0,.1,u);}
-  if(ro.type==='scarp'){const d=ro.dir||[1,0],u=(x*d[0]+z*d[1])/this.half;if(u>.9){const s=smoothstep(.9,1.9,u+this.noise.fbm(x/1400,z/1400,2)*.08);return h+s*s*(ro.h||6500)*.9+s*this.noise.ridged(x/600,z/600,3)*300;}return h+out*.006+this.noise.fbm(x/2200,z/2200,3)*18;}
+  if(ro.type==='scarp'){if(!ro.P){const d=ro.dir||[1,0],u=(x*d[0]+z*d[1])/this.half;if(u>.9){const s=smoothstep(.9,1.9,u+this.noise.fbm(x/1400,z/1400,2)*.08);return h+s*s*(ro.h||6500)*.9+s*this.noise.ridged(x/600,z/600,3)*300;}return h+out*.006+this.noise.fbm(x/2200,z/2200,3)*18;}
+   // the escarpment continues analytically: the plain carried on from the map edge, plus the scarp itself
+   const SN=this._scarpN||(this._scarpN=[new Noise(this.w.seed+920),new Noise(this.w.seed+921)]);const ex=clamp(x,-this.half,this.half),ez=clamp(z,-this.half,this.half);
+   return h-marsScarp(ex,ez,ro.P,SN)+marsScarp(x,z,ro.P,SN)+out*.004+this.noise.fbm(x/2200,z/2200,3)*14*smoothstep(0,800,out);}
   // dunes: continue the longitudinal pattern
   if(ro.type==='dunes'){const d=ro.dir||[1,0],along=x*d[0]+z*d[1],across=-x*d[1]+z*d[0]+this.noise.fbm(along/2600,.3,2)*420;const amp=70+40*this.n2.fbm(along/2400,across/5000,2);return 12+amp*Math.pow(Math.max(0,Math.cos(across/1900*6.283)),1.6)*(.75+.25*this.noise.fbm(along/900,across/900,3))+this.noise.fbm(x/3200,z/3200,3)*30;}
   return h+out*.01;

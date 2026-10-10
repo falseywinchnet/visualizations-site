@@ -98,7 +98,7 @@ float n3(vec3 x){vec3 i=floor(x),f=fract(x);f=f*f*(3.0-2.0*f);return mix(mix(mix
   this.box([1.3,.45,.9],[0,GEOM.topPlate+.3,4.6],M.engine,top);this.mesh(new T.CylinderGeometry(.28,.28,1.2,16),M.frame,[.5,GEOM.topPlate+.4,3.6],top,[0,0,Math.PI/2]);
   const cool=this.box([2.1,.55,.12],[0,GEOM.topPlate+.4,5.28],M.dark,top);for(let k=0;k<9;k++)this.box([2.0,.02,.05],[0,GEOM.topPlate+.2+k*.05,5.35],M.frame,top);
   // exhaust stacks rising behind the V8
-  this.exhausts=[];for(const s of [-1,1]){const e=this.rod([s*.62,4.2,5.2],[s*.72,GEOM.topPlate+.95,5.25],.075,M.dark,top);this.mesh(new T.CylinderGeometry(.09,.075,.25,10),M.chrome,[s*.72,GEOM.topPlate+1.05,5.25],top);this.exhausts.push(new T.Vector3(s*.72,GEOM.topPlate+1.2,5.25));}
+  this.exhausts=[];this.exhaustStacks=[];for(const s of [-1,1]){const e=this.rod([s*.62,4.2,5.2],[s*.72,GEOM.topPlate+.95,5.25],.075,M.dark,top);const tip=this.mesh(new T.CylinderGeometry(.09,.075,.25,10),M.chrome,[s*.72,GEOM.topPlate+1.05,5.25],top);this.exhaustStacks.push(e,tip);this.exhausts.push(new T.Vector3(s*.72,GEOM.topPlate+1.2,5.25));}
   // work lights and beacons along the plate
   this.lights.work=[];for(const z of [-5.2,5.2])for(const s of [-1,1]){const l=this.box([.28,.16,.12],[s*1.0,GEOM.topPlate+.18,z],M.headlamp,top);this.lights.work.push(l);}
   this.lights.beacons=[];for(const z of [-4.8,4.8]){const b=this.mesh(new T.CylinderGeometry(.11,.13,.18,12),M.amber,[0,GEOM.topPlate+.32,z],top);this.lights.beacons.push(b);}
@@ -203,6 +203,18 @@ float n3(vec3 x){vec3 i=floor(x),f=fract(x);f=f*f*(3.0-2.0*f);return mix(mix(mix
   this.box([.72,.56,.08],[0,.12,.56],M.dark,eng);for(let k=0;k<9;k++)this.box([.68,.015,.03],[0,-.12+k*.06,.6],M.frame,eng);
   this.mesh(new T.CylinderGeometry(.24,.24,.1,24,1,true),M.frame,[0,.12,.48],eng,[Math.PI/2,0,0]).material=M.frame;
   this.mesh(new T.CylinderGeometry(.07,.07,.16,10),M.redPaint,[.4,-.2,.1],eng);this.rod([-.2,.1,-.4],[-.28,.55,-.45],.01,M.brass,eng,4);
+  this.v8=eng;
+  // off Earth the same bay holds the electric power pack (no oxygen to burn): a fuel-cell stack of ribbed plates with
+  // its end plates and tie rods, the battery, reactant and coolant lines, orange high-voltage cables, and an electric
+  // motor where the V8 drove the hydraulic pump
+  {const fc=this.fcPack=new T.Group();fc.position.copy(eng.position);fc.visible=false;cab.add(fc);const hv=new T.MeshStandardMaterial({color:0xe2701e,roughness:.55});
+   for(let k=0;k<22;k++)this.box([.62,.46,.03],[0,.08,-.42+k*.04],k%2?M.frame:M.dark,fc);
+   for(const z of [-.46,.46])this.box([.7,.54,.05],[0,.08,z],M.accent,fc);
+   for(const x of [-.3,.3])for(const y of [-.14,.3])this.rod([x,y,-.5],[x,y,.5],.018,M.chrome,fc,6);
+   this.box([.74,.22,.9],[0,-.3,0],M.engine,fc);for(let k=0;k<4;k++)this.box([.76,.02,.05],[0,-.2,-.33+k*.22],M.dark,fc);// battery
+   this.mesh(new T.CylinderGeometry(.15,.15,.34,16),M.frame,[-.3,.42,-.3],fc,[Math.PI/2,0,0]);this.mesh(new T.CylinderGeometry(.16,.16,.36,16),M.accent,[-.3,.42,.06],fc,[Math.PI/2,0,0]);// pump motor, hydraulic pump
+   this.tube([[.25,.32,-.5],[.35,.6,-.2],[.2,.66,.3],[.4,.5,.6]],.03,hv,fc,false,20);this.tube([[-.15,.32,-.5],[-.1,.62,-.3],[-.45,.6,.1]],.03,hv,fc,false,20);
+   this.tube([[.35,-.05,.5],[.5,.3,.6],[.45,.7,.6]],.035,M.hose,fc,false,16);this.mesh(new T.CylinderGeometry(.11,.11,.5,14),M.chrome,[.4,.45,.62],fc);}// coolant line, reactant tank
   // underside hatch and the ladder
   this.hatch=this.mesh(new T.CylinderGeometry(.48,.48,.07,28),M.accent,[0,2.62,.8],cab);this.hatch.name='Underside hatch';
   this.ladder=new T.Group();this.ladder.position.set(0,2.6,.8);cab.add(this.ladder);
@@ -435,6 +447,8 @@ float n3(vec3 x){vec3 i=floor(x),f=fract(x);f=f*f*(3.0-2.0*f);return mix(mix(mix
     this.box([.26,.16,.9],[rail[0],rail[1]+.02,Z],M.frame);}
    this.arms.push(A);}
  }
+ // drive by body: the V8 and its stacks on Earth, the fuel-cell pack elsewhere
+ setPower(electric){if(this.v8)this.v8.visible=!electric;if(this.fcPack)this.fcPack.visible=electric;for(const m of this.exhaustStacks||[])m.visible=!electric;}
  updateArms(sp){
   if(!this.arms||!sp.arms)return;const off=this._aoff||(this._aoff=[0,0,0,0,0,0]);
   for(let i=0;i<2;i++){const A=this.arms[i];armOffsets(sp.arms[i].ext,off);for(let k=1;k<=ARM.n;k++)A.segs[k-1].rotation.z=A.d*off[k];}
