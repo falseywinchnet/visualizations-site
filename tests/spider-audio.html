@@ -1,0 +1,56 @@
+<!doctype html><meta charset="utf-8"><title>Spider audio checks</title>
+<h1>Spider audio checks</h1><p>Serve the repository root, then open this page in a browser. Uses the production Sound graph and native OfflineAudioContext; no audio is played.</p>
+<button id="run">Run audio checks</button><pre id="results">Ready</pre>
+<script type="module">
+import {Sound,earthVoiceRpm} from '../docs/spider-drive/drive/audio.mjs';
+const results=document.querySelector('#results');
+function assert(ok,message){if(!ok)throw Error(message);}
+async function render({world='earth',rpm=1450,load=.9,off=false,stalled=false,unity=false,shutdown=false,limited=false,fullMix=false,view='chase',volume=.7,sampleRate=44100}={}){
+ const ctx=new OfflineAudioContext(1,sampleRate*5,sampleRate);let now=0,seed=711;
+ const clock=new Proxy(ctx,{get(target,key){if(key==='currentTime')return now;const value=Reflect.get(target,key,target);return typeof value==='function'?value.bind(target):value;}});
+ const realContext=window.AudioContext,random=Math.random;let sound;
+ try{
+  window.AudioContext=function(){return clock;};
+  Math.random=()=>{seed^=seed<<13;seed^=seed>>>17;seed^=seed<<5;return (seed>>>0)/4294967296;};
+  sound=new Sound();sound.setBody({id:world});sound.start();
+ }finally{window.AudioContext=realContext;Math.random=random;}
+ clearInterval(sound.music.timer);sound.music.setOn(false);sound.nextBird=Infinity;
+ // Listen only to the complete Earth engine bus, including its atmospheric
+ // layers and cabin feed source. Keep all other game audio out of the render.
+ sound.master.gain.value=volume;
+ if(!fullMix){sound.eng.dc.disconnect();sound.master.disconnect();sound.extG.disconnect();sound.int.disconnect();
+ if(limited){sound.eng.dc.connect(sound.master);sound.master.connect(sound.limiter);}else sound.eng.dc.connect(ctx.destination);}
+ if(unity)sound.eng.mix.gain.value=1;
+ const sp={engine:{rpm,load,off,stalled},speed:()=>0,wheels:Array.from({length:6},()=>({contact:false,ev:0,slip:0,slipAngle:0})),brush:0};
+ for(let frame=0;frame<300;frame++){
+  now=frame/60;
+  if(shutdown&&now>=2)sp.engine.off=true;
+  sound.update(1/60,sp,{atmo:{weather:'clear',night:0},view},{});
+ }
+ const buffer=await ctx.startRendering(),data=buffer.getChannelData(0);
+ assert(data.every(Number.isFinite),'Non-finite audio samples');
+ const segment=data.subarray(3*sampleRate);let square=0,peak=0,mean=0;
+ for(const x of segment){square+=x*x;peak=Math.max(peak,Math.abs(x));mean+=x;}
+ return {rms:Math.sqrt(square/segment.length),peak,mean:mean/segment.length};
+}
+document.querySelector('#run').onclick=async()=>{
+ const button=document.querySelector('#run');button.disabled=true;results.textContent='Running…';const lines=[];
+ try{
+  assert(earthVoiceRpm(0)===0&&earthVoiceRpm(170)>0,'Cranking/run-down pitch');
+  let prev=0;for(let r=0;r<=2500;r++){const v=earthVoiceRpm(r);assert(v>=prev&&v<=1250,'Pitch must remain monotonic and bounded');prev=v;}
+  lines.push('PASS: continuous low pitch range, cranking and run-down');
+  const unity=await render({unity:true}),raised=await render();
+  const db=20*Math.log10(raised.rms/unity.rms);assert(Math.abs(db-4)<.01,'Engine bus gain: '+db);
+  lines.push(`PASS: ${db.toFixed(2)} dB engine-only increase`);
+  for(const world of ['moon','mars','titan']){const x=await render({world});assert(x.peak<1e-7,world+' diesel leak');lines.push('PASS: no diesel layers on '+world);}
+  for(const scenario of [{off:true},{stalled:true},{shutdown:true}]){const x=await render(scenario);assert(x.peak<.0001,'Stopped engine leaked sound: '+JSON.stringify(x));}
+  lines.push('PASS: off, stalled and post-shutdown engine silence');
+  for(const sampleRate of [44100,48000])for(const [rpm,load]of [[550,.08],[1450,.9],[2150,1]]){
+   const x=await render({rpm,load,sampleRate,limited:true});assert(x.rms>.001&&x.peak<.98,'Engine level/headroom: '+JSON.stringify(x));assert(Math.abs(x.mean)<x.rms*.03,'DC offset: '+JSON.stringify({rpm,sampleRate,...x}));
+   lines.push(`PASS: ${sampleRate} Hz, ${rpm} rpm, peak ${x.peak.toFixed(3)}, RMS ${x.rms.toFixed(3)}`);
+  }
+  for(const view of ['chase','seat']){const x=await render({fullMix:true,view,volume:1,rpm:2150,load:1});assert(x.peak<.98,'Full-volume '+view+' clipped: '+JSON.stringify(x));lines.push(`PASS: full-volume ${view} mix, peak ${x.peak.toFixed(3)}`);}
+  results.textContent=lines.join('\n')+'\nALL AUDIO CHECKS PASSED';
+ }catch(error){results.textContent=lines.join('\n')+'\nFAIL: '+error.stack;console.error(error);}finally{button.disabled=false;}
+};
+</script>
