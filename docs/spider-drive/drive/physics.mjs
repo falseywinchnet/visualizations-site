@@ -208,7 +208,7 @@ export class Spider{
     // Kevlar-belted lugged tyres: stiff carcass for high speed, sharper cornering response, no grip loss wading
     const Ck=10,Ca=9.5;const den=Math.max(Math.abs(vx),1.5);
     let Fx,Fy;
-    if(this.hold&&!wh.disabled&&!wh.lifted){
+    if(this.hold&&!wh.disabled&&!wh.lifted){wh.Ti=0;
      // low-speed sticky anchor holds on slopes without creep
      if(!wh.anchor)wh.anchor=cpt.slice();
      const dA=sub(cpt,wh.anchor);const ka=Math.min(3.2e5,Fn*14),ca=Math.min(4e4,Fn*2.2);
@@ -224,10 +224,14 @@ export class Spider{
      // engine power shared by the six hub motors caps motoring torque (braking is hydrostatic and free)
      const Tpow=this.engine.off?0:(this.engine.Pavail??8e5)/6/Math.max(Math.abs(wh.omega),1.5);/* engine off: the hydrostatic brakes still hold, nothing drives */
      const wT=wh.targetOmega||0;const Kp=14000;
-     // unsaturated implicit solution with P control
-     let om=(I*wh.omega+DT*(Kp*wT-Rw*(F0-D*wh.omega)-roll))/(I+DT*(Rw*D+Kp));Tm=Kp*(wT-om);
+     // unsaturated implicit solution with PI control: the integral is the drive holding pressure (or current)
+     // against a load, so a wheel held back below its commanded speed (a steep pitch from a standstill) works up to
+     // full torque instead of stalling on a fixed speed error
+     const Ti=wh.Ti||0;
+     let om=(I*wh.omega+DT*(Kp*wT+Ti-Rw*(F0-D*wh.omega)-roll))/(I+DT*(Rw*D+Kp));Tm=Kp*(wT-om)+Ti;
      const motoring=Tm*(wh.omega||wh.targetOmega||1)>0,Tlim=motoring?Math.min(Tmax,Tpow):Tmax;
-     if(Math.abs(Tm)>Tlim){Tm=Math.sign(Tm)*Tlim;om=(I*wh.omega+DT*(Tm-Rw*(F0-D*wh.omega)-roll))/(I+DT*Rw*D);}
+     let sat=false;if(Math.abs(Tm)>Tlim){sat=true;Tm=Math.sign(Tm)*Tlim;om=(I*wh.omega+DT*(Tm-Rw*(F0-D*wh.omega)-roll))/(I+DT*Rw*D);}
+     {const e=wT-om;if(!(sat&&Math.sign(e)===Math.sign(Ti||e)))wh.Ti=clamp(Ti+(e*Math.sign(Ti||e)<0?1.2e5:4e4)*e*DT,-Tlim,Tlim);/* builds over about a second; lets go three times faster once the wheel is over its speed */else wh.Ti=clamp(Ti,-Tlim,Tlim);}/* anti-windup */
      // traction control trims torque on excessive slip
      const kn=(om*Rw-vx)/den;if(Math.abs(kn)>.15&&this.ctl.assist){const s=.15/Math.abs(kn);Tm*=s;om=(I*wh.omega+DT*(Tm-Rw*(F0-D*wh.omega)-roll))/(I+DT*Rw*D);}
      wh.omega=om;wh.torque=Tm;drivePower+=Math.max(0,Tm*om);
@@ -240,7 +244,7 @@ export class Spider{
     // each patch carries its share of the tyre force along its own surface
     for(const q of patches){const sh=Fn>0?q.Fn/Fn:1/patches.length;tf=add(tf,add(add(scl(q.n,q.Fn),scl(q.t,Fx*sh*q.grip)),scl(q.l,Fy*sh*q.grip)));}
     wh.fx=Fx;wh.fy=Fy;
-   }else{wh.deflection=0;wh.anchor=null;const I=300;const wT=wh.targetOmega||0,al=wh.disabled||this.engine.stalled?0:clamp((wT-wh.omega)*8,-20,20);wh.omega+=al*DT;wh.spin+=wh.omega*DT;wh.fx=wh.fy=0;
+   }else{wh.deflection=0;wh.anchor=null;wh.Ti=0;const I=300;const wT=wh.targetOmega||0,al=wh.disabled||this.engine.stalled?0:clamp((wT-wh.omega)*8,-20,20);wh.omega+=al*DT;wh.spin+=wh.omega*DT;wh.fx=wh.fy=0;
     // in the air the hub motor's torque reacts on the frame: drive the wheels up and the nose lifts, brake them and it drops
     T[0]+=I*al*axl[0];T[1]+=I*al*axl[1];T[2]+=I*al*axl[2];}
    wh.load=Fn;wh.cp=cpt;wh.cn=cn;
@@ -506,7 +510,7 @@ export class Spider{
   const aMax=Math.max(2.2*Math.min(1,G/9.81),Math.min(muAvg*G*.8,G*htm*.8/cmH));this.aLatMax=aMax;/* the floor shrinks with gravity: a sixth of the weight is a sixth of the grip */
   const lock=Math.min(GEOM.maxLock*(.5+.5*trF),Math.max(1.5*Math.PI/180,Math.atan(GEOM.wheelbase*aMax/Math.max(1e-3,speed*speed))));
   const dTarget=clamp(c.steer,-1,1)*lock;
-  {const sr=75*Math.PI/180*dt;this.steer[0]+=clamp(dTarget-this.steer[0],-sr,sr);}/* fast electro-hydraulic plate steering */
+  {const sr=Math.min(30*Math.PI/180,Math.max(4*Math.PI/180,lock/.75))*dt;this.steer[0]+=clamp(dTarget-this.steer[0],-sr,sr);}/* electro-hydraulic plate steering: slewing 20 t of plate and legs takes ~0.75 s to reach whatever lock the speed allows, never faster than 30 deg/s */
   this.steer[1]=Math.atan(Math.tan(this.steer[0])/2);this.steer[2]=0;
   // ---- longitudinal command (hydrostatic: release = controlled stop)
   let vt=c.throttle*c.limit;if(c.brake)vt=0;const gov=this.gov={};const tag=(n,v0)=>{if(Math.abs(vt)<Math.abs(v0)-.05)gov[n]=+(vt*3.6).toFixed(0);};
