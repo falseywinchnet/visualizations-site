@@ -15,6 +15,7 @@ const UNIFORM={scout:[0x5d6a4c,0x3b4436],troop:[0x55603f,0x2f3a2a],rescue:[0xd06
 export class SpiderModel{
  constructor({variant='scout',envMap=null}={}){
   this.variant=variant;this.root=new T.Group();this.root.name='Spider';
+  this._tireDown=new T.Vector3();this._tireInverse=new T.Matrix4();
   const liv=LIVERY[variant];
   this.dirt={value:.15};this.wet={value:0};this.groundY={value:0};
   const dirty=(m)=>{m.onBeforeCompile=sh=>{sh.uniforms.uDirt=this.dirt;sh.uniforms.uWetV=this.wet;sh.uniforms.uGroundY=this.groundY;
@@ -364,8 +365,7 @@ float n3(vec3 x){vec3 i=floor(x),f=fract(x);f=f*f*(3.0-2.0*f);return mix(mix(mix
   this.root.position.set(o[0]+sp.vel[0]*ld,o[1]+sp.vel[1]*ld,o[2]+sp.vel[2]*ld);this.root.quaternion.set(sp.q[0],sp.q[1],sp.q[2],sp.q[3]);
   this.cabin.position.z=sp.carriage;
   this.pairs[0].rotation.y=sp.steer[0];this.pairs[1].rotation.y=sp.steer[1];this.pairs[2].rotation.y=0;
-  const tmpDown=new T.Vector3();
-  this.root.updateMatrixWorld();
+  const tmpDown=this._tireDown,inv=this._tireInverse;
   for(let i=0;i<6;i++){
    const w=sp.wheels[i],L=this.legs[i],W=this.wheels[i];
    L.leg.position.x=L.side*kneeX(sp.ht(i));// telescoping arms: road track to full width
@@ -375,7 +375,10 @@ float n3(vec3 x){vec3 i=floor(x),f=fract(x);f=f*f*(3.0-2.0*f);return mix(mix(mix
    W.spin.rotation.x=-w.spin;
    // tyre flat spot: deflection toward the contact normal (in the spinning tyre's local frame)
    W.tireMat.userData.flat.value=w.contact?Math.min(.3,w.deflection||0):0;
-   tmpDown.set(-w.cn[0],-w.cn[1],-w.cn[2]);const inv=new T.Matrix4().copy(W.spin.matrixWorld).invert();tmpDown.transformDirection(inv);W.tireMat.userData.down.value.copy(tmpDown);
+   // Only this wheel's ancestor chain is needed here. Refresh it AFTER the
+   // steering/extension/spin edits; the renderer updates the full tree once.
+   W.spin.updateWorldMatrix(true,false);
+   tmpDown.set(-w.cn[0],-w.cn[1],-w.cn[2]);inv.copy(W.spin.matrixWorld).invert();tmpDown.transformDirection(inv);W.tireMat.userData.down.value.copy(tmpDown);
   }
   // hatch and ladder
   const want=opts.ladder?1:0;this._lad=(this._lad??0)+(want-(this._lad??0))*Math.min(1,dt*1.2);

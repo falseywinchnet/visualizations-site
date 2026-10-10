@@ -31,7 +31,12 @@ export class Post{
   this.composer=new EffectComposer(renderer,rt);this.render=new RenderPass(scene,camera);this.composer.addPass(this.render);
   // sanitise NaN/Inf before the bloom blur spreads them into black blocks
   this.clean=new ShaderPass({uniforms:{tDiffuse:{value:null}},vertexShader:`varying vec2 vUv;void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,fragmentShader:`uniform sampler2D tDiffuse;varying vec2 vUv;void main(){vec4 c=texture2D(tDiffuse,vUv);if(any(isnan(c))||any(isinf(c)))c=vec4(0.0,0.0,0.0,1.0);gl_FragColor=vec4(min(c.rgb,vec3(64.0)),c.a);}`});this.composer.addPass(this.clean);
-  this.bloom=new UnrealBloomPass(new T.Vector2(size.x/2,size.y/2),.22,.45,.86);this.composer.addPass(this.bloom);
+  this.bloom=new UnrealBloomPass(new T.Vector2(size.x/2,size.y/2),.22,.45,.86);
+  // These eleven targets only receive fullscreen image filters, never scene
+  // geometry. Their default depth attachments are allocated/cleared for no
+  // useful result. Keep every colour target, blur tap and resolution intact.
+  for(const rt of [this.bloom.renderTargetBright,...this.bloom.renderTargetsHorizontal,...this.bloom.renderTargetsVertical])rt.depthBuffer=false;
+  this.composer.addPass(this.bloom);
   this.grade=new ShaderPass(Grade);this.composer.addPass(this.grade);this.composer.addPass(new OutputPass());
   this.bloom.enabled=quality!=='low';
  }

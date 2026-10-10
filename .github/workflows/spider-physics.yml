@@ -1,4 +1,4 @@
-name: Spider physics
+name: Spider checks
 on:
   pull_request:
     paths: ['docs/spider-drive/**', 'tests/**', '.github/workflows/spider-physics.yml']
@@ -15,4 +15,4 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: '24'
-      - run: node --test tests/spider-tires.test.mjs
+      - run: node --test tests/spider-tires.test.mjs tests/spider-render.test.mjs
