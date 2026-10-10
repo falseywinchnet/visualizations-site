@@ -1,0 +1,18 @@
+name: Spider physics
+on:
+  pull_request:
+    paths: ['docs/spider-drive/**', 'tests/**', '.github/workflows/spider-physics.yml']
+  push:
+    paths: ['docs/spider-drive/**', 'tests/**', '.github/workflows/spider-physics.yml']
+permissions:
+  contents: read
+jobs:
+  tire-physics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - run: node --test tests/spider-tires.test.mjs
