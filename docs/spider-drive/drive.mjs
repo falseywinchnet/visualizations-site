@@ -93,7 +93,7 @@ function frameWait(){return new Promise(r=>requestAnimationFrame(()=>r()));}
 async function prime(ms){const t0=performance.now();cameraUpdate(0,true);while(performance.now()-t0<ms){const done=scenery.update(camera.position);veg.update(camera.position,spider.pos,0);renderFrame(0);await frameWait();if(done&&performance.now()-t0>1200&&veg.pendingF.size===0)break;}}
 function setupVehicle(variant){
  if(model){scene.remove(model.root);}
- const prev=spider;spider=new Spider(env,{variant});G.spider=spider;
+ const prev=spider;spider=new Spider(env,{variant});G.spider=spider;/* the driver's assist choices carry over between drives and worlds */if(recall('assist')==='0')spider.ctl.assist=false;if(recall('climb')==='0')spider.ctl.climb=false;
  if(prev){spider.place(prev.pos[0],prev.pos[2],prev.heading());}
  model=new SpiderModel({variant,envMap:null});model.setCrew(spider.crewCount,variant);model.setPower(G.B.id!=='earth');scene.add(model.root);G.model=model;
  headlights();
@@ -164,8 +164,8 @@ addEventListener('keydown',e=>{
   case 'KeyT':{const o=['road','terrain','soft'];c.tire=o[(o.indexOf(c.tire)+1)%3];sound.hiss(1);spider.say(`Tyres to ${PRESSURES[c.tire]} bar (${{road:'road',terrain:'all-terrain',soft:'sand and mud'}[c.tire]})`,2.5);break;}
   case 'KeyV':{const o=['auto','soft','firm'];c.suspension=o[(o.indexOf(c.suspension)+1)%3];spider.say(`Suspension ${c.suspension}`,1.5);break;}
   case 'KeyG':if(!spider.trackSeq)c.track=c.track>=.5?0:1;break;
-  case 'KeyB':c.assist=!c.assist;spider.say(`Stability assist ${c.assist?'on':'off'}`,2);break;
-  case 'KeyK':c.climb=!c.climb;spider.say(`Climb assist ${c.climb?'on':'off'}`,2);break;
+  case 'KeyB':c.assist=!c.assist;store('assist',c.assist?1:0);spider.say(`Stability assist ${c.assist?'on':'off'}`,2);break;
+  case 'KeyK':c.climb=!c.climb;store('climb',c.climb?1:0);spider.say(`Climb assist ${c.climb?'on':'off'}`,2);break;
   case 'Slash':c.carriageManual=null;spider.say('Carriage on automatic load trim',2);break;
   case 'KeyC':cycleView();break;
   case 'KeyM':toggleMap();break;
