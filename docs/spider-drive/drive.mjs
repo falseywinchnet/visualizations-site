@@ -27,6 +27,7 @@ function store(k,v){try{localStorage.setItem('spider-'+k,String(v));}catch{}}
 function recall(k){try{return localStorage.getItem('spider-'+k);}catch{return null;}}
 const G={state:'loading',paused:false,view:'chase',quality:'medium',mission:null,missionDef:null,seed:+(params.get('seed')||711),body:BODIES[params.get('world')]?params.get('world'):'earth',time:16.5,weather:'clear',volume:.7,music:.55,lights:false,frame:0,debug:params.has('debug')};
 G.B=bodyOf(G.body);G.missions=missionsFor(G.B);G.missionDef=G.missions[0];
+G.tires=params.get('tires')==='compliant'?'compliant':'standard';
 {const m=recall('music');if(m!==null&&isFinite(+m))G.music=+m;}
 // ------------------------------------------------------------------ renderer
 let renderer;
@@ -93,7 +94,7 @@ function frameWait(){return new Promise(r=>requestAnimationFrame(()=>r()));}
 async function prime(ms){const t0=performance.now();cameraUpdate(0,true);while(performance.now()-t0<ms){const done=scenery.update(camera.position);veg.update(camera.position,spider.pos,0);renderFrame(0);await frameWait();if(done&&performance.now()-t0>1200&&veg.pendingF.size===0)break;}}
 function setupVehicle(variant){
  if(model){scene.remove(model.root);}
- const prev=spider;spider=new Spider(env,{variant});G.spider=spider;/* the driver's assist choices carry over between drives and worlds */if(recall('assist')==='0')spider.ctl.assist=false;if(recall('climb')==='0')spider.ctl.climb=false;
+ const prev=spider;spider=new Spider(env,{variant,tires:G.tires});G.spider=spider;/* the driver's assist choices carry over between drives and worlds */if(recall('assist')==='0')spider.ctl.assist=false;if(recall('climb')==='0')spider.ctl.climb=false;
  if(prev){spider.place(prev.pos[0],prev.pos[2],prev.heading());}
  model=new SpiderModel({variant,envMap:null});model.setCrew(spider.crewCount,variant);model.setPower(G.B.id!=='earth');scene.add(model.root);G.model=model;
  headlights();
@@ -111,7 +112,7 @@ function buildMenu(){
  const box=$('#missions');box.innerHTML='';
  for(const m of G.missions){const b=document.createElement('button');b.className='mission';b.setAttribute('role','radio');b.setAttribute('aria-checked',String(m===G.missionDef));b.innerHTML=`<b>${m.name}</b><span>${m.tag}</span>`;b.onclick=()=>{G.missionDef=m;$$('.mission').forEach(x=>x.setAttribute('aria-checked','false'));b.setAttribute('aria-checked','true');brief();};box.appendChild(b);}
  brief();
- $('#opt-seed').value=G.seed;$('#opt-world').value=G.body;$('#opt-music').value=$('#p-music').value=G.music;$('#opt-quality').value=params.get('quality')||'auto';
+ $('#opt-seed').value=G.seed;$('#opt-world').value=G.body;$('#opt-tires').value=G.tires;$('#opt-music').value=$('#p-music').value=G.music;$('#opt-quality').value=params.get('quality')||'auto';
  // the sun does not move on a lunar afternoon and there is no weather to pick off Earth
  const off=G.body!=='earth';$('#opt-time').closest('label').hidden=off;$('#opt-weather').closest('label').hidden=off;
 }
@@ -121,7 +122,7 @@ $('#opt-weather').onchange=e=>{G.weather=e.target.value;if(atmo&&G.state==='menu
 $('#opt-volume').oninput=$('#p-volume').oninput=e=>{G.volume=+e.target.value;sound?.setVolume(G.volume);$('#opt-volume').value=$('#p-volume').value=G.volume;};
 $('#opt-music').oninput=$('#p-music').oninput=e=>{G.music=+e.target.value;sound?.music.setVolume(G.music);sound?.music.setOn(G.music>0);$('#opt-music').value=$('#p-music').value=G.music;store('music',G.music);};
 $('#opt-quality').onchange=$('#p-quality').onchange=e=>{const v=e.target.value==='auto'?autoQ():e.target.value;setQuality(v);};
-$('#go').onclick=()=>{const seed=+$('#opt-seed').value||711,world=$('#opt-world').value;if(seed!==G.seed||world!==G.body){const u=new URL(location.href);u.searchParams.set('seed',seed);if(world==='earth')u.searchParams.delete('world');else u.searchParams.set('world',world);location.href=u.href;return;}startMission(G.missionDef);};
+$('#go').onclick=()=>{const seed=+$('#opt-seed').value||711,world=$('#opt-world').value,tires=$('#opt-tires').value;const u=new URL(location.href);if(tires==='compliant')u.searchParams.set('tires',tires);else u.searchParams.delete('tires');if(seed!==G.seed||world!==G.body){u.searchParams.set('seed',seed);if(world==='earth')u.searchParams.delete('world');else u.searchParams.set('world',world);location.href=u.href;return;}G.tires=tires;history.replaceState(null,'',u.href);startMission(G.missionDef);};
 function setQuality(q){G.quality=q;scenery.setQuality(q);veg.cfg(q);veg.dirty=true;renderer.setPixelRatio(Math.min(devicePixelRatio,q==='high'?1.75:q==='low'?1:1.4));post.bloom.enabled=q!=='low';post.enabled=q!=='low';resize();
  /* resizing clears the canvas: draw a frame in the same task so no black frame is ever presented */if(world&&post){try{post.frame(0,scene,camera);}catch{}}$('#p-quality').value=q;}
 // ------------------------------------------------------------------ missions
@@ -129,7 +130,7 @@ function startMission(def){
  sound.start();sound.setVolume(G.volume);sound.music.setVolume(G.music);sound.music.setOn(G.music>0);sound.music.setMood(def.id);
  if(G.mission)G.mission.dispose?.();
  G.missionDef=def;G.stats={t:0,dist:0,maxTilt:0};
- if(def.variant!==spider.variant)setupVehicle(def.variant);
+ if(def.variant!==spider.variant||spider.tireModel!==G.tires)setupVehicle(def.variant);
  atmo.setTime(def.time??G.time);atmo.setWeather(def.weather??G.weather);
  fx.rainOn=(def.weather??G.weather)==='rain'?1:0;shared.uWetness.value=(def.weather??G.weather)==='rain'?.5:0;
  // clear tyre tracks from the last run
@@ -282,7 +283,7 @@ function drawHud(){
  $('#att').textContent=`Roll ${sp.roll?.toFixed(1)}° · Pitch ${sp.pitch?.toFixed(1)}°`;
  {const b=$('#b-right');b.classList.toggle('urgent',!!sp.overturned&&!sp.sr);b.textContent=sp.sr?'Stop arms':'Self-right';}
  $('#b-engine').textContent=G.B.id!=='earth'?(sp.engine.off?(sp.engine.crank>0?'Powering':'Power on'):'Power off'):sp.engine.off?(sp.engine.crank>0?'Starting':'Start'):'Engine off';$('#m-ride').textContent=`${Math.round(sp.ctl.retraction*100)}% retr`;$('#m-assist').textContent=(sp.ctl.assist?'On':'Off')+(sp.ctl.climb?' +climb':'');$('#m-track').textContent=spider.trackFrac>.99?'Wide':spider.trackFrac<.01?'Road':spider.trackSeq?`${spider.trackSeq.tgt?'Widening':'Narrowing'} ${Math.round(spider.trackFrac*100)}%`:`Mixed ${Math.round(spider.trackFrac*100)}% (G)`;$('#m-susp').textContent=`${sp.ctl.suspension}${sp.ctl.suspension==='auto'?' ('+sp.suspMode+')':''}`;
- $('#m-tyre').textContent=`Kevlar ${sp.wheels[0].pressure.toFixed(1)} bar`;$('#m-carr').textContent=`${sp.carriage>=0?'aft ':'fwd '}${Math.abs(sp.carriage).toFixed(1)} m`;
+ $('#m-tyre').textContent=`${sp.tireModel==='compliant'?'Soft / firm walls':'Kevlar'} ${sp.wheels[0].pressure.toFixed(1)} bar`;$('#m-carr').textContent=`${sp.carriage>=0?'aft ':'fwd '}${Math.abs(sp.carriage).toFixed(1)} m`;
  const L=sp.wheels.map(w=>w.load),m=L.reduce((a,b)=>a+b,0)/6||1,dev=Math.max(...L.map(l=>Math.abs(l-m)))/m;$('#m-bal').textContent=`${Math.round(clamp(1-dev*.5,0,1)*100)}%`;
  const bearing=G.mission?.bearing?.();$('#bearing').textContent=bearing||'';
  drawFeet();drawHorizon();drawSpeedo(kmh*uk,U);

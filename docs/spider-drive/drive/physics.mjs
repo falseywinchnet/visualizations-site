@@ -5,6 +5,8 @@
 // controller does levelling, load allocation, skyhook damping and step climbing.
 // This is a speculative concept model: plausible physics, not a validated vehicle.
 
+import {TIRE,tireGrip,stepWheel,tireRadialStiffness,tireNormalResponse} from './tires.mjs';
+
 export const GEOM=Object.freeze({R:1.7,tireWidth:.76,halfTrack:4.5,roadHalfTrack:3.0,splay:5.5*Math.PI/180,stations:[-4.7,0,4.7],stroke:3.6,hubTop:3.24,plateY:6.11,topPlate:6.4,belly:2.6,cabinY:4.2,cabinR:1.6,cabinHalf:5.4,wheelbase:9.4,maxLock:40*Math.PI/180,carriageMax:2.0,intakeY:7.3});
 export const DT=1/240;
 // Self-righting arms: two curved telescoping fingers hung from the top frame beside the pod, at one station just
@@ -59,6 +61,7 @@ export const PRESSURES={road:2.5,terrain:1.6,soft:.8};
 export class Spider{
  constructor(env,opts={}){
   this.env=env;this.variant=opts.variant||'scout';this.crewCount=opts.crew??VARIANTS[this.variant].crew;
+  this.tireModel=opts.tires==='compliant'?'compliant':'standard';
   this.water=VARIANTS[this.variant].tank;// litres ~ kg
   this.carriage=0;this.carriageTarget=0;
   // controls & modes
@@ -145,7 +148,7 @@ export class Spider{
  gasForce(wh,e){const Vn=this.Vn,raw=Vn-PISTON*(wh.eset-e),v=clamp(raw,Vn*.12,Vn*1.25);const P=PN*Math.pow(Vn/v,GAMMA);wh.gas=P;let F=P*PISTON;if(raw>Vn*1.25)F-=3e6*(raw-Vn*1.25)/PISTON;return F;}// oil lock once the accumulator is empty of oil
  gasStiffness(wh,e){const Vn=this.Vn,raw=Vn-PISTON*(wh.eset-e),v=clamp(raw,Vn*.12,Vn*1.25);return GAMMA*PN*Math.pow(Vn/v,GAMMA)*PISTON*PISTON/v+(raw>Vn*1.25?3e6:0);}
  // tyre vertical stiffness at its present pressure
- tyreK(wh){return mix(260e3,620e3,(wh.pressure-.8)/1.7)*TSC;}
+ tyreK(wh){return this.tireModel==='compliant'?tireRadialStiffness(wh.pressure):mix(260e3,620e3,(wh.pressure-.8)/1.7)*TSC;}
  // setpoint giving force F at extension e
  esetFor(F,e){const Vn=this.Vn,r=Math.pow(PN*PISTON/Math.max(F,500),1/GAMMA);return e+(Vn/PISTON)*(1-r);}
  // ---------------------------------------------------------------- step
@@ -192,12 +195,16 @@ export class Spider{
    let tf=[0,0,0];// tyre force on wheel
    if(pen>0){
     const nt=env.normal(patches[0].pt[0],patches[0].pt[2]);const lh=[-fh[2],0,fh[0]];const lat=dot(nt,lh);
-    const kt=this.tyreK(wh);/* the big carcass damps wheel hop */
     for(const q of patches){q.n=norm(add(q.n,scl(lh,lat*(q===patches[0]?1:0))));const pdot=-dot(vH,q.n);
      // struck across the strut (on its side, landing on a wheel's flank) the blow goes straight into the frame,
      // not through the strut's damper: the crushing sidewall and the sloshing ballast fluid soak it instead
-     const cross_=1-Math.abs(dot(q.n,ax)),ct=9000*DSC+9e4*cross_*cross_;
-     q.Fn=kt*q.pen+ct*pdot+(q.pen>.3?Math.max(0,(q.pen-.3)*2.5e6+1.5e5*pdot):0)/* crushed to the rim: steel into dirt */;if(q.Fn<0)q.Fn=0;if(q.Fn>8e5)q.Fn=8e5;
+     if(this.tireModel==='compliant'){
+      const normal=tireNormalResponse({pressure:wh.pressure,penetration:q.pen,speed:pdot,sidewall:Math.abs(dot(q.n,axl)),crossStrut:1-Math.abs(dot(q.n,ax))});
+      q.Fn=normal.force;q.kt=normal.stiffness;q.ct=normal.damping;
+     }else{
+      const cross_=1-Math.abs(dot(q.n,ax)),ct=9000*DSC+9e4*cross_*cross_;
+      q.Fn=clamp(this.tyreK(wh)*q.pen+ct*pdot+(q.pen>.3?Math.max(0,(q.pen-.3)*2.5e6+1.5e5*pdot):0),0,8e5);
+     }
      q.t=norm(sub(fw,scl(q.n,dot(fw,q.n))));q.l=cross(q.n,q.t);Fn+=q.Fn;}
     if(Fn>8e5){const k=8e5/Fn;for(const q of patches)q.Fn*=k;Fn=8e5;}
     // resultant normal and contact point (load weighted) stand for the tyre in the strut and HUD
@@ -210,9 +217,10 @@ export class Spider{
     const pfac=(2.5-wh.pressure)/1.7;
     const Fnom=this.totalMass*G/6;
     // 3.4 m lugged agricultural tyres bite harder than the surface's reference tyre, more so aired down on soft ground
-    const lug=1.2+.35*pfac*surf.soft;let mu=surf.mu*lug*(1+.22*pfac*surf.soft)*clamp(1-.07*(Fn/Fnom-1),.55,1.1);/* load sensitivity, bounded: a tyre crushed far past its share (a machine lying on it) must not go to negative grip */const muS=surf.slide*lug*(1+.22*pfac*surf.soft);
-    // Kevlar-belted lugged tyres: stiff carcass for high speed, sharper cornering response, no grip loss wading
-    const Ck=10,Ca=9.5;const den=Math.max(Math.abs(vx),1.5);
+    const {peak:mu,slide:muS}=tireGrip(surf,wh.pressure,Fn,Fnom);
+    // Edge patches may have no usable tread purchase. Their reduced force must
+    // also reach the spin solver; otherwise the wheel brakes against absent grip.
+    const grip=patches.reduce((s,q)=>s+q.Fn*q.grip,0)/(Fn||1);
     let Fx,Fy;
     if(this.hold&&!wh.disabled&&!wh.lifted){wh.Ti=0;
      // low-speed sticky anchor holds on slopes without creep
@@ -223,8 +231,6 @@ export class Spider{
      wh.omega=0;wh.slip=0;wh.slipAngle=0;
     }else{
      wh.anchor=null;
-     // spin DOF, implicit against the linearised longitudinal force
-     const I=300;const kap=(wh.omega*Rw-vx)/den;const F0=Ck*Fn*kap;const D=Ck*Fn*Rw/den;// dFx/domega
      const roll=(surf.roll*(1+.6*pfac*(1-surf.soft))+wh.sink*.35)*Fn*Rw*Math.tanh(wh.omega*3);
      let Tm=0,Tmax=wh.disabled||this.engine.stalled?0:Math.min(52000*(1+.3*(this.engine.boost||0)),1.25*mu*Fn*Rw+2500);
      // engine power shared by the six hub motors caps motoring torque (braking is hydrostatic and free)
@@ -234,23 +240,26 @@ export class Spider{
      // against a load, so a wheel held back below its commanded speed (a steep pitch from a standstill) works up to
      // full torque instead of stalling on a fixed speed error
      const Ti=wh.Ti||0;
-     let om=(I*wh.omega+DT*(Kp*wT+Ti-Rw*(F0-D*wh.omega)-roll))/(I+DT*(Rw*D+Kp));Tm=Kp*(wT-om)+Ti;
-     const motoring=Tm*(wh.omega||wh.targetOmega||1)>0,Tlim=motoring?Math.min(Tmax,Tpow):Tmax;
-     let sat=false;if(Math.abs(Tm)>Tlim){sat=true;Tm=Math.sign(Tm)*Tlim;om=(I*wh.omega+DT*(Tm-Rw*(F0-D*wh.omega)-roll))/(I+DT*Rw*D);}
-     {const e=wT-om;if(!(sat&&Math.sign(e)===Math.sign(Ti||e)))wh.Ti=clamp(Ti+(e*Math.sign(Ti||e)<0?1.2e5:4e4)*e*DT,-Tlim,Tlim);/* builds over about a second; lets go three times faster once the wheel is over its speed */else wh.Ti=clamp(Ti,-Tlim,Tlim);}/* anti-windup */
-     // traction control trims torque on excessive slip
-     const kn=(om*Rw-vx)/den;if(Math.abs(kn)>.15&&this.ctl.assist){const s=.15/Math.abs(kn);Tm*=s;om=(I*wh.omega+DT*(Tm-Rw*(F0-D*wh.omega)-roll))/(I+DT*Rw*D);}
-     wh.omega=om;wh.torque=Tm;drivePower+=Math.max(0,Tm*om);
-     const kap2=(om*Rw-vx)/den;Fx=Ck*Fn*kap2;Fy=-Ca*Fn*Math.atan2(vy,den);
-     const mag=Math.hypot(Fx,Fy),lim=mu*Fn;
-     if(mag>lim){const rho=mag/lim,me=mix(mu,muS,clamp((rho-1)/2.5,0,1))*Fn;Fx*=me/mag;Fy*=me/mag;}
-     wh.slip=kap2;wh.slipAngle=Math.atan2(vy,den);
+     const p={omega:wh.omega,dt:DT,radius:Rw,vx,vy,load:Fn,mu,muSlide:muS,grip,target:wT,gain:Kp,integral:Ti,torqueLimit:Tmax,rolling:roll};
+     const result=stepWheel(p,wh._tire||(wh._tire={}));
+     const motoring=result.torque*(wh.omega||wT||1)>0,Tlim=motoring?Math.min(Tmax,Tpow):Tmax;
+     if(Tlim<Tmax){p.torqueLimit=Tlim;stepWheel(p,result);}
+     let limited=Math.abs(result.torque-(Kp*(wT-result.omega)+Ti))>1e-6;
+     // Trim torque that drives slip further, then re-solve the wheel. Recovery
+     // torque that opposes existing wheelspin/lockup must retain its authority.
+     if(Math.abs(result.slip)>.15&&this.ctl.assist&&result.torque*result.slip>0){
+      p.gain=0;p.integral=result.torque*.15/Math.abs(result.slip);stepWheel(p,result);limited=true;}
+     const e=wT-result.omega;
+     if(!(limited&&e*(Kp*e+Ti-result.torque)>0))wh.Ti=clamp(Ti+(e*Math.sign(Ti||e)<0?1.2e5:4e4)*e*DT,-Tlim,Tlim);
+     else wh.Ti=clamp(Ti,-Tlim,Tlim);
+     Tm=result.torque;wh.omega=result.omega;wh.torque=Tm;drivePower+=Math.max(0,Tm*wh.omega);
+     Fx=result.fx;Fy=result.fy;wh.slip=result.slip;wh.slipAngle=result.slipAngle;
     }
     wh.spin+=wh.omega*DT;
     // each patch carries its share of the tyre force along its own surface
-    for(const q of patches){const sh=Fn>0?q.Fn/Fn:1/patches.length;tf=add(tf,add(add(scl(q.n,q.Fn),scl(q.t,Fx*sh*q.grip)),scl(q.l,Fy*sh*q.grip)));}
+    for(const q of patches){const sh=Fn>0?q.Fn/Fn:1/patches.length,patchGrip=this.hold&&!wh.disabled&&!wh.lifted?q.grip:grip>0?q.grip/grip:0;tf=add(tf,add(add(scl(q.n,q.Fn),scl(q.t,Fx*sh*patchGrip)),scl(q.l,Fy*sh*patchGrip)));}
     wh.fx=Fx;wh.fy=Fy;
-   }else{wh.deflection=0;wh.anchor=null;wh.Ti=0;const I=300;const wT=wh.targetOmega||0,al=wh.disabled||this.engine.stalled?0:clamp((wT-wh.omega)*8,-20,20);wh.omega+=al*DT;wh.spin+=wh.omega*DT;wh.fx=wh.fy=0;
+   }else{wh.deflection=0;wh.anchor=null;wh.Ti=0;const I=TIRE.inertia;const wT=wh.targetOmega||0,al=wh.disabled||this.engine.stalled?0:clamp((wT-wh.omega)*8,-20,20);wh.omega+=al*DT;wh.spin+=wh.omega*DT;wh.fx=wh.fy=0;
     // in the air the hub motor's torque reacts on the frame: drive the wheels up and the nose lifts, brake them and it drops
     T[0]+=I*al*axl[0];T[1]+=I*al*axl[1];T[2]+=I*al*axl[2];}
    wh.load=Fn;wh.cp=cpt;wh.cn=cn;
@@ -260,8 +269,9 @@ export class Spider{
    const aMu=dot(this.acc,ax);
    const tu=dot(tf,ax);
    const f0=mU*aMu-tu+mU*G*ax[1]+Fs;
-   const Ks=this.gasStiffness(wh,wh.e)+(wh.e<0||wh.e>GEOM.stroke?9e5:0),Kt=pen>0?this.tyreK(wh)*cnU*cnU:0;
-   const Cs=this.strutDamping(wh.ev)+(wh.e<0||wh.e>GEOM.stroke?STOPC:0),Ct=pen>0?9000*DSC*cnU*cnU:0;
+   const compliant=this.tireModel==='compliant';
+   const Ks=this.gasStiffness(wh,wh.e)+(wh.e<0||wh.e>GEOM.stroke?9e5:0),Kt=compliant?patches.reduce((s,q)=>s+(q.kt||0)*dot(q.n,ax)**2,0):pen>0?this.tyreK(wh)*cnU*cnU:0;
+   const Cs=this.strutDamping(wh.ev)+(wh.e<0||wh.e>GEOM.stroke?STOPC:0),Ct=compliant?patches.reduce((s,q)=>s+(q.ct||0)*dot(q.n,ax)**2,0):pen>0?9000*DSC*cnU*cnU:0;
    const Kk=Ks+Kt,Cc=Cs+Ct;
    const evn=(mU*wh.ev+DT*(f0+Cc*wh.ev))/(mU+DT*Cc+DT*DT*Kk);
    wh.ev=evn;wh.e+=DT*evn;if(wh.e<-.08){wh.e=-.08;wh.ev=Math.max(0,wh.ev);}if(wh.e>GEOM.stroke+.08){wh.e=GEOM.stroke+.08;wh.ev=Math.min(0,wh.ev);}

@@ -32,10 +32,12 @@
     <label>Country <input id="opt-seed" type="number" min="1" max="99999" value="711"></label>
     <label>Time of day <input id="opt-time" type="range" min="4" max="21" step=".25" value="16.5"><output id="opt-time-out">16:30</output></label>
     <label>Weather <select id="opt-weather"><option value="clear">Clear</option><option value="haze">Haze</option><option value="rain">Drizzle</option></select></label>
+    <label>Tyres <select id="opt-tires" aria-describedby="tire-note"><option value="standard">Standard reinforced</option><option value="compliant">Softer tires, firm sidewalls (experimental)</option></select></label>
     <label>Quality <select id="opt-quality"><option value="auto">Auto</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></label>
     <label>Sound <input id="opt-volume" type="range" min="0" max="1" step=".05" value=".7"></label>
     <label>Music <input id="opt-music" type="range" min="0" max="1" step=".05" value=".55"></label>
    </div>
+   <p class="small" id="tire-note">The softer setup absorbs bumps differently; it is not a rollover guard. Tyre pressure is still adjustable while driving.</p>
   </details>
   <button id="go" class="go">Board the Spider</button>
   <p class="small honesty">A speculative vehicle concept. The dynamics are simulated from first principles, not validated against a built machine.</p>
