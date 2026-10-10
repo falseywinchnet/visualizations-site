@@ -5,7 +5,7 @@
 // controller does levelling, load allocation, skyhook damping and step climbing.
 // This is a speculative concept model: plausible physics, not a validated vehicle.
 
-export const GEOM=Object.freeze({R:1.7,tireWidth:.62,halfTrack:4.5,roadHalfTrack:3.0,splay:5.5*Math.PI/180,stations:[-4.7,0,4.7],stroke:3.6,hubTop:3.24,plateY:6.11,topPlate:6.4,belly:2.6,cabinY:4.2,cabinR:1.6,cabinHalf:5.4,wheelbase:9.4,maxLock:40*Math.PI/180,carriageMax:2.0,intakeY:7.3});
+export const GEOM=Object.freeze({R:1.7,tireWidth:.76,halfTrack:4.5,roadHalfTrack:3.0,splay:5.5*Math.PI/180,stations:[-4.7,0,4.7],stroke:3.6,hubTop:3.24,plateY:6.11,topPlate:6.4,belly:2.6,cabinY:4.2,cabinR:1.6,cabinHalf:5.4,wheelbase:9.4,maxLock:40*Math.PI/180,carriageMax:2.0,intakeY:7.3});
 export const DT=1/240;
 // Self-righting arms: two curved telescoping fingers hung from the top frame beside the pod, at one station just
 // behind the middle legs. Each sleeve hangs down the side of the pod, clear of it (the pod slides on its carriage;
