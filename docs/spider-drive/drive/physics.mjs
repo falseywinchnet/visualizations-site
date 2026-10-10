@@ -144,6 +144,8 @@ export class Spider{
  volume(){const soft=this.suspMode==='soft';return soft?.006:.0025;}
  gasForce(wh,e){const Vn=this.Vn,raw=Vn-PISTON*(wh.eset-e),v=clamp(raw,Vn*.12,Vn*1.25);const P=PN*Math.pow(Vn/v,GAMMA);wh.gas=P;let F=P*PISTON;if(raw>Vn*1.25)F-=3e6*(raw-Vn*1.25)/PISTON;return F;}// oil lock once the accumulator is empty of oil
  gasStiffness(wh,e){const Vn=this.Vn,raw=Vn-PISTON*(wh.eset-e),v=clamp(raw,Vn*.12,Vn*1.25);return GAMMA*PN*Math.pow(Vn/v,GAMMA)*PISTON*PISTON/v+(raw>Vn*1.25?3e6:0);}
+ // tyre vertical stiffness at its present pressure
+ tyreK(wh){return mix(260e3,620e3,(wh.pressure-.8)/1.7)*TSC;}
  // setpoint giving force F at extension e
  esetFor(F,e){const Vn=this.Vn,r=Math.pow(PN*PISTON/Math.max(F,500),1/GAMMA);return e+(Vn/PISTON)*(1-r);}
  // ---------------------------------------------------------------- step
@@ -167,14 +169,18 @@ export class Spider{
    // a tyre is a disc, not a ball: as its axle tips toward the vertical (the machine on its side) the reach toward the
    // ground shrinks from the radius to half the tread width (unchanged for ordinary roll and splay)
    const axl=mv(R,[Math.cos(d),0,-Math.sin(d)]),ka=Math.abs(axl[1]),Rc=ka<.35?Rw:Math.min(Rw,Rw*Math.sqrt(1-ka*ka)+GEOM.tireWidth*.5*ka);
-   for(let k=-6;k<=6;k++){const s=k/6*Rc*.98,gx=hub[0]+fh[0]*s,gz=hub[2]+fh[2]*s,gy=env.ground(gx,gz,hub[1])-sink;
+   const GS=this._gs||(this._gs=new Float64Array(13));for(let k=-6;k<=6;k++){const s=k/6*Rc*.98;GS[k+6]=env.ground(hub[0]+fh[0]*s,hub[2]+fh[2]*s,hub[1])-sink;}
+   for(let k=-6;k<=6;k++){const s=k/6*Rc*.98,gx=hub[0]+fh[0]*s,gz=hub[2]+fh[2]*s,gy=GS[k+6];
     gSup=Math.max(gSup,gy+Math.sqrt(Math.max(0,Rc*Rc-s*s))-Rc);// where a rigid tyre of this radius rests on the profile
     let p,nx,ny,nz,py;
-    if(gy>hub[1]){// solid column reaches above the hub: nearest point is level with the hub
+    // a sample part-way up the face of a wall that rises above the hub is wall, not ground: its 'top' is just where the
+    // sample fell on the face, and a contact there would point up the wall and let the drive claw the tyre up it
+    const ko=k+Math.sign(k),face=k!==0&&ko>=-6&&ko<=6&&GS[ko+6]>hub[1]&&GS[ko+6]-gy>.35;
+    if(gy>hub[1]||face){// solid column reaches above the hub: nearest point is level with the hub
      if(Math.abs(s)<.12){p=Rc+(gy-hub[1]);nx=0;ny=1;nz=0;py=gy;}else{p=Rc-Math.abs(s);nx=-fh[0]*Math.sign(s);ny=0;nz=-fh[2]*Math.sign(s);py=hub[1];}}
     else{const dx=hub[0]-gx,dy=hub[1]-gy,dz=hub[2]-gz,dd=Math.hypot(dx,dy,dz)||1e-6;p=Rc-dd;nx=dx/dd;ny=dy/dd;nz=dz/dd;py=gy;}
     const P=(ny<.35&&Math.abs(s)>.3)?pe:pg;// only a genuinely steep face counts as an edge patch
-    if(p>P.pen){P.pen=p;P.p=[gx,py,gz];}if(P===pe&&p>0)pe.above=Math.max(pe.above,gy-hub[1]);
+    if(p>P.pen){P.pen=p;P.p=[gx,py,gz];}if(P===pe&&p>0)pe.above=Math.max(pe.above,(face?GS[ko+6]:gy)-hub[1]);
     if(p>0){P.ax+=nx*p;P.ay+=ny*p;P.az+=nz*p;}}
    wh.gSup=gSup;
    // two patches only when they are distinct contacts; otherwise one blended contact as before
@@ -186,7 +192,7 @@ export class Spider{
    let tf=[0,0,0];// tyre force on wheel
    if(pen>0){
     const nt=env.normal(patches[0].pt[0],patches[0].pt[2]);const lh=[-fh[2],0,fh[0]];const lat=dot(nt,lh);
-    const kt=mix(260e3,620e3,(wh.pressure-.8)/1.7)*TSC;/* the big carcass damps wheel hop */
+    const kt=this.tyreK(wh);/* the big carcass damps wheel hop */
     for(const q of patches){q.n=norm(add(q.n,scl(lh,lat*(q===patches[0]?1:0))));const pdot=-dot(vH,q.n);
      // struck across the strut (on its side, landing on a wheel's flank) the blow goes straight into the frame,
      // not through the strut's damper: the crushing sidewall and the sloshing ballast fluid soak it instead
@@ -254,7 +260,7 @@ export class Spider{
    const aMu=dot(this.acc,ax);
    const tu=dot(tf,ax);
    const f0=mU*aMu-tu+mU*G*ax[1]+Fs;
-   const Ks=this.gasStiffness(wh,wh.e)+(wh.e<0||wh.e>GEOM.stroke?9e5:0),Kt=pen>0?mix(260e3,620e3,(wh.pressure-.8)/1.7)*TSC*cnU*cnU:0;
+   const Ks=this.gasStiffness(wh,wh.e)+(wh.e<0||wh.e>GEOM.stroke?9e5:0),Kt=pen>0?this.tyreK(wh)*cnU*cnU:0;
    const Cs=this.strutDamping(wh.ev)+(wh.e<0||wh.e>GEOM.stroke?STOPC:0),Ct=pen>0?9000*DSC*cnU*cnU:0;
    const Kk=Ks+Kt,Cc=Cs+Ct;
    const evn=(mU*wh.ev+DT*(f0+Cc*wh.ev))/(mU+DT*Cc+DT*DT*Kk);
@@ -490,7 +496,7 @@ export class Spider{
      if(mixed&&!Q.back){this._autoBack={tgt:1-Q.tgt,t:0};this.say(m+': walking the legs back',3.5);}else this.say(m+(mixed?'. G walks the legs back':''),3.5);};
     if(Q.t>10&&Q.phase!=='settle')abort('Track change stalled: legs set down');
     else if(speed>2||this.overturned)abort('Track change interrupted');
-    else if(Q.phase==='raise'){Q.carriage=0;let m=0,n=0;for(const w of this.wheels)if(!w.lifted){m+=w.e;n++;}if((m/n>GEOM.stroke-.75&&(this._levErr??0)<.025&&len(this.w)<.03)||Q.t>9){Q.phase='shift';/* up, and settled level (with assist off the levelling only starts with the walk) */Q.t=0;Q.holdE=this.wheels.map(w=>w.e);Q.att=[this.roll||0,this.pitch||0];}}
+    else if(Q.phase==='raise'){Q.carriage=0;let m=0,n=0;for(const w of this.wheels)if(!w.lifted){m+=w.e;n++;}if((m/n>GEOM.stroke-.75&&(this._levErr??0)<.025&&len(this.w)<.03)||Q.t>9){Q.phase='shift';/* up, and settled level (with assist off the levelling only starts with the walk) */Q.t=0;Q.holdE=this.wheels.map(w=>w.e);Q.holdF=this.wheels.map((w,i)=>this.Fsm?.[i]??this.totalMass*G/6);Q.att=[this.roll||0,this.pitch||0];}}
     else if(Q.phase==='settle'){Q.carriage=undefined;if(Q.t>1.5){this.trackSeq=null;this.say(Q.tgt?'Track wide':'Track narrow: road width',2);}}
     else{const U=Q.order[Q.k],W=U.map(i=>this.wheels[i]),p=U[0]>>1;Q.carriage=U.length===1?-1.2:p===0?GEOM.carriageMax:0;
      if(Q.phase==='shift'){if(Math.abs(this.carriage-Q.carriage)<.08||Q.t>9){const rx=[],rz=[];for(let i=0;i<6;i++){const q=this.wheels[i].contact?this.wheels[i].cp:this.wheels[i].hub,rr=sub(q,this.pos);rx.push(dot(rr,[-hf[2],0,hf[0]]));rz.push(dot(rr,hf));}
@@ -596,7 +602,7 @@ export class Spider{
   if(lev&&this.tipMargin<2.6&&!this.climbState){sReq=clamp(sReq+(2.6-this.tipMargin)*.6,0,1);if(this.tipMargin<.9&&this.t-(this._tipMsg||0)>4){this._tipMsg=this.t;this.say('Rollover risk: lowering the cabin',2.5);}}
   const eNom=GEOM.stroke*(1-sReq);
   // body attitude target: level fraction f by bisection so every leg stays within stroke
-  const margin=this.climbState||sReq<.04?.06:.16,lo=margin,hi=GEOM.stroke-(this.trackSeq&&this.trackSeq.phase!=='raise'&&this.trackSeq.order[this.trackSeq.k]?.length===1?.35:margin);/* walking a rear leg on its own: the five planted legs keep some stroke in hand to take its load (on a side slope the downhill ones would otherwise be at full stretch) */
+  const margin=this.climbState||sReq<.04?.06:.16,lo=this.trackSeq?1.2:margin,hi=GEOM.stroke-(this.trackSeq?.35:margin);/* walking the legs: every leg keeps stroke in hand at both ends, enough to draw its tyre clear and enough to take a lifted unit's load (on a slope the downhill legs would otherwise be at full stretch); the body leans with the slope as far as it must to fit */
   const tanOf=v=>v/Math.sqrt(Math.max(1e-6,1-v*v));
   const aB=tanOf(right[1]),bB=tanOf(fwd[1]),upY=Math.max(.3,up[1]);
   const eTouch=wheels.map((wh,i)=>wh.e+(wh.hub[1]-(gH[i]+GEOM.R-.035))/(Math.max(.3,wh.axis?wh.axis[1]:upY)));this.eTouch=eTouch;
@@ -633,7 +639,7 @@ export class Spider{
    this.eTs[i]=v;return v;});
   // during a track change the planted legs hold the raised stance exactly (load-compensated), leveller paused
   if(this.engine.off)for(let i=0;i<6;i++){eT[i]=wheels[i].e;this.eTs[i]=wheels[i].e;}/* engine off: the levelling waits, and restarts from where the legs stand */
-  const TQ=this.trackSeq;if(TQ&&TQ.holdE)for(let i=0;i<6;i++)if(!wheels[i].lifted){if(TQ.phase==='lower'&&TQ.order[TQ.k]?.includes(i))TQ.holdE[i]=Math.max(TQ.holdE[i],Math.min(GEOM.stroke-.1,eTouch[i]+.1));/* set down on a slope, the moved leg reaches for ground lower than where it stood, and holds there */eT[i]=TQ.holdE[i];this.eTs[i]=TQ.holdE[i];}
+  const TQ=this.trackSeq;if(TQ&&TQ.holdE)for(let i=0;i<6;i++)if(!wheels[i].lifted){if(TQ.phase==='lower'&&TQ.order[TQ.k]?.includes(i)){TQ.holdE[i]=Math.max(TQ.holdE[i],Math.min(GEOM.stroke-.1,eTouch[i]+.1));TQ.holdF[i]=Fnom6;}/* set down on a slope, the moved leg reaches for ground lower than where it stood, and holds there */eT[i]=TQ.holdE[i];this.eTs[i]=TQ.holdE[i];}
   // ---- load allocation: minimum-variance loads satisfying force and moment balance about the CoM
   const W=this.totalMass*G*Math.max(.3,1+dot(this.acc,[0,1,0])/G*.0);
   const comH=[0,0];// CoM horizontal is at 0 in hr/hf coords relative to pos
@@ -667,7 +673,8 @@ export class Spider{
     if(!this.Fsm)this.Fsm=wheels.map(()=>Fnom6);
     this.Fsm[i]+=(wh.load-this.Fsm[i])*(1-Math.exp(-dt/.9));
     const Fuse=clamp(anyLift?this.Fsm[i]*.2+(Ft[i]||Fnom6)*.8:this.Fsm[i]*.65+(Ft[i]||Fnom6)*.35,.5*Fnom6,3.4*Fnom6);// with a pair lifting, pre-load the others to their new share
-    const ff=this.esetFor(Fuse-UNSPRUNG*G,eT[i]);
+    const squash=TQ&&TQ.holdF?clamp((Fuse-TQ.holdF[i])/this.tyreK(wh),-.15,.4):0;/* the held stance was measured at the loads of the moment: a leg taking a lifted unit's share extends by what its tyre will squash */
+    const ff=this.esetFor(Fuse-UNSPRUNG*G,eT[i]+squash);
     const modal=TQ&&TQ.holdE?0:this.integ[0];
     const loadTrim=0;
     const vUp=this.pointVel(wh.mount)[1],vDb=Math.sign(vUp)*Math.max(0,Math.abs(vUp)-.04);const sky=lev?clamp(-vDb*.45,-.35,.35):0;
