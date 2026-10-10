@@ -1,6 +1,11 @@
 // Procedural WebAudio: V8, hydraulic pump, valves, pneumatics, tyres by surface, foliage, water,
 // rain, wind, birds and crickets, fire, artillery and radio. Starts on the first user gesture.
 import {clamp,mix} from './noise.mjs';
+// Approved 'Deeper throat' audition: +4 dB on Earth engine layers only.
+const EARTH_ENGINE_GAIN=10**(4/20);
+// Sound-design rev range, independent of the power/pump simulation and RPM HUD.
+// Preserve cranking/run-down to zero; map 550–1900 physical rpm to 500–1250.
+export function earthVoiceRpm(rpm){return rpm<=550?Math.max(0,rpm)*500/550:500+clamp((rpm-550)/1350,0,1)*750;}
 export class Sound{
  constructor(){this.ctx=null;this.vol=.7;this.paused=false;this.music=new Music(this);}
  start(){
@@ -17,9 +22,13 @@ export class Sound{
   this.white=noiseBuf(2);this.brown=noiseBuf(3,'brown');
   const loop=(buf,filterType,freq,q=1,dest=this.ext)=>{const s=C.createBufferSource();s.buffer=buf;s.loop=true;const f=C.createBiquadFilter();f.type=filterType;f.frequency.value=freq;f.Q.value=q;const g=C.createGain();g.gain.value=0;s.connect(f).connect(g).connect(dest);s.start();return {s,f,g};};
   // Turbo diesel V8: a heavy, smooth firing thump (one engine cycle of rounded pulses at the cross-plane bank
-  // pattern, played at rpm/120 and kept under a low cutoff), a firing-rate sub, injector knock (band-passed noise
+  // pattern, played at rpm/120 and kept under a low cutoff), a bank-cadence sub, injector knock (band-passed noise
   // gated by an impulse train at the firing rate), exhaust roar under load, and a turbo whine that spools with boost.
   const e=this.eng={};
+  e.mix=C.createGain();e.mix.gain.value=EARTH_ENGINE_GAIN;
+  // Asymmetric saturation can add DC. Remove it before the shared limiter.
+  e.dc=C.createBiquadFilter();e.dc.type='highpass';e.dc.frequency.value=5;e.dc.Q.value=.707;
+  e.mix.connect(e.dc).connect(this.ext);
   {const N=4096,wave=new Float32Array(N),banks=[1,0,0,1,0,1,1,0],amp=[1,.95,1.04,.98,1.02,.94,1.05,.97];
    for(let c=0;c<8;c++){const t0=c/8,A=amp[c]*(banks[c]?1:.7);for(let k=0;k<N;k++){let t=k/N-t0;if(t<0)t+=1;const x=t*8;
      if(x<.5){const u=x/.5;wave[k]+=A*(Math.pow(Math.sin(Math.PI*Math.pow(u,.6)),3)-.18);}else wave[k]-=A*.18;}}
@@ -31,21 +40,27 @@ export class Sound{
   e.sub=C.createOscillator();e.sub.type='sine';e.subG=C.createGain();e.subG.gain.value=.15;
   e.drive=C.createGain();e.drive.gain.value=1;
   e.sh=C.createWaveShaper();const curve=new Float32Array(1024);for(let i=0;i<1024;i++){const x=i/512-1;curve[i]=Math.tanh(x*1.3)/Math.tanh(1.3);}e.sh.curve=curve;
-  e.shelf=C.createBiquadFilter();e.shelf.type='peaking';e.shelf.frequency.value=95;e.shelf.Q.value=.8;e.shelf.gain.value=8;
+  e.shelf=C.createBiquadFilter();e.shelf.type='peaking';e.shelf.frequency.value=76;e.shelf.Q.value=.72;e.shelf.gain.value=11;
   e.lp=C.createBiquadFilter();e.lp.type='lowpass';e.lp.frequency.value=220;e.lp.Q.value=.7;
   e.lp2=C.createBiquadFilter();e.lp2.type='lowpass';e.lp2.frequency.value=420;e.lp2.Q.value=.5;
   e.g=C.createGain();e.g.gain.value=0;
-  e.osc.connect(e.drive).connect(e.sh).connect(e.shelf).connect(e.lp).connect(e.lp2).connect(e.g).connect(this.ext);
+  e.osc.connect(e.drive).connect(e.sh).connect(e.shelf).connect(e.lp).connect(e.lp2).connect(e.g).connect(e.mix);
   e.sub.connect(e.subG).connect(e.shelf);
   // injector knock: noise x impulse train
-  e.knockSrc=C.createBufferSource();e.knockSrc.buffer=this.white;e.knockSrc.loop=true;e.knockBP=C.createBiquadFilter();e.knockBP.type='bandpass';e.knockBP.frequency.value=650;e.knockBP.Q.value=.9;
+  e.knockSrc=C.createBufferSource();e.knockSrc.buffer=this.white;e.knockSrc.loop=true;e.knockBP=C.createBiquadFilter();e.knockBP.type='bandpass';e.knockBP.frequency.value=480;e.knockBP.Q.value=.9;
   e.knockVCA=C.createGain();e.knockVCA.gain.value=0;e.knockOsc=C.createOscillator();e.knockOsc.setPeriodicWave(e.pulse);e.knockDepth=C.createGain();e.knockDepth.gain.value=.6;e.knockOsc.connect(e.knockDepth).connect(e.knockVCA.gain);
-  e.knockLP=C.createBiquadFilter();e.knockLP.type='lowpass';e.knockLP.frequency.value=1100;e.knockG=C.createGain();e.knockG.gain.value=0;
-  e.knockSrc.connect(e.knockBP).connect(e.knockVCA).connect(e.knockLP).connect(e.knockG).connect(this.ext);
+  e.knockLP=C.createBiquadFilter();e.knockLP.type='lowpass';e.knockLP.frequency.value=820;e.knockG=C.createGain();e.knockG.gain.value=0;
+  e.knockSrc.connect(e.knockBP).connect(e.knockVCA).connect(e.knockLP).connect(e.knockG).connect(e.mix);
   // turbo: whine plus a breathy intake hiss that both follow boost
-  e.turbo=C.createOscillator();e.turbo.type='sine';e.turboG=C.createGain();e.turboG.gain.value=0;e.turbo.connect(e.turboG).connect(this.ext);
-  e.intake=loop(this.white,'bandpass',900,1.5);
-  e.rumble=loop(this.brown,'lowpass',110,1);e.roar=loop(this.brown,'lowpass',260,.8);
+  e.turbo=C.createOscillator();e.turbo.type='sine';e.turboG=C.createGain();e.turboG.gain.value=0;e.turbo.connect(e.turboG).connect(e.mix);
+  e.airLP=C.createBiquadFilter();e.airLP.type='lowpass';e.airLP.frequency.value=1800;e.airLP.Q.value=.7;e.airLP.connect(e.mix);
+  e.intake=loop(this.white,'bandpass',740,.55,e.airLP);
+  // Same white + slow pressure-noise blend as the approved audition.
+  const fanBuf=C.createBuffer(1,this.white.length,C.sampleRate),fd=fanBuf.getChannelData(0),wd=this.white.getChannelData(0);let fb=0;
+  const memory=Math.pow(.983,44100/C.sampleRate);
+  for(let i=0;i<fd.length;i++){fb=memory*fb+(1-memory)*wd[i];fd[i]=wd[i]*.25+fb*3.5;}
+  e.cooling=loop(fanBuf,'lowpass',350,.55,e.mix);
+  e.rumble=loop(this.brown,'lowpass',80,1,e.mix);e.roar=loop(this.brown,'lowpass',180,.8,e.mix);
   // combustion is never perfectly even: a slow random wobble on the firing pitch
   e.wob=C.createBufferSource();e.wob.buffer=this.brown;e.wob.loop=true;const wl=C.createBiquadFilter();wl.type='lowpass';wl.frequency.value=5;const wg=C.createGain();wg.gain.value=260;e.wob.connect(wl).connect(wg);wg.connect(e.osc.detune);wg.connect(e.sub.detune);wg.connect(e.knockOsc.detune);e.wob.start();
   e.osc.start();e.sub.start();e.knockSrc.start();e.knockOsc.start();e.turbo.start();e.boost=0;
@@ -71,7 +86,7 @@ export class Sound{
   this.drv={o:C.createOscillator(),o2:C.createOscillator(),f:C.createBiquadFilter(),g:C.createGain()};this.drv.o.type='sawtooth';this.drv.o2.type='sawtooth';this.drv.o2.detune.value=9;this.drv.f.type='bandpass';this.drv.f.frequency.value=900;this.drv.f.Q.value=1.6;this.drv.g.gain.value=0;this.drv.o.connect(this.drv.f);this.drv.o2.connect(this.drv.f);this.drv.f.connect(this.drv.g).connect(this.int);this.drv.o.start();this.drv.o2.start();
   this.fan={o:C.createOscillator(),o2:C.createOscillator(),g:C.createGain()};this.fan.o.type='triangle';this.fan.o.frequency.value=118;this.fan.o2.type='sine';this.fan.o2.frequency.value=237;this.fan.g.gain.value=0;this.fan.o.connect(this.fan.g);this.fan.o2.connect(this.fan.g);this.fan.g.connect(this.int);this.fan.o.start();this.fan.o2.start();
   this.vib=loop(this.brown,'lowpass',70,1,this.int);this.vib2=loop(this.white,'bandpass',160,2,this.int);
-  this.engInt=C.createBiquadFilter();this.engInt.type='lowpass';this.engInt.frequency.value=130;this.engIntG=C.createGain();this.engIntG.gain.value=0;e.g.connect(this.engInt).connect(this.engIntG).connect(this.int);
+  this.engInt=C.createBiquadFilter();this.engInt.type='lowpass';this.engInt.frequency.value=130;this.engIntG=C.createGain();this.engIntG.gain.value=0;e.dc.connect(this.engInt).connect(this.engIntG).connect(this.int);
   this.creak=loop(this.white,'bandpass',2400,4,this.int);this.vibAcc=0;
   this.hissL=loop(this.white,'highpass',3500,.7);
   this.tyre=loop(this.brown,'bandpass',220,.8);this.gravel=loop(this.white,'bandpass',2600,1.2);this.hum=loop(this.white,'bandpass',420,6);
@@ -110,12 +125,15 @@ export class Sound{
  chirp(){const f=2500+Math.random()*2500;this.tone(f,f*1.4,.08,.05,'sine');setTimeout(()=>this.tone(f*1.2,f*.9,.1,.04,'sine'),110);}
  update(dt,sp,G,cam){
   if(!this.ctx||this.paused)return;this.t+=dt;const C=this.ctx,e=this.eng;
-  const rpm=sp.engine.rpm,load=sp.engine.load,fire=rpm/60*4,on=rpm>50,run=clamp(rpm/450,0,1);/* fades out as the engine runs down */
-  const now=C.currentTime;e.osc.frequency.setTargetAtTime(Math.max(1,rpm/120),now,.04);e.sub.frequency.setTargetAtTime(Math.max(20,fire),now,.04);e.knockOsc.frequency.setTargetAtTime(Math.max(5,fire),now,.04);
-  e.boost+=(load*clamp((rpm-800)/800,0,1)-e.boost)*Math.min(1,dt*1.5);// turbo spools behind the throttle
-  e.drive.gain.setTargetAtTime(1+load*1.4,now,.08);e.lp.frequency.setTargetAtTime(150+load*110+rpm*.05,now,.08);e.lp2.frequency.setTargetAtTime(340+load*220,now,.1);
-  const V8=!this.electric;this.set(e.g,V8&&on?(.26+load*.04)*run:0);this.set(e.subG,V8&&on?(.14+load*.08)*run:0);
-  this.set(e.knockG,V8&&on?.45*(1-load*.45)*(1.1-rpm/2400)*run*(this.knockK??1):0);
+  const rpm=sp.engine.rpm,load=clamp(sp.engine.load,0,1),on=rpm>50;
+  const voiceRpm=earthVoiceRpm(rpm),fire=voiceRpm/60*4,run=clamp(voiceRpm/450,0,1);
+  const V8=!this.electric&&!sp.engine.off&&!sp.engine.stalled&&on;
+  const now=C.currentTime;e.osc.frequency.setTargetAtTime(Math.max(1,voiceRpm/120),now,.04);e.sub.frequency.setTargetAtTime(Math.max(15,fire/2),now,.08);e.knockOsc.frequency.setTargetAtTime(Math.max(5,fire),now,.04);
+  const demand=V8?load*clamp((voiceRpm-420)/550,0,1):0;
+  e.boost+=(demand-e.boost)*(1-Math.exp(-dt/(demand>e.boost?1.7:1.1)));
+  e.drive.gain.setTargetAtTime(1.15+load*1.7,now,.15);e.lp.frequency.setTargetAtTime(125+load*70+voiceRpm*.025,now,.12);e.lp2.frequency.setTargetAtTime(240+load*110,now,.12);
+  this.set(e.g,V8?(.26+load*.04)*run:0);this.set(e.subG,V8?(.20+load*.12)*run:0,.15);
+  this.set(e.knockG,V8?.13*(1-load*.35)*run:0,.12);
   {const el=this.el,live=this.electric&&!sp.engine.off&&!sp.engine.stalled,v=Math.abs(sp.speed?sp.speed():0),ob=sp.engine.boost||0,dp=clamp((sp.engine.drivePower||0)/1.25e6,0,1.6);
    const f=95+v*36;el.inv.frequency.setTargetAtTime(f,now,.05);el.inv3.frequency.setTargetAtTime(f*3,now,.05);el.invBP.frequency.setTargetAtTime(500+f*1.6,now,.08);
    this.set(el.invG,live?(.012+dp*.05+ob*.02)*Math.min(1,.25+v/4):0,.06);
@@ -123,8 +141,10 @@ export class Sound{
    el.blade.frequency.setTargetAtTime(380+dp*900+ob*500,now,.4);this.set(el.bladeG,live?.006+dp*.016:0,.3);
    el.air.f.frequency.setTargetAtTime(600+dp*1400,now,.4);this.set(el.air.g,live?.02+dp*.06:0,.3);
    this.set(el.coolG,live?.05:0,.4);this.set(el.intG,this.electric?this.seatK*1.6:0,.2);}
-  const ob=sp.engine.boost||0;e.turbo.frequency.setTargetAtTime(700+e.boost*1300+ob*900,now,.15);this.set(e.turboG,V8&&on?e.boost*.004+ob*.012:0,.2);e.intake.f.frequency.setTargetAtTime(600+e.boost*700,now,.2);this.set(e.intake.g,V8&&on?e.boost*.04:0,.2);
-  this.set(e.rumble.g,V8&&on?(.28+load*.2)*run:0);this.set(e.roar.g,V8&&on?load*.35:0,.15);
+  e.turbo.frequency.setTargetAtTime(1050+e.boost*1400+5*Math.sin(this.t*8),now,.15);this.set(e.turboG,V8?.006*e.boost*run:0,V8?.2:.08);
+  this.set(e.intake.g,V8?(.012+.09*e.boost)*run:0,V8?.2:.08);this.set(e.cooling.g,V8?(.025+.075*e.boost)*run:0,V8?.2:.08);
+  e.roar.f.frequency.setTargetAtTime(150+55*load,now,.2);
+  this.set(e.rumble.g,V8?(.32+load*.20)*run:0,V8?.2:.08);this.set(e.roar.g,V8?(.10+load*.30)*run:0,V8?.25:.08);
   const flow=sp.engine.pumpFlow||0;this.pump.o.frequency.setTargetAtTime(70+rpm*.05,C.currentTime,.05);this.pump.o2.frequency.setTargetAtTime(140+rpm*.1,C.currentTime,.05);this.set(this.pump.g,clamp(flow/.006,0,1)*.07);
   // valve clicks on leg reversals, accumulator thumps on hard compressions
   // (the levelling servo reverses its valves every few milliseconds; clicking on those read as a Geiger counter)
